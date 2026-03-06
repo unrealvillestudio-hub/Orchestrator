@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Syne", ui-sans-serif, sans-serif;
+  --font-body:    "DM Sans", ui-sans-serif, sans-serif;
+  --font-mono:    "DM Mono", ui-monospace, monospace;
+  --color-accent: #FFAB00;
+  --color-bg:     #050508;
+}
+
+@layer base {
+  * { box-sizing: border-box; }
+
+  body {
+    background-color: #050508;
+    color: #e4e4e7;
+    font-family: "DM Sans", ui-sans-serif, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Subtle grid overlay for mission control feel */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255,171,0,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,171,0,0.025) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  #root {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 2px; }
+}
+
+/* Font utilities */
+.font-display { font-family: "Syne", ui-sans-serif, sans-serif; }
+.font-body    { font-family: "DM Sans", ui-sans-serif, sans-serif; }
+.font-mono    { font-family: "DM Mono", ui-monospace, monospace; }
