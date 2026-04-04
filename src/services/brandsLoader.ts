@@ -8,8 +8,8 @@
 
 import { BrandProfile } from '../core/types';
 
-const SB_URL = import.meta.env.VITE_SUPABASE_URL as string;
-const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const SB_URL = (import.meta as any).env.VITE_SUPABASE_URL as string;
+const SB_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY as string;
 
 // Mapeo de colores por marca — se puede mover a Supabase (brand_palette) cuando esté poblado
 const BRAND_COLORS: Record<string, string> = {
