@@ -105,9 +105,9 @@ export default async function handler(req: Request): Promise<Response> {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
 
-  const anthropicKey = process.env.ANTHROPIC_API_KEY ?? '';
-  const supabaseUrl  = process.env.VITE_SUPABASE_URL ?? '';
-  const supabaseKey  = process.env.VITE_SUPABASE_ANON_KEY ?? '';
+  const anthropicKey = (process as any).env.ANTHROPIC_API_KEY ?? '';
+  const supabaseUrl  = (process as any).env.VITE_SUPABASE_URL ?? '';
+  const supabaseKey  = (process as any).env.VITE_SUPABASE_ANON_KEY ?? '';
 
   if (!anthropicKey) {
     return new Response(JSON.stringify({ error: 'ANTHROPIC_API_KEY not set' }), { status: 500 });
