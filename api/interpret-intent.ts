@@ -10,6 +10,9 @@
  *   VITE_SUPABASE_ANON_KEY
  */
 
+// Edge Runtime: declarar process para acceso a env vars sin @types/node
+declare const process: { env: Record<string, string | undefined> };
+
 export const config = { runtime: 'edge' };
 
 const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
@@ -105,9 +108,9 @@ export default async function handler(req: Request): Promise<Response> {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
 
-  const anthropicKey = (process as any).env.ANTHROPIC_API_KEY ?? '';
-  const supabaseUrl  = (process as any).env.VITE_SUPABASE_URL ?? '';
-  const supabaseKey  = (process as any).env.VITE_SUPABASE_ANON_KEY ?? '';
+  const anthropicKey = process.env.ANTHROPIC_API_KEY ?? '';
+  const supabaseUrl  = process.env.VITE_SUPABASE_URL ?? '';
+  const supabaseKey  = process.env.VITE_SUPABASE_ANON_KEY ?? '';
 
   if (!anthropicKey) {
     return new Response(JSON.stringify({ error: 'ANTHROPIC_API_KEY not set' }), { status: 500 });
