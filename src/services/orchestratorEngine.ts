@@ -16,8 +16,8 @@
 
 import { InterpretResult, FlowStage, PlatformId, FlowObjective } from '../core/types';
 
-const SB_URL = import.meta.env.VITE_SUPABASE_URL as string;
-const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const SB_URL = (import.meta as any).env.VITE_SUPABASE_URL as string;
+const SB_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY as string;
 
 // ── LAB CONFIG (desde Supabase) ───────────────────────────────────────────────
 
