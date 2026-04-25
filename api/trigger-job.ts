@@ -1,48 +1,48 @@
 /**
  * UNRLVL Orchestrator — api/trigger-job.ts
- *
- * Programmatic trigger endpoint for the IID Network.
- * Called by content-dispatcher (Supabase Edge Function).
- * Delegates to content-dispatcher which has the full pipeline logic.
- *
- * Env vars required (add in Vercel project settings):
- *   SUPABASE_URL
- *   IID_CRON_SECRET   (same value as in Supabase secrets)
+ * Edge runtime — no external imports, delegates to content-dispatcher.
  */
 
-import type { VercelRequest, VercelResponse } from "@vercel/node";
+declare const process: { env: Record<string, string | undefined> };
+export const config = { runtime: 'edge' };
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST")
-    return res.status(405).json({ error: "Method not allowed" });
+export default async function handler(req: Request): Promise<Response> {
+  if (req.method !== 'POST')
+    return new Response(JSON.stringify({ error: 'Method not allowed' }),
+      { status: 405, headers: { 'Content-Type': 'application/json' } });
 
   // Optional auth
   const secret = process.env.IID_CRON_SECRET;
   if (secret) {
-    const auth = (req.headers["x-trigger-secret"] ?? req.headers["authorization"] ?? "") as string;
+    const auth = req.headers.get('x-trigger-secret') ?? req.headers.get('authorization') ?? '';
     if (!auth.includes(secret))
-      return res.status(401).json({ error: "Unauthorized" });
+      return new Response(JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const { queue_id, job_id } = req.body ?? {};
-  if (!queue_id && !job_id)
-    return res.status(400).json({ error: "Required: queue_id or job_id" });
+  let body: { queue_id?: string; job_id?: string } = {};
+  try { body = await req.json(); } catch { /* empty body ok */ }
+
+  if (!body.queue_id && !body.job_id)
+    return new Response(JSON.stringify({ error: 'Required: queue_id or job_id' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } });
 
   // Delegate to Supabase content-dispatcher
+  const dispatcherUrl = `${process.env.SUPABASE_URL}/functions/v1/content-dispatcher`;
   try {
-    const dispatcherUrl = `${process.env.SUPABASE_URL}/functions/v1/content-dispatcher`;
-    const dispatchRes = await fetch(dispatcherUrl, {
-      method: "POST",
+    const res = await fetch(dispatcherUrl, {
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
-        "x-cron-secret": process.env.IID_CRON_SECRET ?? "",
+        'Content-Type': 'application/json',
+        'x-cron-secret': process.env.IID_CRON_SECRET ?? '',
       },
-      body: JSON.stringify({ queue_id, job_id }),
+      body: JSON.stringify(body),
     });
-
-    const data = await dispatchRes.json();
-    return res.status(dispatchRes.ok ? 200 : 500).json(data);
+    const data = await res.json();
+    return new Response(JSON.stringify(data),
+      { status: res.ok ? 200 : 500, headers: { 'Content-Type': 'application/json' } });
   } catch (e) {
-    return res.status(500).json({ error: String(e) });
+    return new Response(JSON.stringify({ error: String(e) }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } });
   }
 }
