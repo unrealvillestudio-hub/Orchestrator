@@ -12,21 +12,121 @@ import { getBrandById } from '../../config/brands';
 import { FlowStage, FlowStageStatus } from '../../core/types';
 import { cn, Spinner, GlowDot } from '../../ui/components';
 
-// ── STATUS META ───────────────────────────────────────────────────────────────
+// ── LAYER CONFIG ─────────────────────────────────────────────────
+// Maps labId → which AI layers run inside that stage
+// These are visual indicators — state follows the parent stage lifecycle
 
-const STATUS_META: Record<FlowStageStatus, { label: string; color: string }> = {
-  pending:           { label: "Pendiente",             color: "#52525b" },
-  running:           { label: "Ejecutando...",          color: "#FFAB00" },
-  awaiting_approval: { label: "Esperando aprobación",  color: "#f59e0b" },
-  approved:          { label: "Aprobado",              color: "#22c55e" },
-  rejected:          { label: "Rechazado",             color: "#ef4444" },
-  completed:         { label: "Completado",            color: "#22c55e" },
-  skipped:           { label: "Omitido",               color: "#71717a" },
-  error:             { label: "Error",                 color: "#ef4444" },
+interface LayerDef {
+  id:    string;
+  label: string;
+  color: string;
+  dot:   string; // single char used as icon
+}
+
+const STAGE_LAYERS: Record<string, LayerDef[]> = {
+  copylab:  [
+    { id: 'humanize', label: 'Humanize', color: '#6366f1', dot: '⬡' },
+  ],
+  aife:     [
+    { id: 'aife_filter', label: 'AIFE Filter', color: '#f59e0b', dot: '◈' },
+  ],
+  imagelab: [
+    { id: 'psycholayer', label: 'Psycho Layer', color: '#8b5cf6', dot: '◬' },
+  ],
 };
 
-// ── COPY BUTTON ───────────────────────────────────────────────────────────────
+// ── LAYER PILL ───────────────────────────────────────────────────
+type LayerState = 'idle' | 'running' | 'done' | 'error';
 
+interface LayerPillProps {
+  layer:   LayerDef;
+  state:   LayerState;
+  elapsed: number; // seconds — shown while running
+}
+
+function LayerPill({ layer, state, elapsed }: LayerPillProps) {
+  const isDone    = state === 'done';
+  const isRunning = state === 'running';
+  const isIdle    = state === 'idle';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className={cn(
+        'flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-mono transition-all duration-300',
+        isDone    ? 'border-emerald-500/30 bg-emerald-500/8 text-emerald-400' :
+        isRunning ? 'border-opacity-60 bg-opacity-10'                         :
+                    'border-zinc-800 bg-zinc-900/50 text-zinc-700'
+      )}
+      style={isRunning ? {
+        borderColor:     `${layer.color}50`,
+        backgroundColor: `${layer.color}08`,
+        color:           layer.color,
+      } : isDone ? {} : {}}
+    >
+      {/* State dot */}
+      {isDone ? (
+        <motion.span
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          className="text-emerald-400"
+        >
+          <CheckCircle2 size={9} />
+        </motion.span>
+      ) : isRunning ? (
+        <motion.span
+          animate={{ opacity: [1, 0.3, 1] }}
+          transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+          className="w-1.5 h-1.5 rounded-full shrink-0"
+          style={{ backgroundColor: layer.color }}
+        />
+      ) : (
+        <span
+          className="w-1.5 h-1.5 rounded-full shrink-0 bg-zinc-700"
+        />
+      )}
+
+      {/* Label */}
+      <span className={cn(
+        'uppercase tracking-widest transition-colors',
+        isDone ? 'text-emerald-400' : isRunning ? '' : 'text-zinc-700'
+      )}>
+        {layer.label}
+      </span>
+
+      {/* Elapsed clock while running */}
+      {isRunning && elapsed > 0 && (
+        <span className="flex items-center gap-0.5 opacity-70">
+          <Clock size={8} />
+          {elapsed}s
+        </span>
+      )}
+
+      {/* Done time */}
+      {isDone && elapsed > 0 && (
+        <span className="text-emerald-600 opacity-60 flex items-center gap-0.5">
+          <Clock size={8} />
+          {elapsed}s
+        </span>
+      )}
+    </motion.div>
+  );
+}
+
+// ── STATUS META ───────────────────────────────────────────────────
+const STATUS_META: Record<FlowStageStatus, { label: string; color: string }> = {
+  pending:            { label: 'Pendiente',            color: '#52525b' },
+  running:            { label: 'Ejecutando...',        color: '#FFAB00' },
+  awaiting_approval:  { label: 'Esperando aprobación', color: '#f59e0b' },
+  approved:           { label: 'Aprobado',             color: '#22c55e' },
+  rejected:           { label: 'Rechazado',            color: '#ef4444' },
+  completed:          { label: 'Completado',           color: '#22c55e' },
+  skipped:            { label: 'Omitido',              color: '#71717a' },
+  error:              { label: 'Error',                color: '#ef4444' },
+};
+
+// ── COPY BUTTON ───────────────────────────────────────────────────
 function CopyBtn({ text, size = 12 }: { text: string; size?: number }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -43,41 +143,73 @@ function CopyBtn({ text, size = 12 }: { text: string; size?: number }) {
   );
 }
 
-// ── STAGE CARD ────────────────────────────────────────────────────────────────
-
+// ── STAGE CARD ───────────────────────────────────────────────────
 function StageCard({ stage, isActive, onApprove, onReject }: {
-  stage: FlowStage & { lab?: ReturnType<typeof getLabById> };
-  isActive: boolean;
-  onApprove: () => void;
-  onReject: () => void;
+  stage:      FlowStage & { lab?: ReturnType<typeof getLabById> };
+  isActive:   boolean;
+  onApprove:  () => void;
+  onReject:   () => void;
 }) {
-  const [expanded, setExpanded] = useState(isActive);
-  const sm = STATUS_META[stage.status];
-  const isDone    = ['completed', 'approved'].includes(stage.status);
-  const isWaiting = stage.status === 'awaiting_approval';
-  const isRunning = stage.status === 'running';
-  const isPending = stage.status === 'pending';
+  const [expanded, setExpanded]   = useState(isActive);
+  const [elapsed, setElapsed]     = useState(0);
+  const [doneSecs, setDoneSecs]   = useState(0);
+  const timerRef                  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startRef                  = useRef<number>(0);
+
+  const sm         = STATUS_META[stage.status];
+  const isDone     = ['completed', 'approved'].includes(stage.status);
+  const isWaiting  = stage.status === 'awaiting_approval';
+  const isRunning  = stage.status === 'running';
+  const isPending  = stage.status === 'pending';
+  const layers     = STAGE_LAYERS[stage.labId] ?? [];
+
+  // Derive layer state from parent stage status
+  const layerState: LayerState =
+    isDone    ? 'done'    :
+    isRunning ? 'running' :
+    stage.status === 'error' ? 'error' :
+                'idle';
 
   // Auto-expand when stage becomes active
   useEffect(() => {
     if (isActive) setExpanded(true);
   }, [isActive]);
 
+  // Elapsed timer — starts when running, freezes when done
+  useEffect(() => {
+    if (isRunning) {
+      startRef.current = Date.now();
+      setElapsed(0);
+      timerRef.current = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+      }, 1000);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      if (isDone && startRef.current > 0) {
+        setDoneSecs(Math.floor((Date.now() - startRef.current) / 1000));
+      }
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [isRunning, isDone]);
+
   return (
     <div className={cn(
-      "relative border rounded-2xl overflow-hidden transition-all duration-300",
-      isActive  ? "border-accent/40 shadow-lg shadow-accent/5" :
-      isDone    ? "border-emerald-500/20" :
-      isPending ? "border-zinc-800 opacity-60" :
-                  "border-zinc-800"
+      'relative border rounded-2xl overflow-hidden transition-all duration-300',
+      isActive   ? 'border-accent/40 shadow-lg shadow-accent/5' :
+      isDone     ? 'border-emerald-500/20'                       :
+      isPending  ? 'border-zinc-800 opacity-60'                  :
+                   'border-zinc-800'
     )}>
       {/* Running shimmer */}
       {isRunning && (
         <div className="absolute inset-x-0 top-0 h-0.5 overflow-hidden">
           <motion.div
             className="h-full bg-gradient-to-r from-transparent via-accent to-transparent"
-            animate={{ x: ["-100%", "200%"] }}
-            transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+            animate={{ x: ['-100%', '200%'] }}
+            transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' }}
           />
         </div>
       )}
@@ -91,7 +223,7 @@ function StageCard({ stage, isActive, onApprove, onReject }: {
           className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border"
           style={{
             backgroundColor: `${stage.lab?.color ?? '#888'}15`,
-            borderColor: `${stage.lab?.color ?? '#888'}25`,
+            borderColor:     `${stage.lab?.color ?? '#888'}25`,
           }}
         >
           {isRunning ? (
@@ -119,9 +251,22 @@ function StageCard({ stage, isActive, onApprove, onReject }: {
           <p className="text-sm font-semibold text-white">{stage.label}</p>
         </div>
 
+        {/* Right: status + elapsed (done) + chevron */}
         <div className="flex items-center gap-2 shrink-0">
+          {isDone && doneSecs > 0 && (
+            <span className="flex items-center gap-1 text-[10px] font-mono text-zinc-700">
+              <Clock size={9} />
+              {doneSecs}s
+            </span>
+          )}
+          {isRunning && (
+            <span className="flex items-center gap-1 text-[10px] font-mono text-accent/70">
+              <Clock size={9} />
+              {elapsed}s
+            </span>
+          )}
           <span className="text-[10px] font-mono" style={{ color: sm.color }}>{sm.label}</span>
-          <ChevronDown size={14} className={cn("text-zinc-600 transition-transform", expanded && "rotate-180")} />
+          <ChevronDown size={14} className={cn('text-zinc-600 transition-transform', expanded && 'rotate-180')} />
         </div>
       </button>
 
@@ -130,11 +275,36 @@ function StageCard({ stage, isActive, onApprove, onReject }: {
         {expanded && (
           <motion.div
             initial={{ height: 0 }}
-            animate={{ height: "auto" }}
+            animate={{ height: 'auto' }}
             exit={{ height: 0 }}
             className="overflow-hidden"
           >
             <div className="px-5 pb-5 border-t border-zinc-800/60 pt-4 space-y-4">
+
+              {/* ── LAYER INDICATORS ── */}
+              {layers.length > 0 && (
+                <div>
+                  <p className="text-[9px] font-mono uppercase tracking-widest text-zinc-700 mb-2">
+                    AI Layers
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {layers.map((layer, i) => (
+                      <motion.div
+                        key={layer.id}
+                        initial={{ opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.08 }}
+                      >
+                        <LayerPill
+                          layer={layer}
+                          state={layerState}
+                          elapsed={isRunning ? elapsed : doneSecs}
+                        />
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Output */}
               {stage.output && (
@@ -184,7 +354,7 @@ function StageCard({ stage, isActive, onApprove, onReject }: {
               {/* Timing */}
               {(stage.startedAt || stage.completedAt) && (
                 <div className="flex gap-4 text-[10px] font-mono text-zinc-700">
-                  {stage.startedAt && <span>Inicio: {new Date(stage.startedAt).toLocaleTimeString('es-ES')}</span>}
+                  {stage.startedAt  && <span>Inicio: {new Date(stage.startedAt).toLocaleTimeString('es-ES')}</span>}
                   {stage.completedAt && <span>Fin: {new Date(stage.completedAt).toLocaleTimeString('es-ES')}</span>}
                 </div>
               )}
@@ -196,8 +366,7 @@ function StageCard({ stage, isActive, onApprove, onReject }: {
   );
 }
 
-// ── OUTPUT PREVIEW PANEL ──────────────────────────────────────────────────────
-
+// ── OUTPUT PREVIEW PANEL ──────────────────────────────────────────
 function OutputPreviewPanel({ stages }: { stages: (FlowStage & { lab?: ReturnType<typeof getLabById> })[] }) {
   const [visible, setVisible] = useState(true);
   const completedWithOutput = stages.filter(s =>
@@ -230,11 +399,10 @@ function OutputPreviewPanel({ stages }: { stages: (FlowStage & { lab?: ReturnTyp
       animate={{ opacity: 1, y: 0 }}
       className="mt-6 bg-zinc-900 border border-zinc-700 rounded-2xl overflow-hidden"
     >
-      {/* Header */}
       <div className="flex items-center gap-3 px-5 py-3.5 border-b border-zinc-800">
         <Package size={14} className="text-accent shrink-0" />
         <span className="text-xs font-bold uppercase tracking-widest text-zinc-400 flex-1">
-          Output Preview — {completedWithOutput.length} entregable{completedWithOutput.length !== 1 ? 's' : ''}
+          Output Preview · {completedWithOutput.length} entregable{completedWithOutput.length !== 1 ? 's' : ''}
         </span>
         <div className="flex items-center gap-1">
           <button
@@ -260,12 +428,11 @@ function OutputPreviewPanel({ stages }: { stages: (FlowStage & { lab?: ReturnTyp
         </div>
       </div>
 
-      {/* Output cards */}
       <AnimatePresence initial={false}>
         {visible && (
           <motion.div
             initial={{ height: 0 }}
-            animate={{ height: "auto" }}
+            animate={{ height: 'auto' }}
             exit={{ height: 0 }}
             className="overflow-hidden"
           >
@@ -278,7 +445,6 @@ function OutputPreviewPanel({ stages }: { stages: (FlowStage & { lab?: ReturnTyp
                   transition={{ delay: i * 0.06 }}
                   className="bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden"
                 >
-                  {/* Output card header */}
                   <div
                     className="flex items-center gap-3 px-4 py-2.5 border-b border-zinc-800/60"
                     style={{ borderLeftColor: stage.lab?.color, borderLeftWidth: 3 }}
@@ -290,8 +456,6 @@ function OutputPreviewPanel({ stages }: { stages: (FlowStage & { lab?: ReturnTyp
                     <span className="text-[11px] text-zinc-400 font-medium flex-1 truncate">{stage.label}</span>
                     <CopyBtn text={stage.output!} size={11} />
                   </div>
-
-                  {/* Output content */}
                   <pre className="px-4 py-3 text-xs text-zinc-400 whitespace-pre-wrap leading-relaxed font-sans max-h-48 overflow-y-auto">
                     {stage.output}
                   </pre>
@@ -305,11 +469,10 @@ function OutputPreviewPanel({ stages }: { stages: (FlowStage & { lab?: ReturnTyp
   );
 }
 
-// ── MAIN EXECUTOR ─────────────────────────────────────────────────────────────
-
+// ── MAIN EXECUTOR ─────────────────────────────────────────────────
 interface ExecutorProps {
   onComplete: () => void;
-  onReset: () => void;
+  onReset:    () => void;
 }
 
 export default function FlowExecutorModule({ onComplete, onReset }: ExecutorProps) {
@@ -317,11 +480,9 @@ export default function FlowExecutorModule({ onComplete, onReset }: ExecutorProp
   const executingRef = useRef(false);
   const [flowDone, setFlowDone] = useState(false);
 
-  const stages = activePlan?.stages ?? [];
+  const stages        = activePlan?.stages ?? [];
   const stagesWithLab = stages.map(s => ({ ...s, lab: getLabById(s.labId) }));
-
-  // brand.name — was brand.displayName (bug fix)
-  const brand = getBrandById(activePlan?.brandId ?? '');
+  const brand         = getBrandById(activePlan?.brandId ?? '');
 
   useEffect(() => {
     if (!activePlan || executingRef.current) return;
@@ -380,7 +541,7 @@ export default function FlowExecutorModule({ onComplete, onReset }: ExecutorProp
   };
 
   const completedCount = stages.filter(s => ['completed', 'approved'].includes(s.status)).length;
-  const progress = stages.length > 0 ? (completedCount / stages.length) * 100 : 0;
+  const progress       = stages.length > 0 ? (completedCount / stages.length) * 100 : 0;
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-10 pb-28">
@@ -388,9 +549,9 @@ export default function FlowExecutorModule({ onComplete, onReset }: ExecutorProp
       {/* Progress header */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-8">
         <div className="flex items-center gap-2 mb-3">
-          <GlowDot color={flowDone ? "#22c55e" : "#FFAB00"} pulse={!flowDone} />
+          <GlowDot color={flowDone ? '#22c55e' : '#FFAB00'} pulse={!flowDone} />
           <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-zinc-500">
-            {flowDone ? "Flujo completado" : "Ejecutando flujo"}
+            {flowDone ? 'Flujo completado' : 'Ejecutando flujo'}
           </span>
         </div>
 
@@ -398,7 +559,6 @@ export default function FlowExecutorModule({ onComplete, onReset }: ExecutorProp
           <p className="text-sm text-zinc-400">
             <span className="text-white font-semibold">{completedCount}</span> / {stages.length} etapas
             {brand && <> · <span style={{ color: brand.color }}>{brand.name}</span></>}
-            {/* ↑ was brand.displayName */}
           </p>
           <span className="text-sm font-mono text-zinc-600">{Math.round(progress)}%</span>
         </div>
@@ -406,9 +566,9 @@ export default function FlowExecutorModule({ onComplete, onReset }: ExecutorProp
         <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
           <motion.div
             className="h-full rounded-full"
-            style={{ background: flowDone ? "#22c55e" : "#FFAB00" }}
+            style={{ background: flowDone ? '#22c55e' : '#FFAB00' }}
             animate={{ width: `${progress}%` }}
-            transition={{ type: "spring", damping: 25 }}
+            transition={{ type: 'spring', damping: 25 }}
           />
         </div>
       </motion.div>
@@ -432,7 +592,7 @@ export default function FlowExecutorModule({ onComplete, onReset }: ExecutorProp
         ))}
       </div>
 
-      {/* ── OUTPUT PREVIEW PANEL ── */}
+      {/* Output preview */}
       <OutputPreviewPanel stages={stagesWithLab} />
 
       {/* Completion card */}
