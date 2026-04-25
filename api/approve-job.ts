@@ -1,25 +1,44 @@
 /**
  * UNRLVL Orchestrator — api/approve-job.ts
- *
- * 1-click email approval endpoint.
- * Sam clicks PUBLICAR/RECHAZAR in the email → this runs.
- *
- * Env vars required (add in Vercel project settings):
- *   SUPABASE_URL
- *   SUPABASE_SERVICE_ROLE_KEY
- *   SOCIALLAB_URL   (default: https://social-lab-flame.vercel.app)
+ * Edge runtime — no external imports, uses raw fetch like interpret-intent.ts
  */
 
-import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { createClient } from "@supabase/supabase-js";
+declare const process: { env: Record<string, string | undefined> };
+export const config = { runtime: 'edge' };
 
-const sb = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const SB_URL = () => process.env.SUPABASE_URL ?? '';
+const SB_KEY = () => process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+const SOCIALLAB_URL = () => process.env.SOCIALLAB_URL ?? 'https://social-lab-flame.vercel.app';
 
-const SOCIALLAB_URL = process.env.SOCIALLAB_URL ?? "https://social-lab-flame.vercel.app";
+// ── Supabase helpers (raw fetch, schema-aware) ─────────────────────
+async function sbGet(schema: string, table: string, filter: string): Promise<any | null> {
+  const res = await fetch(`${SB_URL()}/rest/v1/${table}?${filter}&limit=1`, {
+    headers: {
+      apikey: SB_KEY(),
+      Authorization: `Bearer ${SB_KEY()}`,
+      'Accept-Profile': schema,
+    },
+  });
+  if (!res.ok) return null;
+  const data: any[] = await res.json();
+  return data[0] ?? null;
+}
 
+async function sbUpdate(schema: string, table: string, filter: string, payload: object): Promise<boolean> {
+  const res = await fetch(`${SB_URL()}/rest/v1/${table}?${filter}`, {
+    method: 'PATCH',
+    headers: {
+      apikey: SB_KEY(),
+      Authorization: `Bearer ${SB_KEY()}`,
+      'Content-Type': 'application/json',
+      'Content-Profile': schema,
+    },
+    body: JSON.stringify(payload),
+  });
+  return res.ok;
+}
+
+// ── HTML pages ─────────────────────────────────────────────────────
 function htmlPage(title: string, message: string, color: string): string {
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -36,7 +55,7 @@ function htmlPage(title: string, message: string, color: string): string {
 </style>
 </head><body>
 <div class="card">
-  <div class="icon">${color === "#00FFD1" ? "✓" : "✗"}</div>
+  <div class="icon">${color === '#00FFD1' ? '✓' : '✗'}</div>
   <div class="label">UNRLVL · Content Queue</div>
   <h1>${title}</h1>
   <p>${message}</p>
@@ -44,120 +63,96 @@ function htmlPage(title: string, message: string, color: string): string {
 </body></html>`;
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const { token, action } = req.query;
+// ── Handler ────────────────────────────────────────────────────────
+export default async function handler(req: Request): Promise<Response> {
+  const url    = new URL(req.url);
+  const token  = url.searchParams.get('token');
+  const action = url.searchParams.get('action');
 
-  if (!token || typeof token !== "string")
-    return res.status(400).send(htmlPage("Token inválido", "El link no contiene un token válido.", "#FF4444"));
+  if (!token)
+    return new Response(htmlPage('Token inválido', 'El link no contiene un token válido.', '#FF4444'),
+      { status: 400, headers: { 'Content-Type': 'text/html' } });
 
-  if (action !== "approve" && action !== "reject")
-    return res.status(400).send(htmlPage("Acción inválida", "Solo se permiten: approve o reject.", "#FF4444"));
+  if (action !== 'approve' && action !== 'reject')
+    return new Response(htmlPage('Acción inválida', 'Solo se permiten: approve o reject.', '#FF4444'),
+      { status: 400, headers: { 'Content-Type': 'text/html' } });
 
-  // Find the job by approval token
-  const { data: job, error: jobErr } = await sb
-    .schema("content")
-    .from("orchestrator_jobs")
-    .select("id, piece_id, voice, brand_id, platforms, queue_id, iid_source_tag, approval_status, labs_status")
-    .eq("approval_token", token)
-    .single();
+  // Find job by token
+  const job = await sbGet('content', 'orchestrator_jobs',
+    `approval_token=eq.${encodeURIComponent(token)}&select=id,piece_id,voice,brand_id,platforms,queue_id,iid_source_tag,approval_status,labs_status`);
 
-  if (jobErr || !job)
-    return res.status(404).send(htmlPage("Link expirado", "Este link no existe o ya fue procesado.", "#FF4444"));
+  if (!job)
+    return new Response(htmlPage('Link expirado', 'Este link no existe o ya fue procesado.', '#FF4444'),
+      { status: 404, headers: { 'Content-Type': 'text/html' } });
 
-  if (job.approval_status !== "pending") {
-    const msg = job.approval_status === "approved"
-      ? "Esta pieza ya fue publicada."
-      : "Esta pieza fue rechazada previamente.";
-    return res.status(200).send(htmlPage("Ya procesado", msg, "#FFB020"));
+  if (job.approval_status !== 'pending') {
+    const msg = job.approval_status === 'approved'
+      ? 'Esta pieza ya fue publicada.'
+      : 'Esta pieza fue rechazada previamente.';
+    return new Response(htmlPage('Ya procesado', msg, '#FFB020'),
+      { status: 200, headers: { 'Content-Type': 'text/html' } });
   }
 
-  // ── REJECT ──────────────────────────────────────────────
-  if (action === "reject") {
-    await sb.schema("content").from("orchestrator_jobs")
-      .update({ approval_status: "rejected", status: "failed", approved_at: new Date().toISOString() })
-      .eq("id", job.id);
+  const now = new Date().toISOString();
 
+  // ── REJECT ────────────────────────────────────────────────────────
+  if (action === 'reject') {
+    await sbUpdate('content', 'orchestrator_jobs', `id=eq.${job.id}`,
+      { approval_status: 'rejected', status: 'failed', approved_at: now });
     if (job.piece_id)
-      await sb.schema("content").from("content_pieces")
-        .update({ status: "rejected" }).eq("id", job.piece_id);
-
-    await sb.schema("intel").from("iid_content_queue")
-      .update({ approval_status: "rejected", orchestrator_status: "complete" })
-      .eq("id", job.queue_id);
-
-    return res.status(200).send(
-      htmlPage("Rechazado", "La pieza fue rechazada. No se publicará.", "#FF4444")
+      await sbUpdate('content', 'content_pieces', `id=eq.${job.piece_id}`, { status: 'rejected' });
+    await sbUpdate('intel', 'iid_content_queue', `id=eq.${job.queue_id}`,
+      { approval_status: 'rejected', orchestrator_status: 'complete' });
+    return new Response(
+      htmlPage('Rechazado', 'La pieza fue rechazada. No se publicará.', '#FF4444'),
+      { status: 200, headers: { 'Content-Type': 'text/html' } }
     );
   }
 
-  // ── APPROVE ─────────────────────────────────────────────
-  await sb.schema("content").from("orchestrator_jobs")
-    .update({ approval_status: "approved", approved_at: new Date().toISOString(), approved_by: "sam_email_link" })
-    .eq("id", job.id);
+  // ── APPROVE ───────────────────────────────────────────────────────
+  await sbUpdate('content', 'orchestrator_jobs', `id=eq.${job.id}`,
+    { approval_status: 'approved', approved_at: now, approved_by: 'sam_email_link' });
 
-  // SocialLab needs a valid Supabase brands.id
-  const brandId = job.brand_id ?? "UnrealvilleStudio";
-
-  // Get platforms from job (array stored by dispatcher)
-  const platforms = (job.platforms as string[] | null)?.map((p: string) => p.toUpperCase())
-    ?? ["INSTAGRAM", "LINKEDIN"];
-
-  // Get the AIFE-filtered copy stored in labs_status by dispatcher
-  const aifeCopy = (job.labs_status as any)?.aife_filtered_text ?? "";
+  const brandId   = job.brand_id ?? 'UnrealvilleStudio';
+  const platforms = (job.platforms as string[] | null)?.map((p: string) => p.toUpperCase()) ?? ['INSTAGRAM', 'LINKEDIN'];
+  const aifeCopy  = (job.labs_status as any)?.aife_filtered_text ?? '';
 
   try {
-    const publishRes = await fetch(`${SOCIALLAB_URL}/api/execute`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const publishRes = await fetch(`${SOCIALLAB_URL()}/api/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         brandId,
-        stage: {
-          labId: "sociallab",
-          label: "Publish approved post",
-          description: "Approved by Sam via email",
-          order: 4,
-        },
+        stage: { labId: 'sociallab', label: 'Publish approved post', description: 'Approved by Sam via email', order: 4 },
         params: { platforms },
-        // SocialLab reads previousOutputs.copylab (priority 1)
         previousOutputs: { copylab: aifeCopy },
       }),
     });
 
     if (publishRes.ok) {
-      await sb.schema("content").from("orchestrator_jobs")
-        .update({ status: "complete" }).eq("id", job.id);
-
+      await sbUpdate('content', 'orchestrator_jobs', `id=eq.${job.id}`, { status: 'complete' });
       if (job.piece_id)
-        await sb.schema("content").from("content_pieces")
-          .update({ status: "published", published_at: new Date().toISOString() })
-          .eq("id", job.piece_id);
-
-      await sb.schema("intel").from("iid_content_queue")
-        .update({ approval_status: "approved", orchestrator_status: "complete" })
-        .eq("id", job.queue_id);
-
-      return res.status(200).send(
-        htmlPage("Publicado ✓", "Aprobado y enviado a SocialLab para publicación.", "#00FFD1")
+        await sbUpdate('content', 'content_pieces', `id=eq.${job.piece_id}`,
+          { status: 'published', published_at: now });
+      await sbUpdate('intel', 'iid_content_queue', `id=eq.${job.queue_id}`,
+        { approval_status: 'approved', orchestrator_status: 'complete' });
+      return new Response(
+        htmlPage('Publicado ✓', 'Aprobado y enviado a SocialLab para publicación.', '#00FFD1'),
+        { status: 200, headers: { 'Content-Type': 'text/html' } }
       );
     } else {
-      await sb.schema("content").from("orchestrator_jobs")
-        .update({ status: "failed" }).eq("id", job.id);
-
-      return res.status(200).send(
-        htmlPage(
-          "Aprobado — error en publicación",
-          "La pieza fue aprobada pero SocialLab devolvió un error. Revisa el Orchestrator.",
-          "#FFB020"
-        )
+      await sbUpdate('content', 'orchestrator_jobs', `id=eq.${job.id}`, { status: 'failed' });
+      return new Response(
+        htmlPage('Aprobado — error publicación',
+          'La pieza fue aprobada pero SocialLab devolvió un error. Revisa el Orchestrator.', '#FFB020'),
+        { status: 200, headers: { 'Content-Type': 'text/html' } }
       );
     }
-  } catch (e) {
-    return res.status(200).send(
-      htmlPage(
-        "Aprobado — error de conexión",
-        "La pieza fue aprobada pero no se pudo contactar SocialLab.",
-        "#FFB020"
-      )
+  } catch {
+    return new Response(
+      htmlPage('Aprobado — error conexión',
+        'La pieza fue aprobada pero no se pudo contactar SocialLab.', '#FFB020'),
+      { status: 200, headers: { 'Content-Type': 'text/html' } }
     );
   }
 }
