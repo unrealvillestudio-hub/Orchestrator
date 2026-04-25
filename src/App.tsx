@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutGrid, Layers, History, Bell } from 'lucide-react';
+import { LayoutGrid, Layers, History, Bell, Telescope } from 'lucide-react';
 import { useFlowStore } from './store/useFlowStore';
 import { cn, GlowDot } from './ui/components';
 import HubModule from './modules/hub/HubModule';
@@ -8,15 +8,17 @@ import FlowPlannerModule from './modules/planner/FlowPlannerModule';
 import FlowExecutorModule from './modules/executor/FlowExecutorModule';
 import LaunchpadModule from './modules/launchpad/LaunchpadModule';
 import JobMonitorModule from './modules/monitor/JobMonitorModule';
+import EcosystemIntelModule from './modules/intel/EcosystemIntelModule';
 
-const BUILD_TAG = "OR_1.0";
+const BUILD_TAG = "OR_1.1";
 
-type View = "hub" | "planner" | "executor" | "launchpad" | "monitor";
+type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel";
 
 const NAV_ITEMS = [
   { id: "hub" as View,       label: "Orchestrator", icon: LayoutGrid },
   { id: "launchpad" as View, label: "Launchpad",    icon: Layers },
   { id: "monitor" as View,   label: "Monitor",      icon: History },
+  { id: "intel" as View,     label: "IID Intel",    icon: Telescope },
 ];
 
 const Logo = () => (
@@ -35,13 +37,13 @@ export default function App() {
   const [view, setView] = useState<View>("hub");
   const { activePlan, completedFlows, isInterpreting } = useFlowStore();
 
-  // Breadcrumb label
   const breadcrumb: Record<View, string> = {
     hub:       "Nuevo flujo",
     planner:   "Revisar plan",
     executor:  "Ejecutando",
     launchpad: "Launchpad",
     monitor:   "Monitor",
+    intel:     "Ecosystem Intel",
   };
 
   const goHub = () => setView("hub");
@@ -95,7 +97,7 @@ export default function App() {
 
         {/* Right controls */}
         <div className="flex items-center gap-3">
-          {activePlan && (view === "hub" || view === "launchpad" || view === "monitor") && (
+          {activePlan && (view === "hub" || view === "launchpad" || view === "monitor" || view === "intel") && (
             <button
               onClick={() => setView(activePlan.status === 'running' ? 'executor' : 'planner')}
               className="flex items-center gap-2 text-xs font-mono px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/30 text-accent hover:bg-accent/20 transition-colors"
@@ -141,7 +143,8 @@ export default function App() {
             />
           )}
           {view === "launchpad" && <LaunchpadModule />}
-          {view === "monitor" && <JobMonitorModule />}
+          {view === "monitor"   && <JobMonitorModule />}
+          {view === "intel"     && <EcosystemIntelModule />}
         </motion.div>
       </AnimatePresence>
 
