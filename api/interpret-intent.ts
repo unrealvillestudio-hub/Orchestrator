@@ -1,14 +1,13 @@
 /**
  * api/interpret-intent.ts — Orchestrator v2.1
  * Cambios v2.1 (2026-05-18):
- * - Nuevo objective: 'email_sequence' con sub-types (abandoned_cart, welcome, post_purchase, review_request)
+ * - Nuevo objective: 'email_sequence' con sub-types
  * - Lab 'klaviyo' reconocido como stage destino de email sequences
  * - sequence_context: datos de la secuencia para sequence awareness en CopyLab
+ * - Motor: Claude API via fetch directo (sin SDK — consistente con el stack)
  */
 
-import Anthropic from "@anthropic-ai/sdk";
-
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const ANTHROPIC_API_KEY = (import.meta as any).env.ANTHROPIC_API_KEY as string;
 
 const INTERPRET_SYSTEM_PROMPT = `Eres el motor de interpretación del Orchestrator de Unreal>ille Studio.
 
@@ -25,30 +24,28 @@ OBJECTIVES DISPONIBLES:
 - brand_kit: kit completo de copy de marca
 
 LABS DISPONIBLES (en orden de pipeline):
-- copylab: genera copy (texto). Para email_sequence usar pack email_sequence_[type]
+- copylab: genera copy. Para email_sequence usar pack email_sequence_[type] con motor Claude
 - imagelab: genera imágenes
 - sociallab: programa posts en redes sociales
 - klaviyo: deposita emails en Klaviyo (SOLO para email_sequence)
 - weblab: genera páginas web
 
-REGLAS CRÍTICAS:
-1. Para email_sequence: el flow es siempre copylab → klaviyo
-2. copylab para email_sequence usa motor Claude (no Gemini) — especificarlo en los stages
-3. El campo sequence_type es obligatorio cuando objective = email_sequence
-4. Si el prompt menciona "persona" o "segmento" específico, incluirlo en sequence_context
-5. Si el prompt menciona UTM o fuente de tráfico, incluirlo en sequence_context
+REGLAS:
+1. Para email_sequence: flow siempre es copylab → klaviyo
+2. sequence_type es obligatorio cuando objective = email_sequence
+3. Si el prompt menciona persona/segmento o UTM, incluirlo en sequence_context
 
 FORMATO DE RESPUESTA (JSON puro, sin markdown):
 {
   "brandId": "NeuroneSCF" | null,
-  "platforms": ["INSTAGRAM", "FACEBOOK"] | ["EMAIL"] | etc,
+  "platforms": ["EMAIL"] | ["INSTAGRAM", "FACEBOOK"] | etc,
   "objective": "email_sequence" | "social_post" | etc,
   "sequence_type": "abandoned_cart" | "welcome" | "post_purchase" | "review_request" | null,
   "sequence_context": {
-    "persona_key": "b2c_color_fade" | "b2c_default" | etc | null,
+    "persona_key": "b2c_color_fade" | "b2c_default" | null,
     "language": ["ES", "EN"] | ["ES"] | ["EN"],
     "utm_content": "color-fade" | null,
-    "klaviyo_template_ids": { "cart_a_es": "Tm3JWE", "cart_a_en": "X57LJu", ... } | null
+    "klaviyo_template_ids": null
   },
   "interpretedIntent": "descripción en una línea de lo que se va a generar",
   "suggestedStages": [
@@ -76,10 +73,10 @@ FORMATO DE RESPUESTA (JSON puro, sin markdown):
 }`;
 
 export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
-      headers: { "Content-Type": "application/json" },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
@@ -87,60 +84,69 @@ export default async function handler(req: Request): Promise<Response> {
   try {
     body = await req.json();
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON" }), {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
   const userPrompt = body.prompt?.trim();
   if (!userPrompt) {
-    return new Response(JSON.stringify({ error: "prompt is required" }), {
+    return new Response(JSON.stringify({ error: 'prompt is required' }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
   try {
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
-      system: INTERPRET_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userPrompt }],
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        system: INTERPRET_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: userPrompt }],
+      }),
     });
 
-    const rawText =
-      message.content[0]?.type === "text" ? message.content[0].text : "";
+    if (!response.ok) throw new Error(`Anthropic API error: ${response.status}`);
 
-    // Limpiar posible markdown
+    const data = await response.json();
+    const rawText = data.content?.[0]?.type === 'text' ? data.content[0].text : '';
+
     const cleaned = rawText
-      .replace(/```json\s*/gi, "")
-      .replace(/```\s*/g, "")
+      .replace(/```json\s*/gi, '')
+      .replace(/```\s*/g, '')
       .trim();
 
     const parsed = JSON.parse(cleaned);
 
     return new Response(JSON.stringify(parsed), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: { 'Content-Type': 'application/json' },
     });
+
   } catch (err) {
-    console.error("[interpret-intent] error:", err);
+    console.error('[interpret-intent] error:', err);
     return new Response(
       JSON.stringify({
         brandId: null,
-        platforms: ["INSTAGRAM", "FACEBOOK"],
-        objective: "social_post",
+        platforms: ['INSTAGRAM', 'FACEBOOK'],
+        objective: 'social_post',
         sequence_type: null,
         sequence_context: null,
-        interpretedIntent:
-          "No se pudo interpretar el prompt. Revisa la selección de marca y objetivo.",
+        interpretedIntent: 'No se pudo interpretar el prompt. Revisa la selección de marca y objetivo.',
         suggestedStages: [],
         complianceFlags: [],
         dbVariablesKeys: [],
         confidence: 0.3,
       }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   }
 }
