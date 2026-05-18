@@ -1,4 +1,4 @@
-// UNRLVL — Orchestrator v1.0 Core Types
+// UNRLVL — Orchestrator v2.2 Core Types
 
 export type LabId =
   | "blueprintlab"
@@ -7,7 +7,8 @@ export type LabId =
   | "videolab"
   | "voicelab"
   | "sociallab"
-  | "weblab";
+  | "weblab"
+  | "klaviyo";    // ← añadido v2.2: destino de email_sequence
 
 export type FlowStageStatus =
   | "pending"
@@ -33,7 +34,8 @@ export type PlatformId =
   | "TIKTOK"
   | "YOUTUBE"
   | "LINKEDIN"
-  | "THREADS";
+  | "THREADS"
+  | "EMAIL";     // ← añadido v2.2
 
 export type FlowObjective =
   | "social_post"
@@ -41,7 +43,15 @@ export type FlowObjective =
   | "product_launch"
   | "landing_page"
   | "brand_content"
-  | "ecommerce_listing";
+  | "ecommerce_listing"
+  | "email_sequence"; // ← añadido v2.2
+
+export type EmailSequenceType =
+  | "abandoned_cart"
+  | "welcome"
+  | "post_purchase"
+  | "review_request"
+  | "win_back";
 
 // ── FLOW STAGE ──────────────────────────────────────────────────────────────
 
@@ -51,14 +61,24 @@ export interface FlowStage {
   labId: LabId;
   label: string;
   description: string;
-  requiresApproval: boolean;         // checkpoint gate
+  requiresApproval: boolean;
   estimatedSeconds: number;
   status: FlowStageStatus;
-  output?: string;                   // generated content preview
+  output?: string;
   startedAt?: string;
   completedAt?: string;
   errorMsg?: string;
-  mockOutput?: string;               // demo content for preview
+  mockOutput?: string;
+  pack_id?: string;       // ← añadido v2.2: referencia al pack de CopyLab
+}
+
+// ── SEQUENCE CONTEXT ─────────────────────────────────────────────────────────
+
+export interface SequenceContext {
+  persona_key:          string | null;
+  language:             string[];
+  utm_content:          string | null;
+  klaviyo_template_ids: Record<string, string> | null;
 }
 
 // ── FLOW PLAN ────────────────────────────────────────────────────────────────
@@ -69,15 +89,18 @@ export interface FlowPlan {
   objective: FlowObjective;
   platforms: PlatformId[];
   userPrompt: string;
-  interpretedIntent: string;         // Gemini summary of what it understood
+  interpretedIntent: string;
   stages: FlowStage[];
   estimatedTotalSeconds: number;
   complianceFlags: string[];
-  dbVariablesKeys: string[];         // which DB_VARIABLES keys will be used
+  dbVariablesKeys: string[];
   status: FlowStatus;
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
+  // email_sequence fields
+  sequence_type?:    EmailSequenceType | null;
+  sequence_context?: SequenceContext | null;
 }
 
 // ── BRAND ────────────────────────────────────────────────────────────────────
@@ -104,12 +127,15 @@ export interface LabDefinition {
 // ── INTERPRETER RESULT ────────────────────────────────────────────────────────
 
 export interface InterpretResult {
-  brandId: string | null;
-  platforms: PlatformId[];
-  objective: FlowObjective;
+  brandId:           string | null;
+  platforms:         PlatformId[];
+  objective:         FlowObjective;
   interpretedIntent: string;
-  suggestedStages: Omit<FlowStage, "status" | "id">[];
-  complianceFlags: string[];
-  dbVariablesKeys: string[];
-  confidence: number;               // 0-1
+  suggestedStages:   Omit<FlowStage, "status" | "id">[];
+  complianceFlags:   string[];
+  dbVariablesKeys:   string[];
+  confidence:        number;
+  // email_sequence fields (opcionales — null para otros objectives)
+  sequence_type?:    EmailSequenceType | null;
+  sequence_context?: SequenceContext | null;
 }

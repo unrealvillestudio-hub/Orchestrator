@@ -2,18 +2,9 @@
  * UNRLVL — Orchestrator Engine v2.2
  *
  * v2.2 changelog (2026-05-18):
- * - executeStage(): cuando labId === 'klaviyo' → usa executeEmailSequenceStage de sequenceBridge
- * - Pasa sequenceId entre stages del mismo email_sequence flow
- * - meta del pack se propaga desde el stage al bridge
- * - Sequence awareness: Cart B recibe el sequenceId de Cart A en previousOutputs
- *
- * v2.1 changelog:
- * - Nuevo objective: 'email_sequence' con sub-types
- * - Lab 'klaviyo' reconocido como stage destino
- *
- * v2.0 changelog:
- * - interpretPrompt(): Gemini client-side → /api/interpret-intent (Claude server-side)
- * - executeStage(): mock → fetch real a lab endpoint desde Supabase lab_configs
+ * - types.ts: LabId += 'klaviyo', FlowObjective += 'email_sequence', InterpretResult += sequence_type/context
+ * - executeStage(): labId === 'klaviyo' → usesequenceBridge handler
+ * - sequenceId propagado entre stages del mismo email_sequence flow
  */
 
 import {
@@ -21,18 +12,26 @@ import {
   getPreviousMechanism,
   type SequencePieceMeta,
 } from './sequenceBridge';
-import { InterpretResult, FlowStage, PlatformId, FlowObjective } from '../core/types';
+
+import type {
+  InterpretResult,
+  FlowStage,
+  PlatformId,
+  FlowObjective,
+  EmailSequenceType,
+  SequenceContext,
+} from '../core/types';
 
 const SB_URL = (import.meta as any).env.VITE_SUPABASE_URL as string;
 const SB_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY as string;
 
-// ── LAB CONFIG (desde Supabase) ───────────────────────────────────────────────
+// ── LAB CONFIG ────────────────────────────────────────────────────────────────
 
 interface LabConfig {
-  lab_key: string;
-  api_endpoint: string;
-  execute_path: string;
-  active: boolean;
+  lab_key:        string;
+  api_endpoint:   string;
+  execute_path:   string;
+  active:         boolean;
   default_params: Record<string, unknown>;
 }
 
@@ -45,16 +44,16 @@ async function getLabConfigs(): Promise<LabConfig[]> {
       `${SB_URL}/rest/v1/lab_configs?select=lab_key,api_endpoint,execute_path,active,default_params&lab_key=not.is.null`,
       { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
     );
-    if (!res.ok) throw new Error(`lab_configs fetch failed: ${res.status}`);
+    if (!res.ok) throw new Error(`lab_configs fetch: ${res.status}`);
     _labConfigsCache = await res.json();
     return _labConfigsCache!;
   } catch (err) {
-    console.error('[OrchestratorEngine] lab_configs not available:', err);
+    console.error('[OrchestratorEngine] lab_configs error:', err);
     return [];
   }
 }
 
-// ── PUBLIC: INTERPRET ─────────────────────────────────────────────────────────
+// ── INTERPRET ─────────────────────────────────────────────────────────────────
 
 export async function interpretPrompt(userPrompt: string): Promise<InterpretResult> {
   const res = await fetch('/api/interpret-intent', {
@@ -63,25 +62,21 @@ export async function interpretPrompt(userPrompt: string): Promise<InterpretResu
     body: JSON.stringify({ prompt: userPrompt }),
   });
 
-  if (!res.ok) {
-    console.error('[OrchestratorEngine] interpret-intent error:', res.status);
-    return fallbackResult();
-  }
+  if (!res.ok) return fallbackResult();
 
   try {
     const parsed = await res.json();
     return {
-      brandId:           parsed.brandId ?? null,
-      platforms:         (parsed.platforms ?? ['INSTAGRAM', 'FACEBOOK']) as PlatformId[],
-      objective:         (parsed.objective ?? 'social_post') as FlowObjective,
+      brandId:           parsed.brandId          ?? null,
+      platforms:         (parsed.platforms        ?? ['INSTAGRAM', 'FACEBOOK']) as PlatformId[],
+      objective:         (parsed.objective        ?? 'social_post') as FlowObjective,
       interpretedIntent: parsed.interpretedIntent ?? 'Flujo de contenido personalizado',
-      suggestedStages:   parsed.suggestedStages ?? [],
-      complianceFlags:   parsed.complianceFlags ?? [],
-      dbVariablesKeys:   parsed.dbVariablesKeys ?? [],
-      confidence:        parsed.confidence ?? 0.8,
-      // email_sequence campos adicionales
-      sequence_type:     parsed.sequence_type ?? null,
-      sequence_context:  parsed.sequence_context ?? null,
+      suggestedStages:   parsed.suggestedStages   ?? [],
+      complianceFlags:   parsed.complianceFlags   ?? [],
+      dbVariablesKeys:   parsed.dbVariablesKeys   ?? [],
+      confidence:        parsed.confidence        ?? 0.8,
+      sequence_type:     (parsed.sequence_type    ?? null) as EmailSequenceType | null,
+      sequence_context:  (parsed.sequence_context ?? null) as SequenceContext | null,
     };
   } catch {
     return fallbackResult();
@@ -90,44 +85,51 @@ export async function interpretPrompt(userPrompt: string): Promise<InterpretResu
 
 function fallbackResult(): InterpretResult {
   return {
-    brandId: null,
-    platforms: ['INSTAGRAM', 'FACEBOOK'],
-    objective: 'social_post',
-    interpretedIntent: 'No se pudo interpretar el prompt. Revisa la selección de marca.',
-    suggestedStages: [
-      { order: 1, labId: 'copylab', label: 'Generar copy', description: 'Generar texto', requiresApproval: true, estimatedSeconds: 8, mockOutput: 'Copy generado.' },
-      { order: 2, labId: 'sociallab', label: 'Programar post', description: 'Encolar en SocialLab', requiresApproval: false, estimatedSeconds: 2, mockOutput: 'Post encolado.' },
+    brandId:           null,
+    platforms:         ['INSTAGRAM', 'FACEBOOK'],
+    objective:         'social_post' as FlowObjective,
+    interpretedIntent: 'No se pudo interpretar el prompt.',
+    suggestedStages:   [
+      {
+        order: 1, labId: 'copylab', label: 'Generar copy',
+        description: 'Generar texto', requiresApproval: true,
+        estimatedSeconds: 8, mockOutput: 'Copy generado.',
+      },
+      {
+        order: 2, labId: 'sociallab', label: 'Programar post',
+        description: 'Encolar en SocialLab', requiresApproval: false,
+        estimatedSeconds: 2, mockOutput: 'Post encolado.',
+      },
     ],
-    complianceFlags: [],
-    dbVariablesKeys: [],
-    confidence: 0.4,
-    sequence_type: null,
+    complianceFlags:  [],
+    dbVariablesKeys:  [],
+    confidence:       0.4,
+    sequence_type:    null,
     sequence_context: null,
   };
 }
 
-// ── PUBLIC: EXECUTE STAGE ─────────────────────────────────────────────────────
+// ── EXECUTE STAGE ─────────────────────────────────────────────────────────────
 
 export interface ExecuteStageOptions {
-  brandId?: string | null;
+  brandId?:         string | null;
   previousOutputs?: Record<string, string>;
-  // Campos adicionales para email_sequence
-  sequenceType?: string;
-  sequenceContext?: Record<string, any> | null;
-  stageMeta?: Record<string, any>; // meta del pack (position, language, klaviyo IDs, etc.)
+  sequenceType?:    string;
+  sequenceContext?: SequenceContext | null;
+  stageMeta?:       Record<string, unknown>;
 }
 
 export async function executeStage(
   stage: FlowStage,
-  options: ExecuteStageOptions = {}
+  options: ExecuteStageOptions = {},
 ): Promise<string> {
 
-  // ── KLAVIYO STAGE: handler especial ───────────────────────────────────────
+  // Klaviyo: handler especial — parse + Supabase write + EF deploy
   if (stage.labId === 'klaviyo') {
     return executeKlaviyoStage(stage, options);
   }
 
-  // ── LABS ESTÁNDAR: fetch al endpoint del lab ──────────────────────────────
+  // Labs estándar: fetch al endpoint del lab
   const configs = await getLabConfigs();
   const config  = configs.find(c => c.lab_key === stage.labId);
 
@@ -136,14 +138,15 @@ export async function executeStage(
   }
 
   const endpoint = `${config.api_endpoint}${config.execute_path}`;
-  const meta = options.stageMeta ?? {};
+  const meta     = (options.stageMeta ?? {}) as Record<string, unknown>;
+  const seqCtx   = options.sequenceContext ?? null;
 
   try {
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        brandId:         options.brandId ?? null,
+        brandId: options.brandId ?? null,
         stage: {
           labId:       stage.labId,
           label:       stage.label,
@@ -157,35 +160,27 @@ export async function executeStage(
           extra_instructions: stage.description,
         },
         meta: {
-          motor:            meta.motor ?? 'claude',
-          sequence_type:    options.sequenceType ?? null,
-          position:         meta.position ?? 1,
-          language:         meta.language ?? 'ES',
-          persona_key:      options.sequenceContext?.persona_key ?? null,
-          psycho_presets:   meta.psycho_presets ?? [],
+          motor:             meta.motor ?? 'claude',
+          sequence_type:     options.sequenceType ?? null,
+          position:          meta.position ?? 1,
+          language:          meta.language ?? 'ES',
+          persona_key:       seqCtx?.persona_key ?? null,
+          psycho_presets:    meta.psycho_presets ?? [],
           mechanism_primary: meta.mechanism_primary ?? null,
-          utm_content:      options.sequenceContext?.utm_content ?? null,
+          utm_content:       seqCtx?.utm_content ?? null,
         },
-        previousOutputs: {
-          ...options.previousOutputs ?? {},
-          // Pasar sequence_id al CopyLab para que pueda leer la pieza anterior
-          sequence_id: options.previousOutputs?.sequence_id ?? undefined,
-        },
+        previousOutputs: options.previousOutputs ?? {},
       }),
     });
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`${res.status}: ${errText}`);
-    }
-
-    const data: { output?: string; status?: string; error?: string } = await res.json();
+    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+    const data = await res.json() as { output?: string; error?: string };
     if (data.error) throw new Error(data.error);
     return data.output ?? 'Stage completado sin output.';
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[OrchestratorEngine] executeStage error (${stage.labId}):`, msg);
+    console.error(`[OrchestratorEngine] executeStage (${stage.labId}):`, msg);
     return `Error ejecutando ${stage.labId}: ${msg}`;
   }
 }
@@ -196,49 +191,57 @@ async function executeKlaviyoStage(
   stage: FlowStage,
   options: ExecuteStageOptions,
 ): Promise<string> {
-  const brandId = options.brandId ?? '';
-  const meta = options.stageMeta ?? {};
-  const seqCtx = options.sequenceContext ?? {};
+  const brandId    = options.brandId ?? '';
+  const meta       = (options.stageMeta ?? {}) as Record<string, unknown>;
+  const seqCtx     = options.sequenceContext ?? null;
   const prevOutputs = options.previousOutputs ?? {};
 
-  // El output de CopyLab debe estar en previousOutputs con la key del stage anterior
-  // Por convención: la key es el labId + '_' + position + '_' + language
-  // O directamente 'copylab_output' si viene del stage inmediato anterior
-  const copyLabOutput = prevOutputs[`copylab_${meta.position}_${meta.language}`]
+  // Output de CopyLab: buscar en previousOutputs
+  const copyLabOutput =
+    prevOutputs[`copylab_${meta.position}_${meta.language}`]
     ?? prevOutputs['copylab_output']
-    ?? Object.values(prevOutputs).find(v => v.includes('---SUBJECT---'))
+    ?? (Object.values(prevOutputs).find(v => typeof v === 'string' && v.includes('---SUBJECT---')))
     ?? '';
 
   if (!copyLabOutput) {
-    return `[KLAVIYO] Error: no se encontró output de CopyLab en previousOutputs. Keys disponibles: ${Object.keys(prevOutputs).join(', ')}`;
+    return `[KLAVIYO] Error: output de CopyLab no encontrado. Keys: ${Object.keys(prevOutputs).join(', ')}`;
   }
 
-  // Sequence ID: viene de previousOutputs si fue creado en un stage anterior de este flow
   const sequenceIdFromPrev = prevOutputs['sequence_id'] ?? null;
 
-  // Determinar el mechanism_primary de la pieza anterior si position > 1
+  // Sequence awareness: leer mechanism de la pieza anterior
   let previousMechanism = 'none';
-  if (meta.position > 1 && sequenceIdFromPrev) {
+  const position = typeof meta.position === 'number' ? meta.position : 1;
+
+  if (position > 1 && sequenceIdFromPrev) {
     previousMechanism = await getPreviousMechanism(
       sequenceIdFromPrev,
-      meta.position,
-      meta.language
+      position,
+      typeof meta.language === 'string' ? meta.language : 'ES',
     ) ?? 'unknown';
   }
 
+  const templateIds = (seqCtx?.klaviyo_template_ids ?? {}) as Record<string, string>;
+  const templateSlot = typeof meta.klaviyo_template_slot === 'string' ? meta.klaviyo_template_slot : '';
+
   const pieceMeta: SequencePieceMeta = {
-    sequenceType:     options.sequenceType ?? 'generic',
-    position:         meta.position ?? 1,
-    language:         meta.language ?? 'ES',
+    sequenceType:      options.sequenceType ?? 'generic',
+    position,
+    language:          typeof meta.language === 'string' ? meta.language : 'ES',
     brandId,
-    klaviyoTemplateId: meta.klaviyo_template_id ?? seqCtx.klaviyo_template_ids?.[meta.klaviyo_template_slot] ?? undefined,
-    personaKey:       seqCtx.persona_key ?? null,
-    mechanismPrimary: meta.mechanism_primary ?? null,
-    psychoPresets:    meta.psycho_presets ?? [],
-    creativeVectorId: prevOutputs['last_creative_vector'] ?? undefined,
-    tensionId:        prevOutputs['last_tension'] ?? undefined,
-    aggroId:          prevOutputs['last_aggro'] ?? undefined,
-    utmContent:       seqCtx.utm_content ?? null,
+    klaviyoTemplateId: (typeof meta.klaviyo_template_id === 'string' ? meta.klaviyo_template_id : null)
+                       ?? templateIds[templateSlot]
+                       ?? undefined,
+    personaKey:        seqCtx?.persona_key ?? undefined,
+    mechanismPrimary:  typeof meta.mechanism_primary === 'string' ? meta.mechanism_primary : undefined,
+    psychoPresets:     Array.isArray(meta.psycho_presets) ? meta.psycho_presets as string[] : [],
+    creativeVectorId:  typeof prevOutputs['last_creative_vector'] === 'string'
+                         ? prevOutputs['last_creative_vector'] : undefined,
+    tensionId:         typeof prevOutputs['last_tension'] === 'string'
+                         ? prevOutputs['last_tension'] : undefined,
+    aggroId:           typeof prevOutputs['last_aggro'] === 'string'
+                         ? prevOutputs['last_aggro'] : undefined,
+    utmContent:        seqCtx?.utm_content ?? undefined,
   };
 
   const result = await executeEmailSequenceStage(
@@ -247,7 +250,7 @@ async function executeKlaviyoStage(
     sequenceIdFromPrev ?? undefined,
   );
 
-  // Guardar sequence_id en previousOutputs para el siguiente stage del mismo flow
+  // Propagar sequence_id para el siguiente stage
   if (result.sequenceId) {
     prevOutputs['sequence_id'] = result.sequenceId;
   }
