@@ -1,15 +1,18 @@
 /**
- * UNRLVL — Orchestrator Engine v2.3
+ * UNRLVL — Orchestrator Engine v2.4
+ *
+ * v2.4 changelog (2026-05-26):
+ * - executeStage(): imagelab stage → upload image_data_url a Supabase Storage
+ *   via Meta MCP /api/upload → inyecta image_url en previousOutputs
+ *   para que SocialLab lo reciba y lo guarde en scheduled_posts
  *
  * v2.3 changelog (2026-05-26):
  * - types.ts: LabId += 'meta', FlowObjective += 'publish_organic'
  * - executeStage(): labId === 'meta' → executeMetaStage handler
- * - Meta MCP llamado via fetch directo (mismo patrón que Klaviyo)
  *
  * v2.2 changelog (2026-05-18):
- * - types.ts: LabId += 'klaviyo', FlowObjective += 'email_sequence', InterpretResult += sequence_type/context
- * - executeStage(): labId === 'klaviyo' → usesequenceBridge handler
- * - sequenceId propagado entre stages del mismo email_sequence flow
+ * - types.ts: LabId += 'klaviyo', FlowObjective += 'email_sequence'
+ * - executeStage(): labId === 'klaviyo' → executeKlaviyoStage handler
  */
 
 import {
@@ -30,7 +33,7 @@ import type {
 const SB_URL = (import.meta as any).env.VITE_SUPABASE_URL as string;
 const SB_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY as string;
 const META_MCP_URL = (import.meta as any).env.VITE_META_MCP_URL as string
-  ?? 'https://unrlvl-meta-mcp.vercel.app/api/mcp/mcp';
+  ?? 'https://unrlvl-meta-mcp.vercel.app';
 
 // ── LAB CONFIG ────────────────────────────────────────────────────────────────
 
@@ -103,12 +106,17 @@ function fallbackResult(): InterpretResult {
         estimatedSeconds: 8, mockOutput: 'Copy generado.',
       },
       {
-        order: 2, labId: 'sociallab', label: 'Encolar post',
+        order: 2, labId: 'imagelab', label: 'Generar imagen',
+        description: 'Generar imagen del post', requiresApproval: false,
+        estimatedSeconds: 30, mockOutput: 'Imagen generada.',
+      },
+      {
+        order: 3, labId: 'sociallab', label: 'Encolar post',
         description: 'Encolar en SocialLab', requiresApproval: false,
         estimatedSeconds: 2, mockOutput: 'Post encolado.',
       },
       {
-        order: 3, labId: 'meta', label: 'Publicar',
+        order: 4, labId: 'meta', label: 'Publicar',
         description: 'Publicar via Meta MCP', requiresApproval: true,
         estimatedSeconds: 3, mockOutput: 'Publicado.',
       },
@@ -136,17 +144,9 @@ export async function executeStage(
   options: ExecuteStageOptions = {},
 ): Promise<string> {
 
-  // Klaviyo: handler especial
-  if (stage.labId === 'klaviyo') {
-    return executeKlaviyoStage(stage, options);
-  }
+  if (stage.labId === 'klaviyo') return executeKlaviyoStage(stage, options);
+  if (stage.labId === 'meta')    return executeMetaStage(stage, options);
 
-  // Meta MCP: handler especial — publish organic posts
-  if (stage.labId === 'meta') {
-    return executeMetaStage(stage, options);
-  }
-
-  // Labs estándar: fetch al endpoint del lab
   const configs = await getLabConfigs();
   const config  = configs.find(c => c.lab_key === stage.labId);
 
@@ -172,9 +172,11 @@ export async function executeStage(
         },
         params: {
           pack:               meta.pack_id ?? config.default_params?.pack,
-          canal:              meta.canal ?? 'email',
+          canal:              meta.canal ?? 'instagram_feed',
+          aspect_ratio:       meta.aspect_ratio ?? '4:5',
           idioma:             meta.language,
           extra_instructions: stage.description,
+          subject:            meta.subject ?? stage.description,
         },
         meta: {
           motor:             meta.motor ?? 'claude',
@@ -191,8 +193,32 @@ export async function executeStage(
     });
 
     if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
-    const data = await res.json() as { output?: string; error?: string };
+    const data = await res.json() as {
+      output?: string;
+      error?: string;
+      image_data_url?: string;  // ImageLab devuelve esto
+      status?: string;
+    };
     if (data.error) throw new Error(data.error);
+
+    // ── GAP 1 FIX: ImageLab devuelve image_data_url → subir a Storage ──────
+    if (stage.labId === 'imagelab' && data.image_data_url) {
+      try {
+        const uploadResult = await uploadImageToStorage(
+          data.image_data_url,
+          options.brandId ?? 'unrlvl',
+        );
+        if (uploadResult && options.previousOutputs) {
+          // Inyectar la URL pública en previousOutputs para que SocialLab la reciba
+          options.previousOutputs['image_url'] = uploadResult;
+          console.log('[OrchestratorEngine] imagen subida a Storage:', uploadResult);
+        }
+      } catch (uploadErr) {
+        console.error('[OrchestratorEngine] upload imagen falló:', uploadErr);
+        // No bloqueamos el flujo si el upload falla — el post puede ir sin imagen
+      }
+    }
+
     return data.output ?? 'Stage completado sin output.';
 
   } catch (err) {
@@ -200,6 +226,37 @@ export async function executeStage(
     console.error(`[OrchestratorEngine] executeStage (${stage.labId}):`, msg);
     return `Error ejecutando ${stage.labId}: ${msg}`;
   }
+}
+
+// ── IMAGE UPLOAD HELPER ────────────────────────────────────────────────────────
+// Sube el base64 de ImageLab a Supabase Storage via Meta MCP /api/upload
+// Devuelve la URL pública o null si falla
+
+async function uploadImageToStorage(
+  dataUrl: string,
+  brandId: string,
+): Promise<string | null> {
+  const base64 = dataUrl.split(',')[1];
+  if (!base64) return null;
+
+  const uploadEndpoint = `${META_MCP_URL}/api/upload`;
+
+  const res = await fetch(uploadEndpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      base64,
+      mime_type: 'image/jpeg',
+      folder: 'published',
+      brand_id: brandId,
+      filename: `${brandId}_post_${Date.now()}.jpg`,
+    }),
+  });
+
+  if (!res.ok) throw new Error(`Upload HTTP ${res.status}`);
+  const data = await res.json() as { public_url?: string; status?: string; error?: string };
+  if (data.error) throw new Error(data.error);
+  return data.public_url ?? null;
 }
 
 // ── META STAGE HANDLER ────────────────────────────────────────────────────────
@@ -212,7 +269,6 @@ async function executeMetaStage(
   if (!brandId) return '[META] Error: brandId requerido para publicar.';
 
   try {
-    // Llama a /api/publish de SocialLab — publica todos los pending_publish de la marca
     const configs = await getLabConfigs();
     const socialConfig = configs.find(c => c.lab_key === 'sociallab');
     const socialBase = socialConfig?.api_endpoint ?? 'https://social-lab-flame.vercel.app';
@@ -229,7 +285,6 @@ async function executeMetaStage(
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[OrchestratorEngine] executeMetaStage:`, msg);
     return `Error publicando via Meta: ${msg}`;
   }
 }
@@ -240,9 +295,9 @@ async function executeKlaviyoStage(
   stage: FlowStage,
   options: ExecuteStageOptions,
 ): Promise<string> {
-  const brandId    = options.brandId ?? '';
-  const meta       = (options.stageMeta ?? {}) as Record<string, unknown>;
-  const seqCtx     = options.sequenceContext ?? null;
+  const brandId     = options.brandId ?? '';
+  const meta        = (options.stageMeta ?? {}) as Record<string, unknown>;
+  const seqCtx      = options.sequenceContext ?? null;
   const prevOutputs = options.previousOutputs ?? {};
 
   const copyLabOutput =
@@ -256,7 +311,6 @@ async function executeKlaviyoStage(
   }
 
   const sequenceIdFromPrev = prevOutputs['sequence_id'] ?? null;
-
   let previousMechanism = 'none';
   const position = typeof meta.position === 'number' ? meta.position : 1;
 
