@@ -493,14 +493,16 @@ export default function FlowExecutorModule({ onComplete, onReset }: ExecutorProp
 
   const runFlow = async () => {
     if (!activePlan) return;
+    const previousOutputs: Record<string, string> = {};
 
     for (const stage of activePlan.stages) {
       updateStageStatus(stage.id, 'running');
 
       try {
-        const output = await executeStage(stage);
+        const output = await executeStage(stage, { brandId: activePlan.brandId, previousOutputs });
 
         if (stage.requiresApproval) {
+          if (output) previousOutputs[stage.labId] = output;
           updateStageStatus(stage.id, 'awaiting_approval', output);
           await waitForApproval(stage.id);
 
@@ -511,6 +513,7 @@ export default function FlowExecutorModule({ onComplete, onReset }: ExecutorProp
             return;
           }
         } else {
+          if (output) previousOutputs[stage.labId] = output;
           updateStageStatus(stage.id, 'completed', output);
         }
       } catch (e: any) {

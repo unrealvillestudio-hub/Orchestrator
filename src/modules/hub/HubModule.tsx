@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, Sparkles, AlertCircle, RotateCcw } from 'lucide-react';
+import { ArrowRight, Sparkles, AlertCircle, RotateCcw, ChevronDown } from 'lucide-react';
 import { BRANDS } from '../../config/brands';
 import { useFlowStore } from '../../store/useFlowStore';
 import { interpretPrompt } from '../../services/orchestratorEngine';
@@ -19,8 +19,12 @@ interface HubModuleProps {
 }
 
 export default function HubModule({ onPlanReady }: HubModuleProps) {
-  const [prompt, setPrompt] = useState('');
-  const [error, setError] = useState('');
+  const [prompt, setPrompt]           = useState('');
+  const [error, setError]             = useState('');
+  // FIX 1: brand selector — default UNREALville (o el primero disponible)
+  const [selectedBrand, setSelectedBrand] = useState<string>(
+    BRANDS.find(b => b.id === 'UnrealvilleStudio')?.id ?? BRANDS[0].id
+  );
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { isInterpreting, setInterpreting, setActivePlan } = useFlowStore();
 
@@ -32,7 +36,6 @@ export default function HubModule({ onPlanReady }: HubModuleProps) {
     try {
       const result: InterpretResult = await interpretPrompt(prompt.trim());
 
-      // Build full FlowPlan from interpret result
       const stages: FlowStage[] = result.suggestedStages.map((s, i) => ({
         ...s,
         id: `stage_${i}_${Date.now()}`,
@@ -41,7 +44,9 @@ export default function HubModule({ onPlanReady }: HubModuleProps) {
 
       const plan: FlowPlan = {
         id: `flow_${Date.now()}`,
-        brandId: result.brandId ?? BRANDS[0].id,
+        // FIX 1: usar el brand seleccionado manualmente, no el interpretado
+        // El intérprete puede detectar el brand del prompt, pero el selector tiene prioridad
+        brandId: selectedBrand,
         objective: result.objective,
         platforms: result.platforms,
         userPrompt: prompt.trim(),
@@ -73,10 +78,11 @@ export default function HubModule({ onPlanReady }: HubModuleProps) {
     textareaRef.current?.focus();
   };
 
+  const activeBrand = BRANDS.find(b => b.id === selectedBrand);
+
   return (
     <div className="flex flex-col items-center justify-center min-h-[calc(100vh-56px)] px-6 pb-16">
 
-      {/* Hero text */}
       <motion.div
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
@@ -97,20 +103,48 @@ export default function HubModule({ onPlanReady }: HubModuleProps) {
         </p>
       </motion.div>
 
-      {/* Main prompt input */}
       <motion.div
         initial={{ opacity: 0, y: 32 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
         className="w-full max-w-2xl"
       >
+        {/* FIX 1: Brand selector */}
+        <div className="mb-3">
+          <div className="relative">
+            <select
+              value={selectedBrand}
+              onChange={e => setSelectedBrand(e.target.value)}
+              disabled={isInterpreting}
+              className="w-full appearance-none bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm font-medium text-zinc-200 outline-none hover:border-zinc-700 focus:border-accent/50 transition-all disabled:opacity-50 cursor-pointer pr-10"
+              style={{ color: activeBrand?.color ?? '#e4e4e7' }}
+            >
+              {BRANDS.map(b => (
+                <option key={b.id} value={b.id} style={{ color: b.color, background: '#18181b' }}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+              <ChevronDown size={14} className="text-zinc-600" />
+            </div>
+            {/* Color dot */}
+            <div
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full pointer-events-none"
+              style={{ backgroundColor: activeBrand?.color ?? '#888' }}
+            />
+            <div className="absolute left-8 top-1/2 -translate-y-1/2 pointer-events-none">
+              {/* spacer */}
+            </div>
+          </div>
+        </div>
+
         <div className={cn(
           "relative bg-zinc-900 border rounded-2xl transition-all duration-300",
           isInterpreting
             ? "border-accent/50 shadow-lg shadow-accent/10"
             : "border-zinc-800 hover:border-zinc-700 focus-within:border-accent/50 focus-within:shadow-lg focus-within:shadow-accent/10"
         )}>
-          {/* Animated top border */}
           {isInterpreting && (
             <div className="absolute inset-x-0 top-0 h-px rounded-full overflow-hidden">
               <motion.div
@@ -162,7 +196,6 @@ export default function HubModule({ onPlanReady }: HubModuleProps) {
           </div>
         </div>
 
-        {/* Error */}
         <AnimatePresence>
           {error && (
             <motion.div
@@ -174,7 +207,6 @@ export default function HubModule({ onPlanReady }: HubModuleProps) {
           )}
         </AnimatePresence>
 
-        {/* Example prompts */}
         <div className="mt-6 space-y-2">
           <p className="text-[11px] font-mono uppercase tracking-widest text-zinc-700 text-center mb-3">Ejemplos</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
