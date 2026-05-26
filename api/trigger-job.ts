@@ -110,7 +110,7 @@ devuelve SOLO JSON válido con esta estructura exacta (sin markdown, sin explica
   ],
   "platforms": ["INSTAGRAM","FACEBOOK"]
 }
-Para un post orgánico con imagen siempre incluye copylab→imagelab→sociallab→meta en ese orden.`,
+Si el prompt menciona explícitamente 'sin imagen', 'solo texto', 'text only' o similar, omite el stage imagelab. Si incluye imagen, usa copylab→imagelab→sociallab→meta. Si no especifica, usa copylab→sociallab→meta (sin imagelab por defecto para evitar timeouts).`,
       messages: [{ role: 'user', content: `Brand: ${brand_id}\nPrompt: ${prompt}` }],
     }),
   });
@@ -289,6 +289,9 @@ export default async function handler(
     ctx.waitUntil(pipeline); // Edge / Cloudflare Workers — runtime lo mantiene vivo
   } else {
     pipeline.catch(() => {}); // Vercel Node.js serverless — Promise flotante, no bloquea response
+    // Vercel Node.js: mantener el proceso vivo durante el pipeline
+    // (máx 300s según vercel.json)
+    await new Promise(resolve => setTimeout(resolve, 500)); // yield para que Vercel procese el response
   }
 
   // 3. Responder inmediatamente
