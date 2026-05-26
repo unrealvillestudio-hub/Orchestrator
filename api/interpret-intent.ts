@@ -141,6 +141,15 @@ export default async function handler(req: Request): Promise<Response> {
 
     const parsed = JSON.parse(cleaned);
 
+    // Inyectar userPrompt como description en el stage de copylab
+    if (Array.isArray(parsed.suggestedStages)) {
+      for (const stage of parsed.suggestedStages) {
+        if (stage.labId === 'copylab') {
+          stage.description = userPrompt;
+        }
+      }
+    }
+
     return new Response(JSON.stringify(parsed), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
