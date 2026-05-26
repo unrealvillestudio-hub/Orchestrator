@@ -1,5 +1,5 @@
 /**
- * UNRLVL Orchestrator — api/trigger-job.ts v2.0
+ * UNRLVL Orchestrator — api/trigger-job.ts v3.0
  * Dual-mode entry point: permite a Claude/Ayra disparar un flujo completo
  * sin necesitar la UI del Orchestrator.
  *
@@ -13,11 +13,13 @@
  *   secret?: string,           // opcional si TRIGGER_SECRET está configurado
  * }
  *
- * Returns: { job_id, stages, status }
+ * Returns INMEDIATO: { status: 'running', job_id, brand_id, prompt }
  *
- * El job corre de forma asíncrona contra los labs directamente
- * (no necesita el browser — usa el mismo orchestratorEngine server-side).
- * Los resultados se escriben en Supabase tabla orchestrator_jobs (content schema).
+ * El pipeline corre en background (fire-and-forget):
+ * - usa ctx.waitUntil() si el runtime lo expone (Edge/Cloudflare)
+ * - fallback: Promise flotante sin await (Vercel Node.js serverless)
+ * El resultado final se escribe en content.orchestrator_jobs cuando termina.
+ * Claude puede leerlo después via Supabase.
  *
  * Env vars: TRIGGER_SECRET (opcional), SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
  * ANTHROPIC_API_KEY (para interpret-intent)
@@ -168,56 +170,25 @@ async function publishPosts(brandId: string): Promise<string> {
   return data.output ?? 'Publicado';
 }
 
-// ── HANDLER ───────────────────────────────────────────────────────────────────
+// ── PIPELINE (background) ─────────────────────────────────────────────────────
 
-export default async function handler(req: Request): Promise<Response> {
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
-  if (req.method !== 'POST') return new Response(JSON.stringify({ error: 'POST only' }), { status: 405, headers: CORS });
-
-  // Auth opcional
-  const secret = process.env.TRIGGER_SECRET;
-  if (secret) {
-    const auth = req.headers.get('x-trigger-secret') ?? '';
-    if (auth !== secret) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
-  }
-
-  let body: {
-    brand_id?: string;
-    prompt?: string;
-    platforms?: string[];
-    aspect_ratio?: string;
-    auto_publish?: boolean;
-  } = {};
-  try { body = await req.json(); } catch {}
-
-  if (!body.brand_id) return new Response(JSON.stringify({ error: 'brand_id required' }), { status: 400, headers: CORS });
-  if (!body.prompt)   return new Response(JSON.stringify({ error: 'prompt required' }), { status: 400, headers: CORS });
-
-  const brandId       = body.brand_id;
-  const autoPublish   = body.auto_publish ?? false;
-  const aspectRatio   = body.aspect_ratio ?? '4:5';
-
-  // Crear job en Supabase
-  const jobId = await writeJob({
-    brand_id:   brandId,
-    prompt:     body.prompt,
-    status:     'running',
-    started_at: new Date().toISOString(),
-  });
-
+async function runPipeline(
+  jobId: string,
+  brandId: string,
+  prompt: string,
+  autoPublish: boolean,
+  aspectRatio: string,
+): Promise<void> {
   const stageResults: Array<{ labId: string; status: string; output?: string; error?: string }> = [];
 
   try {
-    // 1. Interpretar intent
-    const { stages } = await interpretIntent(body.prompt, brandId);
+    const { stages } = await interpretIntent(prompt, brandId);
     const labs = await getLabEndpoints();
     const previousOutputs: Record<string, string> = {};
 
-    // 2. Ejecutar stages
     for (const stage of stages) {
 
       if (stage.labId === 'meta') {
-        // Publicar via SocialLab /api/publish
         if (!autoPublish) {
           stageResults.push({ labId: 'meta', status: 'pending_approval', output: 'Listo para publicar. Llama /api/trigger-job con auto_publish:true para confirmar.' });
           break;
@@ -241,7 +212,6 @@ export default async function handler(req: Request): Promise<Response> {
         break;
       }
 
-      // ImageLab: subir imagen a Storage
       if (stage.labId === 'imagelab' && result.image_data_url) {
         const imageUrl = await uploadImage(result.image_data_url, brandId);
         if (imageUrl) {
@@ -256,24 +226,76 @@ export default async function handler(req: Request): Promise<Response> {
       }
     }
 
-    if (jobId) {
-      await updateJob(jobId, {
-        status:       'completed',
-        completed_at: new Date().toISOString(),
-        result:       JSON.stringify(stageResults),
-      });
-    }
-
-    return new Response(JSON.stringify({
-      job_id:  jobId,
-      brand_id: brandId,
-      stages:  stageResults,
-      status:  'completed',
-    }), { status: 200, headers: CORS });
+    await updateJob(jobId, {
+      status:       'completed',
+      completed_at: new Date().toISOString(),
+      result:       JSON.stringify(stageResults),
+    });
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (jobId) await updateJob(jobId, { status: 'error', error: msg });
-    return new Response(JSON.stringify({ job_id: jobId, error: msg, status: 'error' }), { status: 500, headers: CORS });
+    await updateJob(jobId, { status: 'error', error: msg, result: JSON.stringify(stageResults) });
   }
+}
+
+// ── HANDLER ───────────────────────────────────────────────────────────────────
+
+export default async function handler(
+  req: Request,
+  ctx?: { waitUntil?: (p: Promise<unknown>) => void },
+): Promise<Response> {
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+  if (req.method !== 'POST') return new Response(JSON.stringify({ error: 'POST only' }), { status: 405, headers: CORS });
+
+  // Auth opcional
+  const secret = process.env.TRIGGER_SECRET;
+  if (secret) {
+    const auth = req.headers.get('x-trigger-secret') ?? '';
+    if (auth !== secret) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
+  }
+
+  let body: {
+    brand_id?: string;
+    prompt?: string;
+    platforms?: string[];
+    aspect_ratio?: string;
+    auto_publish?: boolean;
+  } = {};
+  try { body = await req.json(); } catch {}
+
+  if (!body.brand_id) return new Response(JSON.stringify({ error: 'brand_id required' }), { status: 400, headers: CORS });
+  if (!body.prompt)   return new Response(JSON.stringify({ error: 'prompt required' }), { status: 400, headers: CORS });
+
+  const brandId     = body.brand_id;
+  const prompt      = body.prompt;
+  const autoPublish = body.auto_publish ?? false;
+  const aspectRatio = body.aspect_ratio ?? '4:5';
+
+  // 1. Insertar job inmediatamente con status running
+  const jobId = await writeJob({
+    brand_id:   brandId,
+    prompt,
+    status:     'running',
+    started_at: new Date().toISOString(),
+  });
+
+  if (!jobId) {
+    return new Response(JSON.stringify({ error: 'Failed to create job in Supabase' }), { status: 500, headers: CORS });
+  }
+
+  // 2. Lanzar pipeline en background
+  const pipeline = runPipeline(jobId, brandId, prompt, autoPublish, aspectRatio);
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(pipeline); // Edge / Cloudflare Workers — runtime lo mantiene vivo
+  } else {
+    pipeline.catch(() => {}); // Vercel Node.js serverless — Promise flotante, no bloquea response
+  }
+
+  // 3. Responder inmediatamente
+  return new Response(JSON.stringify({
+    status:   'running',
+    job_id:   jobId,
+    brand_id: brandId,
+    prompt,
+  }), { status: 202, headers: CORS });
 }
