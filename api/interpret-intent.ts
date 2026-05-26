@@ -7,6 +7,8 @@
  * - Motor: Claude API via fetch directo (sin SDK — consistente con el stack)
  */
 
+declare const process: { env: Record<string, string | undefined> };
+
 const ANTHROPIC_API_KEY = (import.meta as any).env.ANTHROPIC_API_KEY as string;
 
 const INTERPRET_SYSTEM_PROMPT = `Eres el motor de interpretación del Orchestrator de Unreal>ille Studio.
@@ -102,8 +104,8 @@ export default async function handler(req: Request): Promise<Response> {
   let brandList = '';
   try {
     const sbRes = await fetch(
-      `${(import.meta as any).env.SUPABASE_URL}/rest/v1/brands?select=id,display_name&status=eq.active`,
-      { headers: { apikey: (import.meta as any).env.SUPABASE_SERVICE_ROLE_KEY } }
+      `${process.env.SUPABASE_URL}/rest/v1/brands?select=id,display_name&status=eq.active`,
+      { headers: { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '' } }
     );
     if (sbRes.ok) {
       const brands = await sbRes.json() as Array<{id: string; display_name: string}>;
