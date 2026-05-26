@@ -501,6 +501,13 @@ export default function FlowExecutorModule({ onComplete, onReset }: ExecutorProp
       try {
         const output = await executeStage(stage, { brandId: activePlan.brandId, previousOutputs });
 
+        // Fail-fast: si el output contiene un error conocido, detener el pipeline
+        if (output && (output.startsWith('Error ejecutando') || output.includes('"status":"error"'))) {
+          updateStageStatus(stage.id, 'error', output);
+          executingRef.current = false;
+          return;
+        }
+
         if (stage.requiresApproval) {
           if (output) previousOutputs[stage.labId] = output;
           updateStageStatus(stage.id, 'awaiting_approval', output);

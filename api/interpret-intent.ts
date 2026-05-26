@@ -98,6 +98,19 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 
+  // Cargar brand IDs válidos desde Supabase
+  let brandList = '';
+  try {
+    const sbRes = await fetch(
+      `${(import.meta as any).env.SUPABASE_URL}/rest/v1/brands?select=id,display_name&status=eq.active`,
+      { headers: { apikey: (import.meta as any).env.SUPABASE_SERVICE_ROLE_KEY } }
+    );
+    if (sbRes.ok) {
+      const brands = await sbRes.json() as Array<{id: string; display_name: string}>;
+      brandList = brands.map(b => `${b.id} (${b.display_name})`).join(', ');
+    }
+  } catch { /* no bloqueamos si falla */ }
+
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -109,7 +122,7 @@ export default async function handler(req: Request): Promise<Response> {
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 1024,
-        system: INTERPRET_SYSTEM_PROMPT,
+        system: INTERPRET_SYSTEM_PROMPT + (brandList ? `\n\nBRANDS VÁLIDAS — ÚNICOS IDs permitidos para brandId: ${brandList}. Si el prompt no menciona ninguna explícitamente, usa brandId: null. NUNCA inventes un brand_id que no esté en esta lista.` : ''),
         messages: [{ role: 'user', content: userPrompt }],
       }),
     });

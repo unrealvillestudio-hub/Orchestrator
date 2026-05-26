@@ -199,7 +199,11 @@ export async function executeStage(
       image_data_url?: string;  // ImageLab devuelve esto
       status?: string;
     };
-    if (data.error) throw new Error(data.error);
+
+    // Fail-fast: si el lab devolvió error, lanzar excepción para detener el pipeline
+    if (data.status === 'error' || data.error) {
+      throw new Error(`[${stage.labId}] ${data.error ?? data.output ?? 'Lab returned error'}`);
+    }
 
     // ── GAP 1 FIX: ImageLab devuelve image_data_url → subir a Storage ──────
     if (stage.labId === 'imagelab' && data.image_data_url) {
