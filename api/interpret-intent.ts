@@ -9,7 +9,7 @@
 
 declare const process: { env: Record<string, string | undefined> };
 
-const ANTHROPIC_API_KEY = (import.meta as any).env.ANTHROPIC_API_KEY as string;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';
 
 const INTERPRET_SYSTEM_PROMPT = `Eres el motor de interpretación del Orchestrator de Unreal>ille Studio.
 
