@@ -1,4 +1,5 @@
-// UNRLVL — Orchestrator v2.2 Core Types
+// UNRLVL — Orchestrator v2.3 Core Types
+// v2.3: meta LabId + publish_organic FlowObjective
 
 export type LabId =
   | "blueprintlab"
@@ -8,7 +9,8 @@ export type LabId =
   | "voicelab"
   | "sociallab"
   | "weblab"
-  | "klaviyo";    // ← añadido v2.2: destino de email_sequence
+  | "klaviyo"     // añadido v2.2: destino de email_sequence
+  | "meta";       // añadido v2.3: publicación organic + ads via Meta MCP
 
 export type FlowStageStatus =
   | "pending"
@@ -35,7 +37,7 @@ export type PlatformId =
   | "YOUTUBE"
   | "LINKEDIN"
   | "THREADS"
-  | "EMAIL";     // ← añadido v2.2
+  | "EMAIL";     // añadido v2.2
 
 export type FlowObjective =
   | "social_post"
@@ -44,7 +46,8 @@ export type FlowObjective =
   | "landing_page"
   | "brand_content"
   | "ecommerce_listing"
-  | "email_sequence"; // ← añadido v2.2
+  | "email_sequence"    // añadido v2.2
+  | "publish_organic";  // añadido v2.3: flujo completo copylab → sociallab → meta publish
 
 export type EmailSequenceType =
   | "abandoned_cart"
@@ -69,7 +72,7 @@ export interface FlowStage {
   completedAt?: string;
   errorMsg?: string;
   mockOutput?: string;
-  pack_id?: string;       // ← añadido v2.2: referencia al pack de CopyLab
+  pack_id?: string;       // añadido v2.2: referencia al pack de CopyLab
 }
 
 // ── SEQUENCE CONTEXT ─────────────────────────────────────────────────────────

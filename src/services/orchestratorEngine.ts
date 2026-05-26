@@ -1,5 +1,10 @@
 /**
- * UNRLVL — Orchestrator Engine v2.2
+ * UNRLVL — Orchestrator Engine v2.3
+ *
+ * v2.3 changelog (2026-05-26):
+ * - types.ts: LabId += 'meta', FlowObjective += 'publish_organic'
+ * - executeStage(): labId === 'meta' → executeMetaStage handler
+ * - Meta MCP llamado via fetch directo (mismo patrón que Klaviyo)
  *
  * v2.2 changelog (2026-05-18):
  * - types.ts: LabId += 'klaviyo', FlowObjective += 'email_sequence', InterpretResult += sequence_type/context
@@ -24,6 +29,8 @@ import type {
 
 const SB_URL = (import.meta as any).env.VITE_SUPABASE_URL as string;
 const SB_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY as string;
+const META_MCP_URL = (import.meta as any).env.VITE_META_MCP_URL as string
+  ?? 'https://unrlvl-meta-mcp.vercel.app/api/mcp/mcp';
 
 // ── LAB CONFIG ────────────────────────────────────────────────────────────────
 
@@ -96,9 +103,14 @@ function fallbackResult(): InterpretResult {
         estimatedSeconds: 8, mockOutput: 'Copy generado.',
       },
       {
-        order: 2, labId: 'sociallab', label: 'Programar post',
+        order: 2, labId: 'sociallab', label: 'Encolar post',
         description: 'Encolar en SocialLab', requiresApproval: false,
         estimatedSeconds: 2, mockOutput: 'Post encolado.',
+      },
+      {
+        order: 3, labId: 'meta', label: 'Publicar',
+        description: 'Publicar via Meta MCP', requiresApproval: true,
+        estimatedSeconds: 3, mockOutput: 'Publicado.',
       },
     ],
     complianceFlags:  [],
@@ -124,9 +136,14 @@ export async function executeStage(
   options: ExecuteStageOptions = {},
 ): Promise<string> {
 
-  // Klaviyo: handler especial — parse + Supabase write + EF deploy
+  // Klaviyo: handler especial
   if (stage.labId === 'klaviyo') {
     return executeKlaviyoStage(stage, options);
+  }
+
+  // Meta MCP: handler especial — publish organic posts
+  if (stage.labId === 'meta') {
+    return executeMetaStage(stage, options);
   }
 
   // Labs estándar: fetch al endpoint del lab
@@ -185,6 +202,38 @@ export async function executeStage(
   }
 }
 
+// ── META STAGE HANDLER ────────────────────────────────────────────────────────
+
+async function executeMetaStage(
+  stage: FlowStage,
+  options: ExecuteStageOptions,
+): Promise<string> {
+  const brandId = options.brandId ?? '';
+  if (!brandId) return '[META] Error: brandId requerido para publicar.';
+
+  try {
+    // Llama a /api/publish de SocialLab — publica todos los pending_publish de la marca
+    const configs = await getLabConfigs();
+    const socialConfig = configs.find(c => c.lab_key === 'sociallab');
+    const socialBase = socialConfig?.api_endpoint ?? 'https://social-lab-flame.vercel.app';
+
+    const res = await fetch(`${socialBase}/api/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ brand_id: brandId }),
+    });
+
+    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+    const data = await res.json() as { output?: string; published?: number; failed?: number };
+    return data.output ?? `Publicados: ${data.published ?? 0} · Fallidos: ${data.failed ?? 0}`;
+
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[OrchestratorEngine] executeMetaStage:`, msg);
+    return `Error publicando via Meta: ${msg}`;
+  }
+}
+
 // ── KLAVIYO STAGE HANDLER ─────────────────────────────────────────────────────
 
 async function executeKlaviyoStage(
@@ -196,7 +245,6 @@ async function executeKlaviyoStage(
   const seqCtx     = options.sequenceContext ?? null;
   const prevOutputs = options.previousOutputs ?? {};
 
-  // Output de CopyLab: buscar en previousOutputs
   const copyLabOutput =
     prevOutputs[`copylab_${meta.position}_${meta.language}`]
     ?? prevOutputs['copylab_output']
@@ -209,7 +257,6 @@ async function executeKlaviyoStage(
 
   const sequenceIdFromPrev = prevOutputs['sequence_id'] ?? null;
 
-  // Sequence awareness: leer mechanism de la pieza anterior
   let previousMechanism = 'none';
   const position = typeof meta.position === 'number' ? meta.position : 1;
 
@@ -250,7 +297,6 @@ async function executeKlaviyoStage(
     sequenceIdFromPrev ?? undefined,
   );
 
-  // Propagar sequence_id para el siguiente stage
   if (result.sequenceId) {
     prevOutputs['sequence_id'] = result.sequenceId;
   }
