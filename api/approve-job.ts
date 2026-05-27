@@ -64,7 +64,10 @@ function htmlPage(title: string, message: string, color: string): string {
 }
 
 async function handleLegacyGet(req: Request): Promise<Response> {
-  const url    = new URL(req.url);
+  // En Node runtime de Vercel, req.url puede ser una path relativa (ej '/api/approve-job?token=...').
+  // new URL() exige URL absoluta o base. Usamos el header 'host' como base, o placeholder.
+  const host = req.headers.get('host') ?? 'orchestrator-unrlvl.vercel.app';
+  const url    = new URL(req.url, `https://${host}`);
   const token  = url.searchParams.get('token');
   const action = url.searchParams.get('action');
 
@@ -132,21 +135,38 @@ interface SbResult<T> {
   envMissing?: boolean;
 }
 
-function checkEnv(): { ok: boolean; missing: string[] } {
+function checkEnv(): { ok: boolean; missing: string[]; reason?: string } {
   const missing: string[] = [];
-  if (!SB_URL()) missing.push('SUPABASE_URL');
-  if (!SB_KEY()) missing.push('SUPABASE_SERVICE_ROLE_KEY');
-  return { ok: missing.length === 0, missing };
+  const url = SB_URL();
+  const key = SB_KEY();
+  if (!url) missing.push('SUPABASE_URL');
+  if (!key) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+  if (missing.length) return { ok: false, missing };
+  if (!/^https?:\/\//i.test(url)) {
+    return { ok: false, missing: ['SUPABASE_URL'], reason: `SUPABASE_URL no tiene protocolo (valor='${url.slice(0, 50)}...'). Debe empezar con https://` };
+  }
+  return { ok: true, missing: [] };
+}
+
+// Timeout defensivo para fetches a Supabase — si la URL es malformada o hay
+// problema de red, evita que la function de Vercel se cuelgue hasta el 504.
+const SB_FETCH_TIMEOUT_MS = 8000;
+
+function sbFetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), SB_FETCH_TIMEOUT_MS);
+  return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(id));
 }
 
 async function sbFetchJob(jobId: string): Promise<SbResult<Record<string, unknown>>> {
-  if (!SB_URL() || !SB_KEY()) {
-    return { data: null, status: 0, body: 'env vars vacías en runtime', ok: false, envMissing: true };
+  const env = checkEnv();
+  if (!env.ok) {
+    return { data: null, status: 0, body: env.reason ?? `env missing: ${env.missing.join(',')}`, ok: false, envMissing: true };
   }
   const url = `${SB_URL()}/rest/v1/lab_jobs?id=eq.${encodeURIComponent(jobId)}&limit=1`;
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await sbFetchWithTimeout(url, {
       headers: {
         apikey:        SB_KEY(),
         Authorization: `Bearer ${SB_KEY()}`,
@@ -173,12 +193,13 @@ async function sbFetchJob(jobId: string): Promise<SbResult<Record<string, unknow
 }
 
 async function sbPatchJob(jobId: string, body: Record<string, unknown>): Promise<SbResult<true>> {
-  if (!SB_URL() || !SB_KEY()) {
-    return { data: null, status: 0, body: 'env vars vacías en runtime', ok: false, envMissing: true };
+  const env = checkEnv();
+  if (!env.ok) {
+    return { data: null, status: 0, body: env.reason ?? `env missing: ${env.missing.join(',')}`, ok: false, envMissing: true };
   }
   let res: Response;
   try {
-    res = await fetch(`${SB_URL()}/rest/v1/lab_jobs?id=eq.${encodeURIComponent(jobId)}`, {
+    res = await sbFetchWithTimeout(`${SB_URL()}/rest/v1/lab_jobs?id=eq.${encodeURIComponent(jobId)}`, {
       method: 'PATCH',
       headers: {
         apikey:         SB_KEY(),
@@ -201,12 +222,13 @@ async function sbPatchJob(jobId: string, body: Record<string, unknown>): Promise
 }
 
 async function sbInsertPublishChild(payload: Record<string, unknown>): Promise<SbResult<string>> {
-  if (!SB_URL() || !SB_KEY()) {
-    return { data: null, status: 0, body: 'env vars vacías en runtime', ok: false, envMissing: true };
+  const env = checkEnv();
+  if (!env.ok) {
+    return { data: null, status: 0, body: env.reason ?? `env missing: ${env.missing.join(',')}`, ok: false, envMissing: true };
   }
   let res: Response;
   try {
-    res = await fetch(`${SB_URL()}/rest/v1/lab_jobs`, {
+    res = await sbFetchWithTimeout(`${SB_URL()}/rest/v1/lab_jobs`, {
       method: 'POST',
       headers: {
         apikey:         SB_KEY(),
