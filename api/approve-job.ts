@@ -107,10 +107,20 @@ async function handleLegacyGet(req: Request): Promise<Response> {
 }
 
 // ── JSON POST (Claude / Ayra) ────────────────────────────────────────────────
+// Headers Accept-Profile / Content-Profile fuerzan el schema 'public' explícitamente.
+// Defensa por si en el futuro PostgREST añade otros schemas (intel, content) al db.schemas
+// y el default cambia. La tabla canónica es public.lab_jobs.
+
 async function sbFetchJob(jobId: string): Promise<Record<string, unknown> | null> {
   const res = await fetch(
     `${SB_URL()}/rest/v1/lab_jobs?id=eq.${jobId}&limit=1`,
-    { headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}` } }
+    {
+      headers: {
+        apikey:           SB_KEY(),
+        Authorization:    `Bearer ${SB_KEY()}`,
+        'Accept-Profile': 'public',
+      },
+    }
   );
   if (!res.ok) return null;
   const data = await res.json();
@@ -121,9 +131,10 @@ async function sbPatchJob(jobId: string, body: Record<string, unknown>): Promise
   const res = await fetch(`${SB_URL()}/rest/v1/lab_jobs?id=eq.${jobId}`, {
     method: 'PATCH',
     headers: {
-      apikey: SB_KEY(),
-      Authorization: `Bearer ${SB_KEY()}`,
-      'Content-Type': 'application/json',
+      apikey:            SB_KEY(),
+      Authorization:     `Bearer ${SB_KEY()}`,
+      'Content-Type':    'application/json',
+      'Content-Profile': 'public',
     },
     body: JSON.stringify(body),
   });
@@ -134,10 +145,11 @@ async function sbInsertPublishChild(payload: Record<string, unknown>): Promise<s
   const res = await fetch(`${SB_URL()}/rest/v1/lab_jobs`, {
     method: 'POST',
     headers: {
-      apikey: SB_KEY(),
-      Authorization: `Bearer ${SB_KEY()}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=representation',
+      apikey:            SB_KEY(),
+      Authorization:     `Bearer ${SB_KEY()}`,
+      'Content-Type':    'application/json',
+      'Content-Profile': 'public',
+      Prefer:            'return=representation',
     },
     body: JSON.stringify(payload),
   });
