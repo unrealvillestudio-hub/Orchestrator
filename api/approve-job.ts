@@ -1,5 +1,5 @@
 /**
- * UNRLVL Orchestrator — api/approve-job.ts v3.0
+ * UNRLVL Orchestrator — api/approve-job.ts v3.1
  *
  * Dual-mode handler:
  *
@@ -15,11 +15,18 @@
  *                                        approval_payload=<copia del padre>) para arrancar Stage 5+6.
  *        → CORS * para que Claude/Vercel MCP pueda llamar desde Anthropic.
  *
- * Runtime: edge.
+ * Runtime: Node.js (default Vercel serverless).
+ *
+ * v3.1 (2026-05-27): Migrado de Edge a Node runtime.
+ *   El Edge bundle no capturaba SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
+ *   en runtime — process.env devolvía '' y todas las requests a Supabase
+ *   resultaban en 401 Invalid API key. trigger-job.ts ya corre en Node y
+ *   lee las mismas vars sin problema. No hay razón para usar Edge en este
+ *   endpoint (no usa waitUntil, no es streaming, no requiere baja latencia
+ *   global). Web APIs (Request/Response/URL/fetch) funcionan en Node 18+.
  */
 
 declare const process: { env: Record<string, string | undefined> };
-export const config = { runtime: 'edge' };
 
 const SB_URL = () => process.env.SUPABASE_URL ?? '';
 const SB_KEY = () => process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
@@ -242,7 +249,7 @@ async function handleJsonPost(req: Request): Promise<Response> {
     return new Response(JSON.stringify({
       error:   'env_missing',
       missing: env.missing,
-      message: `Vercel edge function no recibió env vars: ${env.missing.join(', ')}. Verifica que estén configuradas para Production/Preview/Development y que el último deploy las incluya.`,
+      message: `Vercel serverless function no recibió env vars: ${env.missing.join(', ')}. Verifica que estén configuradas para el environment activo (Production/Preview/Development) y que el último deploy las incluya.`,
     }), { status: 500, headers: JSON_CORS });
   }
 
