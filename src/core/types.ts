@@ -84,6 +84,20 @@ export interface SequenceContext {
   klaviyo_template_ids: Record<string, string> | null;
 }
 
+// ── BRAND CONTEXT (from brand_cache_snapshots) ───────────────────────────────
+// Inyectado por orchestratorEngine.loadBrandContext antes de copylab.
+// Permite que el copy se genere alineado con voice/persona/tono/beneficios/ICP.
+
+export interface BrandContext {
+  voice?:    string;
+  persona?:  string;
+  tone?:     string;
+  benefits?: string[];
+  icp?:      string;
+  // Permite extensiones futuras del snapshot sin romper el tipo.
+  [key: string]: unknown;
+}
+
 // ── FLOW PLAN ────────────────────────────────────────────────────────────────
 
 export interface FlowPlan {
@@ -104,6 +118,8 @@ export interface FlowPlan {
   // email_sequence fields
   sequence_type?:    EmailSequenceType | null;
   sequence_context?: SequenceContext | null;
+  // Brand context cache (cargado en runtime por loadBrandContext)
+  brandContext?:     BrandContext | null;
 }
 
 // ── BRAND ────────────────────────────────────────────────────────────────────

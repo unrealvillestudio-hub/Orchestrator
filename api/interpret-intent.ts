@@ -82,7 +82,7 @@ export default async function handler(req: Request): Promise<Response> {
     });
   }
 
-  let body: { prompt?: string };
+  let body: { prompt?: string; brand_id?: string };
   try {
     body = await req.json();
   } catch {
@@ -113,6 +113,27 @@ export default async function handler(req: Request): Promise<Response> {
     }
   } catch { /* no bloqueamos si falla */ }
 
+  // Si llega brand_id, intentamos enriquecer con brand_cache_snapshots para que
+  // Haiku/Sonnet genere descriptions de stages más alineados con la marca.
+  // Fallback silencioso si no existe snapshot — el flujo sigue funcionando igual.
+  let brandContextHint = '';
+  if (body.brand_id) {
+    try {
+      const sbCacheRes = await fetch(
+        `${process.env.SUPABASE_URL}/rest/v1/brand_cache_snapshots?brand_id=eq.${encodeURIComponent(body.brand_id)}&select=voice,persona,tone,benefits,icp,snapshot&order=created_at.desc&limit=1`,
+        { headers: { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '', Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''}` } }
+      );
+      if (sbCacheRes.ok) {
+        const rows = await sbCacheRes.json() as Array<Record<string, unknown>>;
+        if (rows.length) {
+          const row = rows[0];
+          const snap = row.snapshot ?? row;
+          brandContextHint = `\n\nCONTEXTO DE MARCA (${body.brand_id}) — usar para precisar descriptions de stages:\n${JSON.stringify(snap).slice(0, 1200)}`;
+        }
+      }
+    } catch { /* fallback silencioso */ }
+  }
+
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -124,7 +145,9 @@ export default async function handler(req: Request): Promise<Response> {
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 1024,
-        system: INTERPRET_SYSTEM_PROMPT + (brandList ? `\n\nBRANDS VÁLIDAS — ÚNICOS IDs permitidos para brandId: ${brandList}. Si el prompt no menciona ninguna explícitamente, usa brandId: null. NUNCA inventes un brand_id que no esté en esta lista.` : ''),
+        system: INTERPRET_SYSTEM_PROMPT
+          + (brandList ? `\n\nBRANDS VÁLIDAS — ÚNICOS IDs permitidos para brandId: ${brandList}. Si el prompt no menciona ninguna explícitamente, usa brandId: null. NUNCA inventes un brand_id que no esté en esta lista.` : '')
+          + brandContextHint,
         messages: [{ role: 'user', content: userPrompt }],
       }),
     });

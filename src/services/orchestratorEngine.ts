@@ -1,5 +1,10 @@
 /**
- * UNRLVL — Orchestrator Engine v2.4
+ * UNRLVL — Orchestrator Engine v2.5
+ *
+ * v2.5 changelog (2026-05-27):
+ * - loadBrandContext(): lee brand_cache_snapshots y memoiza por brandId.
+ * - executeStage(): antes de copylab, inyecta brand context en meta y previousOutputs.
+ *   Paridad con el PromptBuilder (Stage 1) del pipeline API-mode en lab-worker.
  *
  * v2.4 changelog (2026-05-26):
  * - executeStage(): imagelab stage → upload image_data_url a Supabase Storage
@@ -28,6 +33,7 @@ import type {
   FlowObjective,
   EmailSequenceType,
   SequenceContext,
+  BrandContext,
 } from '../core/types';
 
 const SB_URL = (import.meta as any).env.VITE_SUPABASE_URL as string;
@@ -129,6 +135,56 @@ function fallbackResult(): InterpretResult {
   };
 }
 
+// ── BRAND CONTEXT LOADER ──────────────────────────────────────────────────────
+// Lee public.brand_cache_snapshots y memoiza por brandId para evitar hits repetidos
+// durante la ejecución de un mismo flow. La invalidación natural ocurre al recargar
+// la app (cache vive en memoria del browser).
+
+const _brandContextCache: Map<string, BrandContext | null> = new Map();
+
+export async function loadBrandContext(brandId: string): Promise<BrandContext | null> {
+  if (!brandId) return null;
+  if (_brandContextCache.has(brandId)) return _brandContextCache.get(brandId) ?? null;
+
+  try {
+    const res = await fetch(
+      `${SB_URL}/rest/v1/brand_cache_snapshots?brand_id=eq.${encodeURIComponent(brandId)}&select=voice,persona,tone,benefits,icp,snapshot&order=created_at.desc&limit=1`,
+      { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
+    );
+    if (!res.ok) {
+      _brandContextCache.set(brandId, null);
+      return null;
+    }
+    const rows = await res.json() as Array<Record<string, unknown>>;
+    if (!rows.length) {
+      _brandContextCache.set(brandId, null);
+      return null;
+    }
+    const row = rows[0];
+    // El snapshot puede venir aplanado (columnas individuales) o anidado en .snapshot
+    const ctx: BrandContext = (typeof row.snapshot === 'object' && row.snapshot !== null)
+      ? row.snapshot as BrandContext
+      : {
+          voice:    row.voice    as string  | undefined,
+          persona:  row.persona  as string  | undefined,
+          tone:     row.tone     as string  | undefined,
+          benefits: row.benefits as string[] | undefined,
+          icp:      row.icp      as string  | undefined,
+        };
+    _brandContextCache.set(brandId, ctx);
+    return ctx;
+  } catch (err) {
+    console.warn('[OrchestratorEngine] loadBrandContext error:', err);
+    _brandContextCache.set(brandId, null);
+    return null;
+  }
+}
+
+export function invalidateBrandContextCache(brandId?: string): void {
+  if (brandId) _brandContextCache.delete(brandId);
+  else _brandContextCache.clear();
+}
+
 // ── EXECUTE STAGE ─────────────────────────────────────────────────────────────
 
 export interface ExecuteStageOptions {
@@ -157,6 +213,17 @@ export async function executeStage(
   const endpoint = `${config.api_endpoint}${config.execute_path}`;
   const meta     = (options.stageMeta ?? {}) as Record<string, unknown>;
   const seqCtx   = options.sequenceContext ?? null;
+
+  // Stage 1 paridad: para copylab cargamos brand_cache_snapshots y lo inyectamos
+  // en meta + previousOutputs.brand_context. Otros labs (imagelab, sociallab, meta)
+  // lo reciben implícito via previousOutputs si fue cargado en el copylab anterior.
+  let brandContext: BrandContext | null = null;
+  if (stage.labId === 'copylab' && options.brandId) {
+    brandContext = await loadBrandContext(options.brandId);
+    if (brandContext && options.previousOutputs) {
+      options.previousOutputs['brand_context'] = JSON.stringify(brandContext);
+    }
+  }
 
   try {
     const res = await fetch(endpoint, {
@@ -187,6 +254,7 @@ export async function executeStage(
           psycho_presets:    meta.psycho_presets ?? [],
           mechanism_primary: meta.mechanism_primary ?? null,
           utm_content:       seqCtx?.utm_content ?? null,
+          brand_context:     brandContext ?? null,
         },
         previousOutputs: options.previousOutputs ?? {},
       }),
