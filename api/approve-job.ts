@@ -107,55 +107,125 @@ async function handleLegacyGet(req: Request): Promise<Response> {
 }
 
 // ── JSON POST (Claude / Ayra) ────────────────────────────────────────────────
-// Headers Accept-Profile / Content-Profile fuerzan el schema 'public' explícitamente.
-// Defensa por si en el futuro PostgREST añade otros schemas (intel, content) al db.schemas
-// y el default cambia. La tabla canónica es public.lab_jobs.
+// public.lab_jobs es la tabla canónica. PostgREST resuelve /rest/v1/<tabla> al
+// schema 'public' por default — sin necesidad de Accept-Profile / Content-Profile.
+// (Esos headers, añadidos como defensa preventiva en el commit anterior,
+// causaban 406 Not Acceptable en algunos setups donde 'public' no estaba listado
+// explícitamente en Exposed Schemas. El bug enmascaraba todo como '404 job_not_found'.)
+//
+// Las tres funciones ahora devuelven un objeto rico con el outcome real para que
+// el handler distinga entre: not_found (job real ausente) vs supabase_error
+// (problema técnico: 4xx/5xx, env vars vacías, RLS, etc.).
 
-async function sbFetchJob(jobId: string): Promise<Record<string, unknown> | null> {
-  const res = await fetch(
-    `${SB_URL()}/rest/v1/lab_jobs?id=eq.${jobId}&limit=1`,
-    {
+interface SbResult<T> {
+  data:        T | null;
+  status:      number;
+  body:        string;
+  ok:          boolean;
+  envMissing?: boolean;
+}
+
+function checkEnv(): { ok: boolean; missing: string[] } {
+  const missing: string[] = [];
+  if (!SB_URL()) missing.push('SUPABASE_URL');
+  if (!SB_KEY()) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+  return { ok: missing.length === 0, missing };
+}
+
+async function sbFetchJob(jobId: string): Promise<SbResult<Record<string, unknown>>> {
+  if (!SB_URL() || !SB_KEY()) {
+    return { data: null, status: 0, body: 'env vars vacías en runtime', ok: false, envMissing: true };
+  }
+  const url = `${SB_URL()}/rest/v1/lab_jobs?id=eq.${encodeURIComponent(jobId)}&limit=1`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
       headers: {
-        apikey:           SB_KEY(),
-        Authorization:    `Bearer ${SB_KEY()}`,
-        'Accept-Profile': 'public',
+        apikey:        SB_KEY(),
+        Authorization: `Bearer ${SB_KEY()}`,
+        Accept:        'application/json',
       },
-    }
-  );
-  if (!res.ok) return null;
-  const data = await res.json();
-  return Array.isArray(data) && data.length ? data[0] : null;
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[approve-job sbFetchJob] network', msg);
+    return { data: null, status: 0, body: `network: ${msg}`, ok: false };
+  }
+  const bodyText = await res.text();
+  if (!res.ok) {
+    console.error(`[approve-job sbFetchJob] ${res.status}`, bodyText.slice(0, 500));
+    return { data: null, status: res.status, body: bodyText, ok: false };
+  }
+  try {
+    const arr = JSON.parse(bodyText);
+    const row = Array.isArray(arr) && arr.length ? arr[0] : null;
+    return { data: row, status: res.status, body: bodyText, ok: true };
+  } catch (err) {
+    return { data: null, status: res.status, body: bodyText, ok: false };
+  }
 }
 
-async function sbPatchJob(jobId: string, body: Record<string, unknown>): Promise<boolean> {
-  const res = await fetch(`${SB_URL()}/rest/v1/lab_jobs?id=eq.${jobId}`, {
-    method: 'PATCH',
-    headers: {
-      apikey:            SB_KEY(),
-      Authorization:     `Bearer ${SB_KEY()}`,
-      'Content-Type':    'application/json',
-      'Content-Profile': 'public',
-    },
-    body: JSON.stringify(body),
-  });
-  return res.ok;
+async function sbPatchJob(jobId: string, body: Record<string, unknown>): Promise<SbResult<true>> {
+  if (!SB_URL() || !SB_KEY()) {
+    return { data: null, status: 0, body: 'env vars vacías en runtime', ok: false, envMissing: true };
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${SB_URL()}/rest/v1/lab_jobs?id=eq.${encodeURIComponent(jobId)}`, {
+      method: 'PATCH',
+      headers: {
+        apikey:         SB_KEY(),
+        Authorization:  `Bearer ${SB_KEY()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[approve-job sbPatchJob] network', msg);
+    return { data: null, status: 0, body: `network: ${msg}`, ok: false };
+  }
+  const bodyText = await res.text();
+  if (!res.ok) {
+    console.error(`[approve-job sbPatchJob] ${res.status}`, bodyText.slice(0, 500));
+    return { data: null, status: res.status, body: bodyText, ok: false };
+  }
+  return { data: true, status: res.status, body: bodyText, ok: true };
 }
 
-async function sbInsertPublishChild(payload: Record<string, unknown>): Promise<string | null> {
-  const res = await fetch(`${SB_URL()}/rest/v1/lab_jobs`, {
-    method: 'POST',
-    headers: {
-      apikey:            SB_KEY(),
-      Authorization:     `Bearer ${SB_KEY()}`,
-      'Content-Type':    'application/json',
-      'Content-Profile': 'public',
-      Prefer:            'return=representation',
-    },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  return Array.isArray(data) ? data[0]?.id ?? null : data?.id ?? null;
+async function sbInsertPublishChild(payload: Record<string, unknown>): Promise<SbResult<string>> {
+  if (!SB_URL() || !SB_KEY()) {
+    return { data: null, status: 0, body: 'env vars vacías en runtime', ok: false, envMissing: true };
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${SB_URL()}/rest/v1/lab_jobs`, {
+      method: 'POST',
+      headers: {
+        apikey:         SB_KEY(),
+        Authorization:  `Bearer ${SB_KEY()}`,
+        'Content-Type': 'application/json',
+        Prefer:         'return=representation',
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[approve-job sbInsertPublishChild] network', msg);
+    return { data: null, status: 0, body: `network: ${msg}`, ok: false };
+  }
+  const bodyText = await res.text();
+  if (!res.ok) {
+    console.error(`[approve-job sbInsertPublishChild] ${res.status}`, bodyText.slice(0, 500));
+    return { data: null, status: res.status, body: bodyText, ok: false };
+  }
+  try {
+    const data = JSON.parse(bodyText);
+    const id = Array.isArray(data) ? data[0]?.id ?? null : data?.id ?? null;
+    return { data: id, status: res.status, body: bodyText, ok: true };
+  } catch (err) {
+    return { data: null, status: res.status, body: bodyText, ok: false };
+  }
 }
 
 interface ApprovePostBody {
@@ -166,6 +236,16 @@ interface ApprovePostBody {
 }
 
 async function handleJsonPost(req: Request): Promise<Response> {
+  // Pre-check env vars. Si faltan, devolvemos 500 explícito en vez de 404 enmascarado.
+  const env = checkEnv();
+  if (!env.ok) {
+    return new Response(JSON.stringify({
+      error:   'env_missing',
+      missing: env.missing,
+      message: `Vercel edge function no recibió env vars: ${env.missing.join(', ')}. Verifica que estén configuradas para Production/Preview/Development y que el último deploy las incluya.`,
+    }), { status: 500, headers: JSON_CORS });
+  }
+
   let body: ApprovePostBody = {};
   try { body = await req.json(); } catch {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: JSON_CORS });
@@ -177,7 +257,21 @@ async function handleJsonPost(req: Request): Promise<Response> {
     return new Response(JSON.stringify({ error: "decision must be 'approved' or 'rejected'" }),
       { status: 400, headers: JSON_CORS });
 
-  const job = await sbFetchJob(body.job_id);
+  const fetchResult = await sbFetchJob(body.job_id);
+
+  // Distinguir: error de Supabase vs job realmente no existe.
+  if (!fetchResult.ok) {
+    return new Response(JSON.stringify({
+      error:       'supabase_error',
+      message:     'No se pudo leer lab_jobs desde Supabase',
+      sb_status:   fetchResult.status,
+      sb_body:     fetchResult.body.slice(0, 500),
+      job_id:      body.job_id,
+      env_missing: fetchResult.envMissing ?? false,
+    }), { status: 500, headers: JSON_CORS });
+  }
+
+  const job = fetchResult.data;
   if (!job)
     return new Response(JSON.stringify({ error: 'job_not_found', job_id: body.job_id }),
       { status: 404, headers: JSON_CORS });
@@ -197,15 +291,19 @@ async function handleJsonPost(req: Request): Promise<Response> {
   const nowIso = new Date().toISOString();
 
   if (body.decision === 'rejected') {
-    const ok = await sbPatchJob(body.job_id, {
+    const patchResult = await sbPatchJob(body.job_id, {
       status:          'rejected',
       rejected_reason: body.notes ?? 'rechazado sin notas',
       decision_notes:  body.notes ?? null,
       approved_by:     body.approved_by ?? null,
       completed_at:    nowIso,
     });
-    if (!ok)
-      return new Response(JSON.stringify({ error: 'patch_failed' }), { status: 500, headers: JSON_CORS });
+    if (!patchResult.ok)
+      return new Response(JSON.stringify({
+        error:     'patch_failed',
+        sb_status: patchResult.status,
+        sb_body:   patchResult.body.slice(0, 500),
+      }), { status: 500, headers: JSON_CORS });
 
     return new Response(JSON.stringify({
       ok:      true,
@@ -216,18 +314,22 @@ async function handleJsonPost(req: Request): Promise<Response> {
   }
 
   // decision === 'approved'
-  const okPatch = await sbPatchJob(body.job_id, {
+  const patchResult = await sbPatchJob(body.job_id, {
     status:         'approved',
     approved_at:    nowIso,
     approved_by:    body.approved_by ?? 'sam',
     decision_notes: body.notes ?? null,
   });
-  if (!okPatch)
-    return new Response(JSON.stringify({ error: 'patch_failed' }), { status: 500, headers: JSON_CORS });
+  if (!patchResult.ok)
+    return new Response(JSON.stringify({
+      error:     'patch_failed',
+      sb_status: patchResult.status,
+      sb_body:   patchResult.body.slice(0, 500),
+    }), { status: 500, headers: JSON_CORS });
 
   // Disparar Stage 5+6 vía INSERT child job.
   // El pg_net trigger sobre lab_jobs despierta a lab-worker → processOrchestratorPublishJob.
-  const childId = await sbInsertPublishChild({
+  const insertResult = await sbInsertPublishChild({
     job_type:         'orchestrator_publish',
     parent_job_id:    body.job_id,
     brand_id:         job.brand_id,
@@ -238,17 +340,19 @@ async function handleJsonPost(req: Request): Promise<Response> {
     stage_outputs:    {},
   });
 
-  if (!childId) {
+  if (!insertResult.ok || !insertResult.data) {
     // El padre quedó aprobado pero el hijo no se creó. Reportamos el fallo a Claude.
     await sbPatchJob(body.job_id, {
       status:    'failed',
-      error_msg: 'approve-job: no se pudo crear job hijo orchestrator_publish',
+      error_msg: `approve-job: no se pudo crear job hijo orchestrator_publish (sb_status=${insertResult.status})`,
       failed_at_stage: 'sociallab',
     });
     return new Response(JSON.stringify({
-      ok:     false,
-      error:  'publish_child_insert_failed',
-      job_id: body.job_id,
+      ok:        false,
+      error:     'publish_child_insert_failed',
+      job_id:    body.job_id,
+      sb_status: insertResult.status,
+      sb_body:   insertResult.body.slice(0, 500),
     }), { status: 500, headers: JSON_CORS });
   }
 
@@ -256,7 +360,7 @@ async function handleJsonPost(req: Request): Promise<Response> {
     ok:               true,
     job_id:           body.job_id,
     status:           'approved',
-    publish_job_id:   childId,
+    publish_job_id:   insertResult.data,
     next:             'orchestrator_publish job disparado — lee status del publish_job_id',
   }), { status: 200, headers: JSON_CORS });
 }
