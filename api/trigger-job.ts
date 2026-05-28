@@ -1,19 +1,40 @@
 /**
- * UNRLVL Orchestrator — api/trigger-job.ts v4.0
+ * UNRLVL Orchestrator — api/trigger-job.ts v4.1
  *
  * Thin wrapper: valida input + INSERT en public.lab_jobs + 202 inmediato.
- * Todo el pipeline corre en lab-worker EF de Supabase (job_type='orchestrator').
- * El pg_net trigger sobre lab_jobs despierta a lab-worker automáticamente.
+ * Todo el pipeline corre en lab-worker EF de Supabase. El pg_net trigger
+ * sobre lab_jobs despierta a lab-worker automáticamente.
  *
  * POST /api/trigger-job
  * Body: {
- *   brand_id: string,
- *   prompt: string,
- *   platforms?: string[],      // default: ['INSTAGRAM', 'FACEBOOK']
- *   aspect_ratio?: string,     // default: '4:5'
- *   auto_publish?: boolean,    // default: false — si true salta approval gate
- *   secret?: string,           // opcional si TRIGGER_SECRET está configurado
+ *   brand_id:     string,
+ *   prompt:       string,
+ *   platforms?:   string[],                          // default: ['INSTAGRAM', 'FACEBOOK']
+ *   aspect_ratio?: string,                           // default: '4:5'
+ *   auto_publish?: boolean,                          // default: false (true salta approval gate)
+ *   job_type?:    'content' | 'teaser' | 'announcement', // default: 'content'
+ *   language?:    'EN' | 'ES' | 'EN+ES',             // default: 'EN'
+ *   secret?:      string,                            // opcional si TRIGGER_SECRET configurado
  * }
+ *
+ * ─── ASPECT RATIOS ────────────────────────────────────────────────────────
+ * Vertex AI Imagen acepta solo: 1:1, 3:4, 4:3, 9:16, 16:9.
+ * lab-worker mapea automáticamente antes de llamar a ImageLab:
+ *   4:5  → 3:4   (Instagram feed estándar)
+ *   5:4  → 4:3
+ *   otros → 1:1  (fallback seguro)
+ * El job se INSERTA con el aspect_ratio original; el mapeo ocurre en EF.
+ *
+ * ─── JOB_TYPE ─────────────────────────────────────────────────────────────
+ *   'content'      → flow normal: CopyLab interpretativo + ImageLab + SocialLab.
+ *   'teaser'       → CopyLab en mode='literal': prompt se respeta como copy
+ *                    inamovible, solo se generan caption + hashtags.
+ *   'announcement' → idéntico a teaser.
+ *
+ * ─── LANGUAGE ─────────────────────────────────────────────────────────────
+ *   'EN'    → todo el output en inglés.
+ *   'ES'    → todo el output en español.
+ *   'EN+ES' → bilingual (relevante sobre todo en literal mode).
  *
  * Returns: { job_id, status: 'queued' }  (202 Accepted)
  *
@@ -36,12 +57,17 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type, x-trigger-secret',
 };
 
+type JobType  = 'content' | 'teaser' | 'announcement';
+type Language = 'EN' | 'ES' | 'EN+ES';
+
 interface TriggerBody {
   brand_id?:     string;
   prompt?:       string;
   platforms?:    string[];
   aspect_ratio?: string;
   auto_publish?: boolean;
+  job_type?:     JobType;
+  language?:     Language;
 }
 
 async function insertOrchestratorJob(payload: Record<string, unknown>): Promise<string | null> {
@@ -96,15 +122,21 @@ export default async function handler(req: Request): Promise<Response> {
   const platforms    = body.platforms    ?? ['INSTAGRAM', 'FACEBOOK'];
   const aspect_ratio = body.aspect_ratio ?? '4:5';
   const auto_publish = body.auto_publish ?? false;
+  const job_type: JobType  = body.job_type ?? 'content';
+  const language: Language = body.language ?? 'EN';
 
-  // INSERT lab_jobs. pg_net trigger despierta a lab-worker → processOrchestratorJob.
+  // INSERT lab_jobs. pg_net trigger despierta a lab-worker.
+  // lab-worker v3.1+ enruta job_type ∈ {orchestrator, content, teaser, announcement}
+  // a processOrchestratorJob; aplica mapAspectForImagen y elige CopyLab mode
+  // según job_type (literal para teaser/announcement).
   const jobId = await insertOrchestratorJob({
-    job_type:     'orchestrator',
+    job_type,
     brand_id:     body.brand_id,
     prompt:       body.prompt,
     platforms,
     aspect_ratio,
     auto_publish,
+    language,
     status:       'queued',
     stage_outputs: {},
   });
