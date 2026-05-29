@@ -47,7 +47,24 @@
 
 declare const process: { env: Record<string, string | undefined> };
 
-const SB_URL = () => process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '';
+// Normalize SUPABASE_URL — same defensive parse used by ImageLab and CopyLab.
+// Tolerates the three shapes commonly pasted into Vercel env panels:
+//   1) bare project ref     "amlvyycfepwhiindxgzw"
+//   2) bare hostname        "amlvyycfepwhiindxgzw.supabase.co"
+//   3) full url             "https://amlvyycfepwhiindxgzw.supabase.co"
+// All three end up as `https://{ref}.supabase.co`. Prevents silent fetch
+// failures when the env was saved without a protocol.
+function normalizeSupabaseUrl(raw: string | undefined): string {
+  if (!raw) return '';
+  const s = raw.trim().replace(/\/+$/, '');
+  if (!s) return '';
+  if (s.startsWith('https://') || s.startsWith('http://')) return s;
+  if (s.includes('.supabase.co')) return `https://${s}`;
+  if (/^[a-z]{20}$/.test(s)) return `https://${s}.supabase.co`;
+  return s;
+}
+
+const SB_URL = () => normalizeSupabaseUrl(process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL);
 const SB_KEY = () => process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
 
 const CORS = {

@@ -11,6 +11,20 @@ declare const process: { env: Record<string, string | undefined> };
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';
 
+// Normalize SUPABASE_URL — tolerates bare project ref, bare hostname, or
+// full URL. See trigger-job.ts for the full explanation.
+function normalizeSupabaseUrl(raw: string | undefined): string {
+  if (!raw) return '';
+  const s = raw.trim().replace(/\/+$/, '');
+  if (!s) return '';
+  if (s.startsWith('https://') || s.startsWith('http://')) return s;
+  if (s.includes('.supabase.co')) return `https://${s}`;
+  if (/^[a-z]{20}$/.test(s)) return `https://${s}.supabase.co`;
+  return s;
+}
+const SB_URL = () => normalizeSupabaseUrl(process.env.SUPABASE_URL);
+const SB_KEY = () => process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+
 const INTERPRET_SYSTEM_PROMPT = `Eres el motor de interpretación del Orchestrator de Unreal>ille Studio.
 
 Tu trabajo: analizar el prompt del usuario y devolver un JSON estructurado que describa el flujo de labs a ejecutar.
@@ -104,8 +118,8 @@ export default async function handler(req: Request): Promise<Response> {
   let brandList = '';
   try {
     const sbRes = await fetch(
-      `${process.env.SUPABASE_URL}/rest/v1/brands?select=id,display_name&status=eq.active`,
-      { headers: { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '' } }
+      `${SB_URL()}/rest/v1/brands?select=id,display_name&status=eq.active`,
+      { headers: { apikey: SB_KEY() } }
     );
     if (sbRes.ok) {
       const brands = await sbRes.json() as Array<{id: string; display_name: string}>;
@@ -120,8 +134,8 @@ export default async function handler(req: Request): Promise<Response> {
   if (body.brand_id) {
     try {
       const sbCacheRes = await fetch(
-        `${process.env.SUPABASE_URL}/rest/v1/brand_cache_snapshots?brand_id=eq.${encodeURIComponent(body.brand_id)}&select=voice,persona,tone,benefits,icp,snapshot&order=created_at.desc&limit=1`,
-        { headers: { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '', Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''}` } }
+        `${SB_URL()}/rest/v1/brand_cache_snapshots?brand_id=eq.${encodeURIComponent(body.brand_id)}&select=voice,persona,tone,benefits,icp,snapshot&order=created_at.desc&limit=1`,
+        { headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}` } }
       );
       if (sbCacheRes.ok) {
         const rows = await sbCacheRes.json() as Array<Record<string, unknown>>;

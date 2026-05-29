@@ -28,7 +28,19 @@
 
 declare const process: { env: Record<string, string | undefined> };
 
-const SB_URL = () => process.env.SUPABASE_URL ?? '';
+// Normalize SUPABASE_URL — tolerates bare project ref, bare hostname, or
+// full URL. See trigger-job.ts for the full explanation.
+function normalizeSupabaseUrl(raw: string | undefined): string {
+  if (!raw) return '';
+  const s = raw.trim().replace(/\/+$/, '');
+  if (!s) return '';
+  if (s.startsWith('https://') || s.startsWith('http://')) return s;
+  if (s.includes('.supabase.co')) return `https://${s}`;
+  if (/^[a-z]{20}$/.test(s)) return `https://${s}.supabase.co`;
+  return s;
+}
+
+const SB_URL = () => normalizeSupabaseUrl(process.env.SUPABASE_URL);
 const SB_KEY = () => process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
 
 const JSON_CORS = {
