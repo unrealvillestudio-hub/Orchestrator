@@ -68,6 +68,12 @@ interface TriggerBody {
   auto_publish?: boolean;
   job_type?:     JobType;
   language?:     Language;
+  // Canal de publicación. ImageLab usa este valor para resolver imagelab_presets
+  // (lookup por brand_id+canal). Convención UPPERCASE:
+  //   INSTAGRAM_FEED · INSTAGRAM_REEL · INSTAGRAM_STORY ·
+  //   FACEBOOK_FEED · TIKTOK · YOUTUBE_SHORT · ...
+  // Default: 'INSTAGRAM_FEED'.
+  canal?:        string;
 }
 
 async function insertOrchestratorJob(payload: Record<string, unknown>): Promise<string | null> {
@@ -124,11 +130,13 @@ export default async function handler(req: Request): Promise<Response> {
   const auto_publish = body.auto_publish ?? false;
   const job_type: JobType  = body.job_type ?? 'content';
   const language: Language = body.language ?? 'EN';
+  const canal              = (body.canal ?? 'INSTAGRAM_FEED').toUpperCase();
 
   // INSERT lab_jobs. pg_net trigger despierta a lab-worker.
-  // lab-worker v3.1+ enruta job_type ∈ {orchestrator, content, teaser, announcement}
-  // a processOrchestratorJob; aplica mapAspectForImagen y elige CopyLab mode
-  // según job_type (literal para teaser/announcement).
+  // lab-worker v3.2+ usa el canal para forward a ImageLab → ImageLab hace
+  // lookup en imagelab_presets por (brand_id, canal) y construye un prompt
+  // brand-specific (composición, lighting, color grading, mood, brand_dna…)
+  // en vez de generar imágenes genéricas con personas AI-look.
   const jobId = await insertOrchestratorJob({
     job_type,
     brand_id:     body.brand_id,
@@ -137,6 +145,7 @@ export default async function handler(req: Request): Promise<Response> {
     aspect_ratio,
     auto_publish,
     language,
+    canal,
     status:       'queued',
     stage_outputs: {},
   });
