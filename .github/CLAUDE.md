@@ -1,10 +1,10 @@
-# Claude Code — reglas para este repo
+# Claude Code -- reglas para este repo
 
 ## OBLIGATORIO antes de cualquier commit
 - Trabajar siempre en una branch, nunca en main directamente
 - Crear la branch con: `git checkout -b fix/descripcion` o `feat/descripcion`
 - `tsc --noEmit` o `vite build` debe pasar antes de commitear
-- Commit message descriptivo en inglés o español
+- Commit message descriptivo en ingles o espanol
 
 ## OBLIGATORIO antes de hacer push
 - Confirmar que el build local pasa
