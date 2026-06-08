@@ -1,6 +1,25 @@
 # CLAUDE.md — Orchestrator
 _Contexto persistente para Claude Code. No editar manualmente._
 
+---
+
+## ⚠️ GOBERNANZA CC — NIVEL ALTA COMPLEJIDAD (leer ANTES de tocar nada)
+
+Antes de cualquier acción en este repositorio, Claude Code DEBE cargar y obedecer el protocolo central:
+**`https://unrlvl-context.vercel.app/protocols/CC_PROTOCOL.md`** (cargar con `Vercel:web_fetch_vercel_url` o `curl`).
+
+**Este repo es parte del pipeline de contenido — un error rompe el flujo de varias marcas. Reglas:**
+
+1. **CONTEXT FILES NUNCA SE REEMPLAZAN.** Se actualizan preservando historia: lo nuevo al tope, lo anterior archivado debajo, nunca borrado. Aplica a todo `.json`/`.md` de contexto. Antes de commitear: verificar que el diff no BORRA historia.
+
+2. **PUSH:** `unrlvl-context` → nunca push directo, nunca por CC (solo Sam vía GitHub Desktop). Este repo y demás repos de código → branch + PR, nunca merge propio. CC nunca mergea por su cuenta. CC limpia sus worktrees al cerrar un PR.
+
+3. **VERIFICACIÓN REFORZADA POR COMPLEJIDAD:** cambios que afecten `lab_jobs`, `lab_configs`, Edge Functions, o el flujo del pipeline requieren mensaje de verificación EXPLÍCITO a Sam antes de commitear (objetivo, pasos, archivos, repos y EFs afectados), porque un error se propaga aguas abajo a CopyLab/ImageLab/Meta y a todas las marcas. Reportar al final con el formato de CC_PROTOCOL (incluida PRESERVACIÓN DE CONTEXTO).
+
+Ante cualquier duda → preguntar a Sam, no asumir.
+
+---
+
 ## Qué es este repo
 El Orchestrator es el cerebro del pipeline de contenido UNRLVL. Recibe un `brand_id` + `prompt`, inserta un job en `public.lab_jobs`, y el trigger pg_net despierta a `lab-worker` EF que ejecuta el pipeline completo en Supabase.
 
