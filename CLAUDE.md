@@ -32,10 +32,12 @@ El Orchestrator es el cerebro del pipeline de contenido UNRLVL. Recibe un `brand
 
 ## Stack técnico
 
-### API routes
-- **`api/trigger-job.ts`** — `POST /api/trigger-job` — inserta job en `lab_jobs`, retorna `{ job_id, status: 'queued' }`
-- **`api/approve-job.ts`** — `POST /api/approve-job` — Sam aprueba contenido pendiente → publica en Meta
-- **`api/interpret-intent.ts`** — `POST /api/interpret-intent` — Claude haiku interpreta intent de Sam en lenguaje natural
+### API routes (verificado contra el código)
+- **`api/trigger-job.ts`** (v4.1, Node runtime) — `POST /api/trigger-job` — valida input, INSERT en `public.lab_jobs` vía REST (`Prefer: return=representation`), retorna 202 `{ job_id, status: 'queued' }`. `normalizeSupabaseUrl()` tolera 3 formatos de `SUPABASE_URL`. Auth opcional vía header `x-trigger-secret` (si `TRIGGER_SECRET` está set).
+- **`api/approve-job.ts`** (v3.1, **Node runtime** — migrado de Edge porque el Edge bundle no capturaba las env vars de Supabase → 401) — **dual-mode**:
+  - `GET ?token=&action=approve|reject` → flujo legacy HTML (email approvals), delega a la EF `approve-piece`.
+  - `POST { job_id, decision, notes?, approved_by? }` → flujo Claude/Ayra. UPDATE del job padre; si `approved`, **INSERT de un job hijo `orchestrator_publish`** (parent_job_id + approval_payload) que despierta a lab-worker para Stage 5+6. **La publicación a Meta NO ocurre aquí** — ocurre en lab-worker (EF). Distingue errores: `env_missing` / `supabase_error` / `job_not_found` / `invalid_state`.
+- **`api/interpret-intent.ts`** — `POST /api/interpret-intent` — Claude haiku interpreta intent de Sam en lenguaje natural.
 
 ### Variables de entorno (Vercel)
 ```
@@ -64,8 +66,8 @@ TRIGGER_SECRET               ← Opcional — auth header x-trigger-secret
    c. POST ImageLab /api/execute (con preset injection via imagelab_presets)
    d. Upload imagen → Supabase Storage (unrlvl-media bucket)
    e. UPDATE lab_jobs (status: 'pending_approval', approval_payload)
-5. Sam aprueba en Orchestrator UI → POST /api/approve-job
-6. approve-job.ts → Meta MCP → ig_create_container + ig_publish_container + fb_publish_post
+5. Sam aprueba en Orchestrator UI o vía Claude → POST /api/approve-job (Node runtime)
+6. approve-job UPDATE job padre → INSERT job hijo 'orchestrator_publish' → pg_net despierta lab-worker → lab-worker publica vía Meta MCP (ig_create_container + ig_publish_container + fb_publish_post)
 7. UPDATE lab_jobs (status: 'completed', output_parsed)
 ```
 
