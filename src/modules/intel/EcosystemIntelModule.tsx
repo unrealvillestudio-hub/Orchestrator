@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronDown, ChevronRight, Inbox, RefreshCw, Zap, Eye, FileText } from 'lucide-react';
+import { ChevronDown, ChevronRight, Inbox, RefreshCw, Zap, Telescope, Sprout } from 'lucide-react';
 import { cn } from '../../ui/components';
+import type { IidSession } from '../../services/iidInbound';
+import IidSeedsAdmin from '../iid/IidSeedsAdmin';
 
 // ── Supabase (same pattern as interpret-intent.ts) ─────────────────
 const SB_URL = (import.meta as any).env.VITE_SUPABASE_URL as string;
@@ -203,8 +205,8 @@ function FindingCard({ finding, agentMap, bandColor }: {
   );
 }
 
-// ── Main module ────────────────────────────────────────────────────
-export default function EcosystemIntelModule() {
+// ── Findings view (vista original) ──────────────────────────────────
+function FindingsView() {
   const [band, setBand]         = useState<Band>('top');
   const [findings, setFindings] = useState<Finding[]>([]);
   const [agents, setAgents]     = useState<Agent[]>([]);
@@ -326,6 +328,52 @@ export default function EcosystemIntelModule() {
             </motion.div>
           ))}
         </motion.div>
+      )}
+    </div>
+  );
+}
+
+// ── Main module ────────────────────────────────────────────────────
+// Admin: subpestañas Hallazgos | IID Seeds (cola/approve + capturar).
+// Sin sesión admin (no debería pasar): solo Hallazgos.
+type IntelTab = 'findings' | 'seeds';
+
+export default function EcosystemIntelModule({ session }: { session?: IidSession | null } = {}) {
+  const [tab, setTab] = useState<IntelTab>('findings');
+  const isAdmin = session?.role === 'admin';
+
+  if (!isAdmin || !session) return <FindingsView />;
+
+  const TABS: { id: IntelTab; label: string; icon: typeof Telescope }[] = [
+    { id: 'findings', label: 'Hallazgos', icon: Telescope },
+    { id: 'seeds',    label: 'IID Seeds', icon: Sprout },
+  ];
+
+  return (
+    <div>
+      <div className="max-w-3xl mx-auto px-6 pt-8">
+        <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 max-w-xs">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all font-body',
+                tab === t.id ? 'bg-accent text-black shadow' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
+              )}
+            >
+              <t.icon size={12} /> {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {tab === 'findings' ? (
+        <FindingsView />
+      ) : (
+        <div className="max-w-3xl mx-auto px-6 py-6 pb-24">
+          <IidSeedsAdmin session={session} />
+        </div>
       )}
     </div>
   );
