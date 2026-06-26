@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutGrid, Layers, History, Bell, Telescope } from 'lucide-react';
+import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout } from 'lucide-react';
 import { useFlowStore } from './store/useFlowStore';
 import { cn, GlowDot } from './ui/components';
 import HubModule from './modules/hub/HubModule';
@@ -9,6 +9,9 @@ import FlowExecutorModule from './modules/executor/FlowExecutorModule';
 import LaunchpadModule from './modules/launchpad/LaunchpadModule';
 import JobMonitorModule from './modules/monitor/JobMonitorModule';
 import EcosystemIntelModule from './modules/intel/EcosystemIntelModule';
+import LoginScreen from './modules/iid/LoginScreen';
+import IidSeedsCapture from './modules/iid/IidSeedsCapture';
+import type { IidSession } from './services/iidInbound';
 
 const BUILD_TAG = "OR_1.1";
 
@@ -35,7 +38,23 @@ const Logo = () => (
 
 export default function App() {
   const [view, setView] = useState<View>("hub");
+  const [session, setSession] = useState<IidSession | null>(null);
   const { activePlan, completedFlows, isInterpreting } = useFlowStore();
+
+  const logout = () => { setSession(null); setView("hub"); };
+
+  // ── Sin sesión → puerta única (login). Sesión en memoria: re-login al refrescar.
+  if (!session) {
+    return <LoginScreen onSession={setSession} />;
+  }
+
+  // ── Rol seeder → SOLO IID Seeds (captura). Resto del Orchestrator no renderiza
+  //    ni es alcanzable. El gate real lo refuerza la EF (seeder → 403 en approve/reject).
+  if (session.role === "seeder") {
+    return <SeederShell session={session} onLogout={logout} />;
+  }
+
+  // ── Rol admin → NAV completa + subpestaña IID Seeds dentro de IID Intel.
 
   const breadcrumb: Record<View, string> = {
     hub:       "Nuevo flujo",
@@ -115,6 +134,7 @@ export default function App() {
           <button className="p-2 hover:bg-zinc-800 rounded-xl transition-colors">
             <Bell size={15} className="text-zinc-600" />
           </button>
+          <SessionControl session={session} onLogout={logout} />
         </div>
       </header>
 
@@ -144,7 +164,7 @@ export default function App() {
           )}
           {view === "launchpad" && <LaunchpadModule />}
           {view === "monitor"   && <JobMonitorModule />}
-          {view === "intel"     && <EcosystemIntelModule />}
+          {view === "intel"     && <EcosystemIntelModule session={session} />}
         </motion.div>
       </AnimatePresence>
 
@@ -162,6 +182,64 @@ export default function App() {
           )}
         </div>
         <span className="text-[9px] font-mono text-accent/20">UNRLVL Orchestrator {BUILD_TAG}</span>
+      </footer>
+    </div>
+  );
+}
+
+// ── Indicador de sesión + logout (compartido) ──────────────────────────────────
+function SessionControl({ session, onLogout }: { session: IidSession; onLogout: () => void }) {
+  return (
+    <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+      <div className="hidden sm:flex flex-col items-end leading-none">
+        <span className="text-[11px] font-semibold text-zinc-300">{session.sub}</span>
+        <span className="text-[9px] font-mono uppercase tracking-widest text-accent/70">{session.role}</span>
+      </div>
+      <button
+        onClick={onLogout}
+        title="Cerrar sesión"
+        className="p-2 hover:bg-zinc-800 rounded-xl transition-colors text-zinc-600 hover:text-rose-400"
+      >
+        <LogOut size={15} />
+      </button>
+    </div>
+  );
+}
+
+// ── Shell del seeder: SOLO captura. NAV reducida a "IID Seeds". ─────────────────
+function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () => void }) {
+  return (
+    <div className="min-h-screen bg-[#050508] text-zinc-200 selection:bg-accent/30">
+      <header className="h-14 border-b border-zinc-800/60 px-5 flex items-center justify-between sticky top-0 bg-[#050508]/95 backdrop-blur-xl z-50">
+        <div className="flex items-center gap-3">
+          <div className="w-7 h-7 bg-accent rounded-lg flex items-center justify-center text-black">
+            <Sprout size={15} />
+          </div>
+          <div className="flex flex-col leading-none">
+            <span className="text-[13px] font-display font-bold text-accent tracking-tight">IID SEEDS</span>
+            <span className="text-[9px] font-mono text-zinc-600 uppercase tracking-widest">Sembrador</span>
+          </div>
+        </div>
+
+        {/* NAV reducida: único destino, no navegable a otra cosa */}
+        <nav className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800 rounded-xl p-1">
+          <span className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-accent text-black shadow-md shadow-accent/20">
+            <Sprout size={13} /> IID Seeds
+          </span>
+        </nav>
+
+        <div className="flex items-center gap-3">
+          <SessionControl session={session} onLogout={onLogout} />
+        </div>
+      </header>
+
+      <IidSeedsCapture session={session} />
+
+      <footer className="fixed bottom-0 left-0 right-0 h-7 border-t border-zinc-800/40 px-5 flex items-center justify-between bg-[#050508]/80 backdrop-blur-sm z-50">
+        <div className="flex items-center gap-1.5 text-[9px] font-mono text-zinc-800 uppercase tracking-widest">
+          <GlowDot color="#22c55e" pulse={false} /> Conectado
+        </div>
+        <span className="text-[9px] font-mono text-accent/20">UNRLVL IID · Sembrador</span>
       </footer>
     </div>
   );
