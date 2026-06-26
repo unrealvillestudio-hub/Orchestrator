@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Lock, ArrowRight, Telescope } from 'lucide-react';
+import { Lock, ArrowRight, Telescope, Eye, EyeOff } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import { login, IidError, type IidSession } from '../../services/iidInbound';
 
@@ -11,6 +11,7 @@ import { login, IidError, type IidSession } from '../../services/iidInbound';
  */
 export default function LoginScreen({ onSession }: { onSession: (s: IidSession) => void }) {
   const [password, setPassword] = useState('');
+  const [show, setShow]         = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
 
@@ -55,13 +56,22 @@ export default function LoginScreen({ onSession }: { onSession: (s: IidSession) 
             <div className="relative mt-2">
               <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
               <input
-                type="password"
+                type={show ? 'text' : 'password'}
                 autoFocus
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); setError(null); }}
                 placeholder="••••••••••"
-                className="w-full bg-[#050508] border border-zinc-800 rounded-xl pl-9 pr-3 py-2.5 text-sm text-white placeholder:text-zinc-700 outline-none focus:border-accent/60 transition-colors font-mono"
+                className="w-full bg-[#050508] border border-zinc-800 rounded-xl pl-9 pr-10 py-2.5 text-sm text-white placeholder:text-zinc-700 outline-none focus:border-accent/60 transition-colors font-mono"
               />
+              <button
+                type="button"
+                onClick={() => setShow((s) => !s)}
+                tabIndex={-1}
+                aria-label={show ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-zinc-600 hover:text-zinc-300 transition-colors"
+              >
+                {show ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
             </div>
           </label>
 

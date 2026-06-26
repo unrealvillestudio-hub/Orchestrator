@@ -216,10 +216,15 @@ function SeedReviewCard({ seed, session, opts, onResolved }: {
           <StatusBadge status={seed.status} />
         </div>
 
-        {/* Señal humana + criterio */}
+        {/* Señal humana + criterio + sugerencia de marca del seeder */}
         <div className="space-y-2">
           <Block label="Por qué importa (capturador)">{seed.raw_signal}</Block>
           {seed.seeder_rationale && <Block label="Criterio">{seed.seeder_rationale}</Block>}
+          {seed.seeder_brand_suggestion && (
+            <Block label="Marca sugerida por el seeder (pista, no ruteo)">
+              {brandName(opts, seed.seeder_brand_suggestion)}
+            </Block>
+          )}
         </div>
 
         {/* Destilado */}
@@ -368,6 +373,11 @@ function SeedReviewCard({ seed, session, opts, onResolved }: {
       </div>
     </motion.div>
   );
+}
+
+/** Resuelve el id de marca a su nombre legible (cae al id si no está en las opciones). */
+function brandName(opts: ListOptions, id: string): string {
+  return opts.brands.find((b) => b.id === id)?.name || id;
 }
 
 function Block({ label, children }: { label: string; children: React.ReactNode }) {

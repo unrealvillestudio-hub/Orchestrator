@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Link2, Sprout, RefreshCw, CheckCircle2, Inbox, MessageSquareQuote } from 'lucide-react';
+import { Link2, Sprout, RefreshCw, CheckCircle2, Inbox, MessageSquareQuote, Store } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import {
-  capture, list, IidError,
-  type IidSession, type Seed, type SeedStatus,
+  capture, list, listOptions, IidError,
+  type IidSession, type Seed, type SeedStatus, type ListOptions,
 } from '../../services/iidInbound';
 import { StatusBadge, fmtDate, HonestBanner } from './seedUi';
 
@@ -15,10 +15,11 @@ interface FormState {
   source_url: string;
   raw_signal: string;
   seeder_rationale: string;
+  seeder_brand_suggestion: string;
   handle: string;
 }
 
-const EMPTY: FormState = { source_url: '', raw_signal: '', seeder_rationale: '', handle: '' };
+const EMPTY: FormState = { source_url: '', raw_signal: '', seeder_rationale: '', seeder_brand_suggestion: '', handle: '' };
 
 /**
  * IidSeedsCapture — captura de semillas (seeder + admin).
@@ -32,6 +33,14 @@ export default function IidSeedsCapture({ session }: { session: IidSession }) {
 
   const [seeds, setSeeds]     = useState<Seed[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Marcas del scope del usuario (la EF ya filtra list_options por brand_scope).
+  const [brands, setBrands] = useState<ListOptions['brands']>([]);
+
+  const loadBrands = async () => {
+    try { setBrands((await listOptions(session.session_token)).brands ?? []); }
+    catch { setBrands([]); }
+  };
 
   const loadMine = async () => {
     setLoading(true);
@@ -48,9 +57,9 @@ export default function IidSeedsCapture({ session }: { session: IidSession }) {
     }
   };
 
-  useEffect(() => { loadMine(); }, []);
+  useEffect(() => { loadBrands(); loadMine(); }, []);
 
-  const canSubmit = form.source_url.trim() && form.raw_signal.trim() && !saving;
+  const canSubmit = form.source_url.trim() && form.raw_signal.trim() && form.seeder_brand_suggestion && !saving;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,6 +72,7 @@ export default function IidSeedsCapture({ session }: { session: IidSession }) {
         source_url: form.source_url.trim(),
         raw_signal: form.raw_signal.trim(),
         seeder_rationale: form.seeder_rationale.trim() || null,
+        seeder_brand_suggestion: form.seeder_brand_suggestion || null,
         handle: form.handle.trim() || null,
       });
       setDone(r.neutral_topic ?? 'Semilla registrada');
@@ -93,14 +103,18 @@ export default function IidSeedsCapture({ session }: { session: IidSession }) {
 
       {/* Form */}
       <form onSubmit={submit} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-5">
-        <Field label="Link del post" required>
+        <Field
+          label="Link de referencia (no se procesa — solo rastro de origen)"
+          required
+          hint="El sistema NO lee ni consume el contenido del link. La semilla es un disparador, no material a copiar."
+        >
           <div className="relative">
             <Link2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
             <input
               type="url"
               value={form.source_url}
               onChange={(e) => setForm({ ...form, source_url: e.target.value })}
-              placeholder="https://…"
+              placeholder="https://… (solo referencia, no se procesa)"
               className="w-full bg-[#050508] border border-zinc-800 rounded-xl pl-9 pr-3 py-2.5 text-sm text-white placeholder:text-zinc-700 outline-none focus:border-accent/60 transition-colors font-mono"
             />
           </div>
@@ -114,6 +128,27 @@ export default function IidSeedsCapture({ session }: { session: IidSession }) {
             placeholder="Lo que viste y por qué te llamó la atención…"
             className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-zinc-700 outline-none focus:border-accent/60 transition-colors resize-none leading-relaxed"
           />
+        </Field>
+
+        <Field
+          label="¿Para qué marca lo ves?"
+          required
+          hint="Tu sugerencia como capturador. Es una pista para Sam — no decide el ruteo (eso se define al aprobar)."
+        >
+          <div className="relative">
+            <Store size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+            <select
+              value={form.seeder_brand_suggestion}
+              onChange={(e) => setForm({ ...form, seeder_brand_suggestion: e.target.value })}
+              className={cn(
+                'w-full bg-[#050508] border rounded-xl pl-9 pr-3 py-2.5 text-sm text-white outline-none focus:border-accent/60 transition-colors',
+                form.seeder_brand_suggestion ? 'border-zinc-800' : 'border-amber-500/40'
+              )}
+            >
+              <option value="">— elegí una marca —</option>
+              {brands.map((b) => <option key={b.id} value={b.id}>{b.name || b.id}</option>)}
+            </select>
+          </div>
         </Field>
 
         <Field label="Tu criterio (opcional)" hint="Contexto de mercado / por qué encaja con una marca. No material original.">

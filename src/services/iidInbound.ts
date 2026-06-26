@@ -52,6 +52,7 @@ export interface Seed {
   handle: string | null;
   raw_signal: string;
   seeder_rationale: string | null;
+  seeder_brand_suggestion?: string | null; // pista del seeder (NO el mapeo real); la EF la sirve tras su PR
   captured_by: string;
   neutral_topic: string | null;
   mapped_brand_id: string | null;
@@ -139,7 +140,14 @@ export function login(password: string): Promise<IidSession> {
 /** Captura una semilla. captured_by lo deriva la EF del JWT (no del body). */
 export function capture(
   token: string,
-  input: { source_url: string; raw_signal: string; seeder_rationale?: string | null; handle?: string | null; lane?: string },
+  input: {
+    source_url: string;
+    raw_signal: string;
+    seeder_rationale?: string | null;
+    seeder_brand_suggestion?: string | null;
+    handle?: string | null;
+    lane?: string;
+  },
 ): Promise<CaptureResult> {
   return call<CaptureResult>({
     action: 'capture',
@@ -147,6 +155,7 @@ export function capture(
     source_url: input.source_url,
     raw_signal: input.raw_signal,
     seeder_rationale: input.seeder_rationale ?? null,
+    seeder_brand_suggestion: input.seeder_brand_suggestion ?? null,
     handle: input.handle ?? null,
     ...(input.lane ? { lane: input.lane } : {}),
   });
