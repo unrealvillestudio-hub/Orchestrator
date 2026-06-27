@@ -29,14 +29,16 @@ export interface ExpertCaptureInput {
   /** brand_id del scope del seeder; la EF re-valida (marca fuera de scope → 403). */
   applies_to_brands: string[];
   creator_handle?: string | null;
-  /** Rastro(s) de origen — NO se procesa (mismo encuadre anti-IP que Basic). */
-  source_refs?: string[] | null;
-  tags?: string[] | null;
   /**
-   * Caption(s) manual(es) pegado(s) por el seeder — complementa el OCR.
-   * Campo extra: la EF v1 solo lee lo que conoce e ignora lo demás (no rompe el contrato).
+   * Rastro(s) de origen — jsonb libre que la EF persiste tal cual (no procesa).
+   * DEBE ser array: la EF hace `Array.isArray(source_refs) ? source_refs : []`,
+   * así que un objeto suelto se descartaría. Lleva los link(s) como strings y,
+   * opcionalmente, el caption manual como elemento objeto `{ caption }`. Así el
+   * caption se persiste sin reabrir la EF (que solo lee creator_handle/source_refs/
+   * frames/applies_to_brands/tags — `captions` suelto se perdía). Encuadre anti-IP igual que Basic.
    */
-  captions?: string | null;
+  source_refs?: Array<string | { caption: string }> | null;
+  tags?: string[] | null;
 }
 
 export interface ExpertCaptureResult {
@@ -63,7 +65,6 @@ export async function submitExpertCapture(
     ...(input.creator_handle ? { creator_handle: input.creator_handle } : {}),
     ...(input.source_refs && input.source_refs.length ? { source_refs: input.source_refs } : {}),
     ...(input.tags && input.tags.length ? { tags: input.tags } : {}),
-    ...(input.captions ? { captions: input.captions } : {}),
   };
 
   let res: Response;

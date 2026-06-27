@@ -211,13 +211,19 @@ export default function ExpertCapture({ session }: { session: IidSession }) {
     setSubmitError(null);
     setResult(null);
     try {
+      // source_refs es jsonb que la EF persiste tal cual, PERO descarta a [] si no es
+      // array. Por eso mantenemos array: link(s) como strings + caption como objeto
+      // { caption } dentro del mismo array (no como campo suelto, que la EF ignoraba).
+      const refs: Array<string | { caption: string }> = [];
+      if (sourceRefs.trim()) refs.push(sourceRefs.trim());
+      if (captions.trim()) refs.push({ caption: captions.trim() });
+
       const r = await submitExpertCapture(session.session_token, {
         frames,
         applies_to_brands: selectedBrands,
         creator_handle: creatorHandle.trim() || null,
-        source_refs: sourceRefs.trim() ? [sourceRefs.trim()] : null,
+        source_refs: refs.length ? refs : null,
         tags: tags.trim() ? tags.split(',').map((t) => t.trim()).filter(Boolean) : null,
-        captions: captions.trim() || null,
       });
       setResult(r);
       setPhase('ready');
