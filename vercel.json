@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/extract-frames.ts": {
+      "maxDuration": 60,
+      "includeFiles": "node_modules/ffmpeg-static/**"
+    }
+  }
+}
