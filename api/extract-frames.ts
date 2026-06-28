@@ -111,11 +111,11 @@ function objectUrl(videoPath: string): string {
   return `${SB_URL()}/storage/v1/object/${BUCKET}/${safe}`;
 }
 
-async function downloadVideo(videoPath: string): Promise<{ ok: boolean; status: number; buf?: Buffer }> {
+async function downloadVideo(videoPath: string): Promise<{ ok: boolean; status: number; buf?: Buffer; body?: string }> {
   const res = await fetch(objectUrl(videoPath), {
     headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}` },
   });
-  if (!res.ok) return { ok: false, status: res.status };
+  if (!res.ok) return { ok: false, status: res.status, body: (await res.text().catch(() => '')).slice(0, 300) };
   const buf = Buffer.from(await res.arrayBuffer());
   return { ok: true, status: res.status, buf };
 }
@@ -191,7 +191,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const dl = await downloadVideo(videoPath);
     if (!dl.ok || !dl.buf) {
       if (dl.status === 404) return res.status(404).json({ error: 'video_not_found', video_path: videoPath });
-      return res.status(502).json({ error: 'download_failed', sb_status: dl.status, video_path: videoPath });
+      return res.status(502).json({ error: 'download_failed', sb_status: dl.status, sb_body: dl.body ?? '', key_len: SB_KEY().length, video_path: videoPath });
     }
     downloaded = true;
     await writeFile(inputPath, dl.buf);
