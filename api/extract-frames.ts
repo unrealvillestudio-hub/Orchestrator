@@ -32,7 +32,13 @@ import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
 import { mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import ffmpegPath from 'ffmpeg-static';
+import ffmpegStatic from 'ffmpeg-static';
+
+// El default export de ffmpeg-static es la RUTA del binario (string) o null.
+// Bajo el typecheck de Vercel (@vercel/node) el default import se tipa como el
+// módulo y no como string → TS2769 al pasarlo a spawn. En runtime (esbuild) el
+// valor ya es el string; este const explícito alinea el tipo con la realidad.
+const ffmpegPath: string | null = ffmpegStatic as unknown as string | null;
 
 // ── Parámetros configurables ───────────────────────────────────────────────────
 const MAX_FRAMES = 15;      // tope de frames a extraer
@@ -130,7 +136,7 @@ function runFfmpeg(args: string[]): Promise<{ code: number; stderr: string }> {
     const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     const timer = setTimeout(() => { proc.kill('SIGKILL'); reject(new Error('ffmpeg timeout')); }, FFMPEG_TIMEOUT_MS);
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stderr?.on('data', (d) => { stderr += d.toString(); });
     proc.on('error', (e) => { clearTimeout(timer); reject(e); });
     proc.on('close', (code) => { clearTimeout(timer); resolve({ code: code ?? -1, stderr }); });
   });
