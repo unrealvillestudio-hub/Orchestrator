@@ -59,8 +59,11 @@ function normalizeSupabaseUrl(raw: string | undefined): string {
   return s;
 }
 const SB_URL = () => normalizeSupabaseUrl(process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL);
-const SB_KEY = () => process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-const JWT_SECRET = () => process.env.ORCHESTRATOR_NSCF_IID_INTEL_JWT_SECRET ?? '';
+const SB_KEY = () => (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim();
+// .trim() defensivo: un secret pegado en el panel de Vercel suele arrastrar un \n o
+// espacios al final, que cambian los bytes del HMAC → la firma del JWT no valida (401)
+// aunque el valor "se vea" idéntico al de Supabase. El secret canónico no lleva espacios.
+const JWT_SECRET = () => (process.env.ORCHESTRATOR_NSCF_IID_INTEL_JWT_SECRET ?? '').trim();
 
 const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
