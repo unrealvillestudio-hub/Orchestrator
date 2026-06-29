@@ -4,6 +4,9 @@
     "api/extract-frames.ts": {
       "maxDuration": 60,
       "includeFiles": "node_modules/ffmpeg-static/**"
+    },
+    "api/sign-upload.ts": {
+      "maxDuration": 15
     }
   }
 }

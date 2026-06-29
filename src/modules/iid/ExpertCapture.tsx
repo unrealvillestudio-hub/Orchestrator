@@ -1,152 +1,47 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Clapperboard, Film, CheckCircle2, AlertTriangle, Store, MessageSquareQuote,
+  Clapperboard, UploadCloud, CheckCircle2, AlertTriangle, Store, MessageSquareQuote,
   Link2, Tag, Sparkles, RefreshCw,
 } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import { listOptions, IidError, type IidSession, type ListOptions } from '../../services/iidInbound';
-import { submitExpertCapture, type ExpertCaptureResult } from '../../services/iidExpert';
+import {
+  submitExpertCapture, signUpload, uploadToSignedUrl, extractFrames,
+  type ExpertCaptureResult,
+} from '../../services/iidExpert';
 import { HonestBanner } from './seedUi';
 
 /* ════════════════════════════════════════════════════════════════════════════
- * PARÁMETROS DE EXTRACCIÓN — tunear acá tras la prueba real en el navegador
- * de Marisol. Son el único punto de ajuste del payload vs. legibilidad del OCR.
- * ════════════════════════════════════════════════════════════════════════════ */
-const MAX_FRAMES = 15;       // tope de frames por envío (no reventar el body de la EF)
-const TARGET_WIDTH = 720;    // ancho al redibujar (alto se calcula por aspect ratio)
-const JPEG_QUALITY = 0.8;    // calidad JPEG del canvas (0–1)
-const SEEK_TIMEOUT_MS = 8000; // safety: si un seek nunca dispara 'seeked', abortamos
-
-/* ════════════════════════════════════════════════════════════════════════════
- * EXTRACCIÓN DE FRAMES — canvas nativo, CERO dependencias externas.
- * Carga el video en un <video> oculto, busca N timestamps equiespaciados,
- * dibuja cada frame en un <canvas> redimensionado y exporta JPEG base64.
- * ════════════════════════════════════════════════════════════════════════════ */
-
-interface ExtractionOutput {
-  frames: string[];   // data URLs JPEG
-  duration: number;   // segundos
-  width: number;      // ancho de salida (canvas)
-  height: number;     // alto de salida (canvas)
-}
-
-/** Espera un evento del <video>; rechaza ante 'error' (códec no soportado) o timeout. */
-function waitFor(
-  video: HTMLVideoElement,
-  event: 'loadedmetadata' | 'seeked',
-  timeoutMs: number,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let done = false;
-    const cleanup = () => {
-      video.removeEventListener(event, onOk);
-      video.removeEventListener('error', onErr);
-      clearTimeout(timer);
-    };
-    const onOk = () => { if (done) return; done = true; cleanup(); resolve(); };
-    const onErr = () => { if (done) return; done = true; cleanup(); reject(new Error('decode')); };
-    const timer = setTimeout(() => { if (done) return; done = true; cleanup(); reject(new Error('timeout')); }, timeoutMs);
-    video.addEventListener(event, onOk);
-    video.addEventListener('error', onErr);
-  });
-}
-
-/**
- * Extrae hasta MAX_FRAMES del video. Lanza Error con código legible en .message:
- *   'decode'   → el navegador no pudo decodificar (códec/formato no soportado)
- *   'timeout'  → un seek se colgó
- *   'empty'    → duración/dimensiones inválidas
- */
-async function extractFrames(
-  file: File,
-  onProgress?: (n: number, total: number) => void,
-): Promise<ExtractionOutput> {
-  const url = URL.createObjectURL(file);
-  const video = document.createElement('video');
-  video.muted = true;
-  video.playsInline = true;
-  video.preload = 'auto';
-  video.crossOrigin = 'anonymous';
-  video.src = url;
-
-  try {
-    await waitFor(video, 'loadedmetadata', SEEK_TIMEOUT_MS);
-
-    const duration = video.duration;
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
-    if (!isFinite(duration) || duration <= 0 || !vw || !vh) {
-      throw new Error('empty');
-    }
-
-    // Lienzo de salida redimensionado (mantiene aspect ratio).
-    const scale = Math.min(1, TARGET_WIDTH / vw);
-    const w = Math.round(vw * scale);
-    const h = Math.round(vh * scale);
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('decode');
-
-    // Timestamps equiespaciados, tomados en el centro de cada segmento.
-    const total = Math.max(1, Math.min(MAX_FRAMES, Math.ceil(duration)));
-    const frames: string[] = [];
-    for (let i = 0; i < total; i++) {
-      const t = (duration * (i + 0.5)) / total;
-      // Evita pedir exactamente el final (algunos navegadores no disparan 'seeked').
-      video.currentTime = Math.min(t, Math.max(0, duration - 0.05));
-      await waitFor(video, 'seeked', SEEK_TIMEOUT_MS);
-      ctx.drawImage(video, 0, 0, w, h);
-      frames.push(canvas.toDataURL('image/jpeg', JPEG_QUALITY));
-      onProgress?.(i + 1, total);
-    }
-
-    return { frames, duration, width: w, height: h };
-  } finally {
-    URL.revokeObjectURL(url);
-    video.removeAttribute('src');
-    video.load();
-  }
-}
-
-/** Tamaño aproximado del payload de frames en KB (para tunear MAX_FRAMES/calidad). */
-function approxPayloadKB(frames: string[]): number {
-  const chars = frames.reduce((acc, f) => acc + f.length, 0);
-  return Math.round(chars / 1024);
-}
-
-/* ════════════════════════════════════════════════════════════════════════════
- * COMPONENTE
- * ════════════════════════════════════════════════════════════════════════════ */
-
-type Phase = 'idle' | 'extracting' | 'ready' | 'sending';
-
-const EXTRACT_ERRORS: Record<string, string> = {
-  decode: 'Este formato de video no se pudo leer en tu navegador. Probá con otro clip (MP4/H.264 suele funcionar) o convertilo antes.',
-  timeout: 'La lectura del video tardó demasiado y se canceló. Probá con un clip más corto o liviano.',
-  empty: 'No se pudo leer la duración del video (archivo dañado o formato no soportado).',
-};
-
-/**
- * ExpertCapture — extracción de frames en el navegador + envío a iid-expert-ocr.
+ * ExpertCapture — captura de técnica (video) · Sprint #47 · E3b-2 (Vía D server-side)
  *
- * MÓDULO AISLADO (E3-FRONT). La envoltura de UI Expert completa (renombrar
- * Capturar→Basic, gating, etc.) es E5 — acá solo se prueba que la extracción
- * canvas + el envío funcionen end-to-end en el navegador real de Marisol.
+ * CAMBIO vs. E3-FRONT original: la extracción de frames ya NO ocurre en el navegador
+ * (canvas falló con HEVC/H.265). Ahora el flujo es server-side de punta a punta:
  *
- * Reusa el `session_token` de la sesión IID existente (mismo patrón que Basic).
- */
+ *   1. POST /api/sign-upload   → URL firmada (service_role server-side)
+ *   2. PUT del video crudo     → directo a esa URL (sin policy anon-insert)
+ *   3. POST /api/extract-frames → ffmpeg server-side extrae 15 frames JPEG ~720px
+ *   4. preview + envío a iid-expert-ocr (submitExpertCapture — INTACTO)
+ *
+ * Toda la maquinaria canvas (extractFrames local, waitFor, parámetros MAX_FRAMES/
+ * TARGET_WIDTH/JPEG_QUALITY) se jubiló — vive ahora en el servidor. La firma + el
+ * PUT + la extracción están en services/iidExpert.ts (tipados con IidError).
+ *
+ * MOUNT TEMPORAL (Expert prueba) — la envoltura definitiva es E5.
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+type Phase = 'idle' | 'uploading' | 'extracting' | 'ready' | 'sending';
+
 export default function ExpertCapture({ session }: { session: IidSession }) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [phase, setPhase] = useState<Phase>('idle');
+  const [isDragOver, setIsDragOver] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [uploadPct, setUploadPct] = useState(0);
   const [frames, setFrames] = useState<string[]>([]);
-  const [meta, setMeta] = useState<{ duration: number; width: number; height: number } | null>(null);
-  const [progress, setProgress] = useState<{ n: number; total: number } | null>(null);
-  const [extractError, setExtractError] = useState<string | null>(null);
+  const [meta, setMeta] = useState<{ duration: number | null; frameCount: number } | null>(null);
+  const [flowError, setFlowError] = useState<string | null>(null);
 
   // Form
   const [brands, setBrands] = useState<ListOptions['brands']>([]);
@@ -167,36 +62,72 @@ export default function ExpertCapture({ session }: { session: IidSession }) {
       .catch(() => setBrands([]));
   }, [session.session_token]);
 
-  const resetExtraction = () => {
+  const busy = phase === 'uploading' || phase === 'extracting' || phase === 'sending';
+
+  const resetFlow = () => {
     setFrames([]);
     setMeta(null);
-    setProgress(null);
-    setExtractError(null);
+    setUploadPct(0);
+    setFlowError(null);
     setResult(null);
     setSubmitError(null);
   };
 
-  const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    resetExtraction();
+  /** Flujo completo: sign → PUT → extract. */
+  const handleFile = async (file: File) => {
+    if (!file.type.startsWith('video/')) {
+      resetFlow();
+      setFileName(null);
+      setFlowError('Eso no parece un video. Arrastrá o elegí un archivo de video (MP4, MOV, etc.).');
+      setPhase('idle');
+      return;
+    }
+    resetFlow();
     setFileName(file.name);
-    setPhase('extracting');
-    setProgress({ n: 0, total: MAX_FRAMES });
+    setPhase('uploading');
+    setUploadPct(0);
     try {
-      const out = await extractFrames(file, (n, total) => setProgress({ n, total }));
-      setFrames(out.frames);
-      setMeta({ duration: out.duration, width: out.width, height: out.height });
+      // 1 · Firmar la URL de subida (service_role server-side).
+      const signed = await signUpload(session.session_token, file.name);
+      // 2 · PUT del video crudo a la URL firmada (con progreso).
+      await uploadToSignedUrl(signed.upload_url, file, (pct) => setUploadPct(pct));
+      // 3 · Extraer frames server-side (ffmpeg) — borra el video del bucket al terminar.
+      setPhase('extracting');
+      const ext = await extractFrames(session.session_token, signed.path);
+      setFrames(ext.frames);
+      setMeta({ duration: ext.duration_sec, frameCount: ext.frame_count });
       setPhase('ready');
     } catch (err) {
-      const code = err instanceof Error ? err.message : 'decode';
-      setExtractError(EXTRACT_ERRORS[code] ?? EXTRACT_ERRORS.decode);
+      const msg = err instanceof IidError ? err.message : 'No se pudo procesar el video. Reintentá.';
+      setFlowError(msg);
       setPhase('idle');
     } finally {
-      setProgress(null);
       // Permite re-elegir el mismo archivo (onChange no dispara si el value no cambia).
       if (fileRef.current) fileRef.current.value = '';
     }
+  };
+
+  const onPickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) void handleFile(file);
+  };
+
+  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (busy) return;
+    const file = e.dataTransfer.files?.[0];
+    if (file) void handleFile(file);
+  };
+
+  const onDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (!busy) setIsDragOver(true);
+  };
+
+  const onDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
   };
 
   const toggleBrand = (id: string) => {
@@ -229,16 +160,20 @@ export default function ExpertCapture({ session }: { session: IidSession }) {
       setPhase('ready');
     } catch (err) {
       let msg = err instanceof IidError ? err.message : 'No se pudo enviar la captura.';
-      // Caso esperado a tunear: payload demasiado grande para el body de la EF.
       if (err instanceof IidError && (err.status === 413 || /too large|payload|body/i.test(err.message))) {
-        msg = `El envío es demasiado grande (${approxPayloadKB(frames)} KB). Bajá MAX_FRAMES o JPEG_QUALITY en ExpertCapture.tsx y reintentá.`;
+        msg = 'El envío es demasiado grande para el lector de texto. Probá con un clip más corto.';
       }
       setSubmitError(msg);
       setPhase('ready');
     }
   };
 
-  const payloadKB = frames.length ? approxPayloadKB(frames) : 0;
+  // Texto del indicador de progreso por fase (flujo ~40-60s, que no parezca colgado).
+  const phaseLabel =
+    phase === 'uploading' ? `Subiendo video… ${uploadPct}%`
+    : phase === 'extracting' ? 'Extrayendo fotogramas…'
+    : phase === 'sending' ? 'Leyendo texto…'
+    : null;
 
   return (
     <div className="max-w-2xl mx-auto px-6 py-10 pb-24 space-y-8">
@@ -249,21 +184,21 @@ export default function ExpertCapture({ session }: { session: IidSession }) {
           <Clapperboard size={22} className="text-accent" /> Capturar técnica (video)
         </h2>
         <p className="text-sm text-zinc-500 mt-1">
-          Subí un clip ya descargado. Tu navegador extrae fotogramas y los manda al lector de texto en pantalla —
-          el video nunca sale de tu equipo entero, solo los fotogramas.
+          Subí un clip ya descargado. El servidor extrae fotogramas y los manda al lector de texto en pantalla —
+          el video se borra del servidor apenas se extraen los fotogramas.
         </p>
       </div>
 
       <HonestBanner />
 
-      {/* 1 · Input de video + extracción */}
+      {/* 1 · Drop zone + extracción */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-5">
         <div>
           <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">
             Video <span className="text-accent ml-1">*</span>
           </span>
           <span className="block text-[10px] text-zinc-600 mt-0.5 mb-2 font-body normal-case tracking-normal">
-            Se extraen hasta {MAX_FRAMES} fotogramas a {TARGET_WIDTH}px de ancho. El video no se sube — solo los fotogramas.
+            El video se sube al servidor, se extraen ~15 fotogramas y luego se borra. Arrastrá el clip o elegilo.
           </span>
 
           <input
@@ -271,49 +206,76 @@ export default function ExpertCapture({ session }: { session: IidSession }) {
             type="file"
             accept="video/*"
             onChange={onPickFile}
-            disabled={phase === 'extracting' || phase === 'sending'}
+            disabled={busy}
             className="hidden"
             id="expert-video-input"
           />
-          <label
-            htmlFor="expert-video-input"
+
+          {/* Zona drag-and-drop (con click → file picker) */}
+          <div
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onClick={() => { if (!busy) fileRef.current?.click(); }}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !busy) fileRef.current?.click(); }}
             className={cn(
-              'flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-dashed text-sm font-body cursor-pointer transition-colors',
-              phase === 'extracting' || phase === 'sending'
+              'flex flex-col items-center justify-center gap-2 w-full py-8 rounded-xl border border-dashed text-sm font-body transition-colors text-center',
+              busy
                 ? 'border-zinc-800 text-zinc-600 cursor-not-allowed'
-                : 'border-zinc-700 text-zinc-300 hover:border-accent/60 hover:text-accent'
+                : isDragOver
+                  ? 'border-accent bg-accent/[0.06] text-accent cursor-copy'
+                  : 'border-zinc-700 text-zinc-300 hover:border-accent/60 hover:text-accent cursor-pointer'
             )}
           >
-            <Film size={15} />
-            {fileName ? <span className="font-mono text-xs truncate max-w-[60%]">{fileName}</span> : 'Elegir clip de video'}
-          </label>
+            <UploadCloud size={22} className={isDragOver ? 'text-accent' : 'text-zinc-500'} />
+            {fileName ? (
+              <span className="font-mono text-xs truncate max-w-[80%]">{fileName}</span>
+            ) : (
+              <>
+                <span>{isDragOver ? 'Soltá el video acá' : 'Arrastrá el clip o hacé click para elegirlo'}</span>
+                <span className="text-[10px] text-zinc-600 font-mono">MP4 · MOV · WEBM · cualquier video</span>
+              </>
+            )}
+          </div>
         </div>
 
-        {/* Estado de extracción */}
-        {phase === 'extracting' && (
-          <div className="flex items-center gap-3 text-sm text-zinc-400">
-            <Spinner size={16} />
-            Extrayendo fotogramas{progress ? ` (${progress.n}/${progress.total})` : ''}…
+        {/* Estado del flujo (uploading / extracting / sending) */}
+        {phaseLabel && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-3 text-sm text-zinc-400">
+              <Spinner size={16} />
+              {phaseLabel}
+            </div>
+            {phase === 'uploading' && (
+              <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-accent transition-[width] duration-200"
+                  style={{ width: `${uploadPct}%` }}
+                />
+              </div>
+            )}
           </div>
         )}
 
-        {extractError && (
+        {flowError && (
           <div className="flex items-start gap-2.5 bg-rose-500/[0.07] border border-rose-500/25 rounded-xl px-4 py-3.5">
             <AlertTriangle size={18} className="text-rose-400 shrink-0 mt-0.5" />
-            <p className="text-sm text-rose-300 leading-snug">{extractError}</p>
+            <p className="text-sm text-rose-300 leading-snug">{flowError}</p>
           </div>
         )}
 
         {/* 4 · Preview de frames */}
-        {phase !== 'extracting' && frames.length > 0 && (
+        {!busy && frames.length > 0 && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">
                 {frames.length} fotograma{frames.length !== 1 ? 's' : ''}
-                {meta && <span className="text-zinc-600"> · {meta.duration.toFixed(1)}s · {meta.width}×{meta.height} · ~{payloadKB} KB</span>}
+                {meta?.duration != null && <span className="text-zinc-600"> · {meta.duration.toFixed(1)}s</span>}
               </p>
               <button
-                onClick={() => fileRef.current?.click()}
+                onClick={() => { if (!busy) fileRef.current?.click(); }}
                 className="flex items-center gap-1.5 text-[10px] font-mono text-zinc-600 hover:text-zinc-300 transition-colors"
               >
                 <RefreshCw size={11} /> Otro clip
@@ -441,7 +403,7 @@ export default function ExpertCapture({ session }: { session: IidSession }) {
             )}
           >
             {phase === 'sending'
-              ? <><Spinner size={15} /> Enviando {frames.length} fotogramas…</>
+              ? <><Spinner size={15} /> Leyendo texto…</>
               : <><Sparkles size={15} /> Capturar técnica</>}
           </button>
         </div>

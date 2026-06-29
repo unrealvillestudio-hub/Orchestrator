@@ -48,6 +48,97 @@ export interface ExpertCaptureResult {
   chars_extracted: number;
 }
 
+// ── E3b-2: puente de subida server-side ────────────────────────────────────────
+// El navegador NO puede escribir al bucket `iid-expert-uploads` con la anon key
+// (sin policy anon-insert — decisión cerrada). El flujo es:
+//   1. POST /api/sign-upload  → URL firmada server-side con service_role.
+//   2. PUT del video crudo a esa URL (el permiso viaja embebido en el token).
+//   3. POST /api/extract-frames → ffmpeg server-side devuelve frames base64.
+// Estas tres rutas son funciones Vercel del MISMO repo (Node-native), NO la EF
+// de Supabase — por eso usan rutas relativas `/api/*`, no `${SB_URL}/functions/v1`.
+
+/** Respuesta de `/api/sign-upload`. `upload_url` ya es absoluta y lista para el PUT. */
+export interface SignUploadResult {
+  ok: true;
+  /** Path relativo dentro del bucket (lo que después se manda a extract-frames como `video_path`). */
+  path: string;
+  /** URL absoluta firmada — `fetch(upload_url, { method:'PUT', body:file })` directo. */
+  upload_url: string;
+  /** Token firmado (informativo; el PUT ya lo lleva embebido en `upload_url`). */
+  token: string | null;
+}
+
+/** Respuesta de `/api/extract-frames` (contrato E3b-1, ya en main). */
+export interface ExtractFramesResult {
+  ok: true;
+  frames: string[];            // data URLs `data:image/jpeg;base64,…`
+  frame_count: number;
+  duration_sec: number | null;
+  video_deleted?: boolean;
+}
+
+/** Helper común para las rutas `/api/*` Node-native del repo. Conserva el manejo IidError. */
+async function callApi<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    throw new IidError('No se pudo contactar el servidor (red).', 0, { cause: String(err) });
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = (data && (data.error || data.detail || data.message)) || `Error ${res.status}`;
+    throw new IidError(String(msg), res.status, data);
+  }
+  return data as T;
+}
+
+/** Pide una signed upload URL para subir el video crudo (firma con service_role server-side). */
+export function signUpload(token: string, filename?: string | null): Promise<SignUploadResult> {
+  return callApi<SignUploadResult>('/api/sign-upload', {
+    session_token: token,
+    ...(filename ? { filename } : {}),
+  });
+}
+
+/**
+ * Sube el video a la signed upload URL vía PUT.
+ * Usa XHR (no fetch) para poder reportar progreso de subida (`onProgress`, 0–100).
+ * La URL lleva el permiso embebido — el navegador NUNCA usa la service_role.
+ */
+export function uploadToSignedUrl(
+  uploadUrl: string,
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', uploadUrl, true);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new IidError(`No se pudo subir el video (HTTP ${xhr.status}).`, xhr.status, xhr.responseText));
+    };
+    xhr.onerror = () => reject(new IidError('No se pudo subir el video (red).', 0, null));
+    xhr.send(file);
+  });
+}
+
+/** Extrae frames server-side (ffmpeg) del video ya subido. Borra el video del bucket al terminar. */
+export function extractFrames(token: string, videoPath: string): Promise<ExtractFramesResult> {
+  return callApi<ExtractFramesResult>('/api/extract-frames', {
+    session_token: token,
+    video_path: videoPath,
+  });
+}
+
 // ── Núcleo del fetch (mismo shape que iidInbound.call) ─────────────────────────
 
 /**
