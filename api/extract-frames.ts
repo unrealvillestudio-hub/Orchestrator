@@ -111,11 +111,17 @@ function objectUrl(videoPath: string): string {
   return `${SB_URL()}/storage/v1/object/${BUCKET}/${safe}`;
 }
 
-async function downloadVideo(videoPath: string): Promise<{ ok: boolean; status: number; buf?: Buffer; body?: string }> {
+async function downloadVideo(videoPath: string): Promise<{ ok: boolean; status: number; buf?: Buffer; body?: string; notFound?: boolean }> {
   const res = await fetch(objectUrl(videoPath), {
     headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}` },
   });
-  if (!res.ok) return { ok: false, status: res.status, body: (await res.text().catch(() => '')).slice(0, 300) };
+  if (!res.ok) {
+    const body = (await res.text().catch(() => '')).slice(0, 300);
+    // Supabase Storage devuelve HTTP 400 con body {"statusCode":"404","error":"not_found",…}
+    // cuando el objeto no existe — lo normalizamos a notFound para el 404 del contrato.
+    const notFound = res.status === 404 || /not_?found|object not found|"404"/i.test(body);
+    return { ok: false, status: res.status, body, notFound };
+  }
   const buf = Buffer.from(await res.arrayBuffer());
   return { ok: true, status: res.status, buf };
 }
@@ -190,8 +196,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 1 · Descargar el video del bucket.
     const dl = await downloadVideo(videoPath);
     if (!dl.ok || !dl.buf) {
-      if (dl.status === 404) return res.status(404).json({ error: 'video_not_found', video_path: videoPath });
-      return res.status(502).json({ error: 'download_failed', sb_status: dl.status, sb_body: dl.body ?? '', key_len: SB_KEY().length, video_path: videoPath });
+      if (dl.notFound) return res.status(404).json({ error: 'video_not_found', video_path: videoPath });
+      return res.status(502).json({ error: 'download_failed', sb_status: dl.status, sb_body: dl.body ?? '', video_path: videoPath });
     }
     downloaded = true;
     await writeFile(inputPath, dl.buf);
