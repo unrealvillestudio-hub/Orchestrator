@@ -124,6 +124,10 @@ function toAbsoluteUploadUrl(url: string): string {
 async function createSignedUpload(
   path: string,
 ): Promise<{ ok: boolean; status: number; url?: string; token?: string; body?: string }> {
+  // SIN body y SIN Content-Type: el path va en la URL. Si se declara
+  // Content-Type: application/json sin body, Storage responde 400
+  // ("Body cannot be empty when content-type is set to 'application/json'").
+  // Mismo patrón que extract-frames.ts (downloadVideo/deleteVideo): solo apikey + Bearer.
   const res = await fetch(
     `${SB_URL()}/storage/v1/object/upload/sign/${BUCKET}/${encodePath(path)}`,
     {
@@ -131,7 +135,6 @@ async function createSignedUpload(
       headers: {
         apikey: SB_KEY(),
         Authorization: `Bearer ${SB_KEY()}`,
-        'Content-Type': 'application/json',
       },
     },
   );
