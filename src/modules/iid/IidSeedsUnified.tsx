@@ -104,10 +104,18 @@ export default function IidSeedsUnified({ session }: { session: IidSession }) {
     setDone(null);
   };
 
-  /** Flujo completo del post: sign → PUT → extract. Imagen O video (mismo pipeline). */
+  /**
+   * Bifurca por tipo de archivo (E5a-fix):
+   *   · IMAGEN → ya ES el frame. Se lee en el navegador como data URL base64 y va
+   *     directo al OCR. Sin sign-upload ni extract-frames: ffmpeg falla con una
+   *     imagen fija (sin pista de video → 0 frames → 500 en /api/extract-frames).
+   *   · VIDEO  → flujo server-side intacto: sign-upload → PUT → extract-frames → frames.
+   * Ambos convergen en `frames: string[]` (1 para imagen, ~15 para video) → OCR.
+   */
   const handleFile = async (file: File) => {
-    const isMedia = file.type.startsWith('video/') || file.type.startsWith('image/');
-    if (!isMedia) {
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    if (!isVideo && !isImage) {
       resetFlow();
       setFileName(null);
       setFlowError('Eso no parece un post. Arrastrá o elegí una imagen o un video.');
@@ -116,6 +124,25 @@ export default function IidSeedsUnified({ session }: { session: IidSession }) {
     }
     resetFlow();
     setFileName(file.name);
+
+    // ── IMAGEN: la imagen es su propio frame. Sin subida al bucket ni ffmpeg.
+    if (isImage) {
+      try {
+        const dataUrl = await readFileAsDataURL(file);
+        setFrames([dataUrl]);       // frame único: el OCR (stripDataUrl) acepta data:image/…;base64
+        setPostPath(null);          // no toca el bucket → source_url será 'ocr-capture'
+        setMeta({ duration: null, frameCount: 1 });
+        setPhase('ready');
+      } catch {
+        setFlowError('No se pudo leer la imagen. Reintentá.');
+        setPhase('idle');
+      } finally {
+        if (fileRef.current) fileRef.current.value = '';
+      }
+      return;
+    }
+
+    // ── VIDEO: flujo server-side (sign-upload → PUT → extract-frames) — sin cambios.
     setPhase('uploading');
     setUploadPct(0);
     try {
@@ -521,6 +548,16 @@ export default function IidSeedsUnified({ session }: { session: IidSession }) {
       </div>
     </div>
   );
+}
+
+// ── Lectura de imagen → data URL base64 (para el OCR sin pasar por el bucket) ────
+function readFileAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error('No se pudo leer el archivo'));
+    reader.readAsDataURL(file);
+  });
 }
 
 // ── CheckChip (checkbox estilo chip) ────────────────────────────────────────────
