@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Clapperboard } from 'lucide-react';
+import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout } from 'lucide-react';
 import { useFlowStore } from './store/useFlowStore';
 import { cn, GlowDot } from './ui/components';
 import HubModule from './modules/hub/HubModule';
@@ -10,8 +10,7 @@ import LaunchpadModule from './modules/launchpad/LaunchpadModule';
 import JobMonitorModule from './modules/monitor/JobMonitorModule';
 import EcosystemIntelModule from './modules/intel/EcosystemIntelModule';
 import LoginScreen from './modules/iid/LoginScreen';
-import IidSeedsCapture from './modules/iid/IidSeedsCapture';
-import ExpertCapture from './modules/iid/ExpertCapture';
+import IidSeedsUnified from './modules/iid/IidSeedsUnified';
 import type { IidSession } from './services/iidInbound';
 
 const BUILD_TAG = "OR_1.1";
@@ -207,15 +206,12 @@ function SessionControl({ session, onLogout }: { session: IidSession; onLogout: 
   );
 }
 
-// ── Shell del seeder: captura. NAV reducida a IID Seeds. ────────────────────────
+// ── Shell del seeder: pestaña única IID Seeds (captura+OCR unificada). ───────────
 //
-// MOUNT TEMPORAL E3-FRONT (Sprint #47 / Vía D): se añade un toggle "Expert (prueba)"
-// para que Marisol pueda probar la extracción de frames en su navegador real desde
-// el Vercel Preview. NO es la sub-pestaña Expert definitiva — esa es E5 (renombrar
-// Capturar→Basic, gating por rol/feature, etc.). Sam puede mover/quitar este toggle
-// en el PR. Por defecto abre en "Basic" para no alterar el flujo actual del seeder.
+// E5a (Sprint #47): colapsa el toggle temporal Basic / "Expert (prueba)" en UN solo
+// flujo. La captura por OCR es común y bifurca al final en dos destinos (Seed /
+// Genoma) dentro de IidSeedsUnified. El header "IID SEEDS / Sembrador" se mantiene.
 function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () => void }) {
-  const [mode, setMode] = useState<'basic' | 'expert'>('basic');
   return (
     <div className="min-h-screen bg-[#050508] text-zinc-200 selection:bg-accent/30">
       <header className="h-14 border-b border-zinc-800/60 px-5 flex items-center justify-between sticky top-0 bg-[#050508]/95 backdrop-blur-xl z-50">
@@ -229,34 +225,12 @@ function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () 
           </div>
         </div>
 
-        {/* NAV: Basic (captura existente) + Expert (prueba E3-FRONT, temporal) */}
-        <nav className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800 rounded-xl p-1">
-          <button
-            onClick={() => setMode('basic')}
-            className={cn(
-              'flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all font-body',
-              mode === 'basic' ? 'bg-accent text-black shadow-md shadow-accent/20' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800'
-            )}
-          >
-            <Sprout size={13} /> IID Seeds
-          </button>
-          <button
-            onClick={() => setMode('expert')}
-            className={cn(
-              'flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all font-body',
-              mode === 'expert' ? 'bg-accent text-black shadow-md shadow-accent/20' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800'
-            )}
-          >
-            <Clapperboard size={13} /> Expert (prueba)
-          </button>
-        </nav>
-
         <div className="flex items-center gap-3">
           <SessionControl session={session} onLogout={onLogout} />
         </div>
       </header>
 
-      {mode === 'basic' ? <IidSeedsCapture session={session} /> : <ExpertCapture session={session} />}
+      <IidSeedsUnified session={session} />
 
       <footer className="fixed bottom-0 left-0 right-0 h-7 border-t border-zinc-800/40 px-5 flex items-center justify-between bg-[#050508]/80 backdrop-blur-sm z-50">
         <div className="flex items-center gap-1.5 text-[9px] font-mono text-zinc-800 uppercase tracking-widest">

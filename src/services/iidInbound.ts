@@ -147,6 +147,10 @@ export function capture(
     seeder_brand_suggestion?: string | null;
     handle?: string | null;
     lane?: string;
+    /** E5a: texto OCR del post (persist:false de iid-expert-ocr). La EF lo destila. */
+    ocr_text?: string | null;
+    /** E5a: qué se captura del post — ['tema'] | ['metodo'] | ambos. */
+    capture_intent?: string[] | null;
   },
 ): Promise<CaptureResult> {
   return call<CaptureResult>({
@@ -158,6 +162,8 @@ export function capture(
     seeder_brand_suggestion: input.seeder_brand_suggestion ?? null,
     handle: input.handle ?? null,
     ...(input.lane ? { lane: input.lane } : {}),
+    ...(input.ocr_text !== undefined ? { ocr_text: input.ocr_text } : {}),
+    ...(input.capture_intent !== undefined ? { capture_intent: input.capture_intent } : {}),
   });
 }
 
