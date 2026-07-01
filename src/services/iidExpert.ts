@@ -14,7 +14,7 @@
  * Reusa `IidError` de iidInbound para mantener el mismo manejo de errores tipado.
  */
 
-import { IidError } from './iidInbound';
+import { IidError, capture, type CaptureResult } from './iidInbound';
 
 const SB_URL = (import.meta as any).env.VITE_SUPABASE_URL as string;
 const SB_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY as string;
@@ -37,8 +37,15 @@ export interface ExpertCaptureInput {
    * caption se persiste sin reabrir la EF (que solo lee creator_handle/source_refs/
    * frames/applies_to_brands/tags — `captions` suelto se perdía). Encuadre anti-IP igual que Basic.
    */
-  source_refs?: Array<string | { caption: string }> | null;
+  source_refs?: Array<string | Record<string, unknown>> | null;
   tags?: string[] | null;
+  /**
+   * E5a — flag `persist` del contrato con iid-expert-ocr:
+   *   true  (default): persiste en captured_techniques y devuelve technique_id.
+   *   false: solo OCR, devuelve { ok, ocr_text, frame_count } sin persistir.
+   * El camino Genoma usa persist:true; el camino Seed usa `ocrOnly` (persist:false).
+   */
+  persist?: boolean;
 }
 
 export interface ExpertCaptureResult {
@@ -46,6 +53,13 @@ export interface ExpertCaptureResult {
   technique_id: string;
   frame_count: number;
   chars_extracted: number;
+}
+
+/** Respuesta de iid-expert-ocr con `persist:false` (E5a): OCR sin persistir. */
+export interface OcrOnlyResult {
+  ok: true;
+  ocr_text: string;
+  frame_count: number;
 }
 
 // ── E3b-2: puente de subida server-side ────────────────────────────────────────
@@ -141,23 +155,8 @@ export function extractFrames(token: string, videoPath: string): Promise<Extract
 
 // ── Núcleo del fetch (mismo shape que iidInbound.call) ─────────────────────────
 
-/**
- * Envía los frames + metadata a `iid-expert-ocr`.
- * El `session_token` va en el body (igual que todas las acciones del IID).
- */
-export async function submitExpertCapture(
-  token: string,
-  input: ExpertCaptureInput,
-): Promise<ExpertCaptureResult> {
-  const payload: Record<string, unknown> = {
-    session_token: token,
-    frames: input.frames,
-    applies_to_brands: input.applies_to_brands,
-    ...(input.creator_handle ? { creator_handle: input.creator_handle } : {}),
-    ...(input.source_refs && input.source_refs.length ? { source_refs: input.source_refs } : {}),
-    ...(input.tags && input.tags.length ? { tags: input.tags } : {}),
-  };
-
+/** POST a `iid-expert-ocr`. session_token va en el body (igual que todo el IID). */
+async function callOcrFn<T>(payload: Record<string, unknown>): Promise<T> {
   let res: Response;
   try {
     res = await fetch(FN_URL, {
@@ -178,5 +177,73 @@ export async function submitExpertCapture(
     const msg = (data && (data.error || data.detail)) || `Error ${res.status}`;
     throw new IidError(String(msg), res.status, data);
   }
-  return data as ExpertCaptureResult;
+  return data as T;
+}
+
+/**
+ * Envía los frames + metadata a `iid-expert-ocr` con `persist:true` (default).
+ * Persiste en captured_techniques → camino Genoma. El `session_token` va en el body.
+ */
+export function submitExpertCapture(
+  token: string,
+  input: ExpertCaptureInput,
+): Promise<ExpertCaptureResult> {
+  return callOcrFn<ExpertCaptureResult>({
+    session_token: token,
+    frames: input.frames,
+    applies_to_brands: input.applies_to_brands,
+    // Genoma persiste: persist:true explícito (default del contrato, pero lo mandamos claro).
+    persist: input.persist !== false,
+    ...(input.creator_handle ? { creator_handle: input.creator_handle } : {}),
+    ...(input.source_refs && input.source_refs.length ? { source_refs: input.source_refs } : {}),
+    ...(input.tags && input.tags.length ? { tags: input.tags } : {}),
+  });
+}
+
+/**
+ * E5a — OCR SIN persistir (`persist:false`). Devuelve el texto leído sin escribir en
+ * captured_techniques. Es el primer paso del camino Seed: el texto se pasa luego a
+ * `iid-inbound` (acción capture) para destilarlo en una semilla.
+ */
+export function ocrOnly(
+  token: string,
+  input: { frames: string[]; applies_to_brands: string[] },
+): Promise<OcrOnlyResult> {
+  return callOcrFn<OcrOnlyResult>({
+    session_token: token,
+    frames: input.frames,
+    applies_to_brands: input.applies_to_brands,
+    persist: false,
+  });
+}
+
+/**
+ * E5a — camino Seed completo (dos pasos encadenados):
+ *   1. OCR sin persistir (`ocrOnly`, persist:false) → ocr_text.
+ *   2. `iid-inbound` acción capture con el contrato extendido (ocr_text + capture_intent).
+ * Devuelve el CaptureResult de iid-inbound (seed_id, neutral_topic, …).
+ */
+export async function captureSeed(
+  token: string,
+  input: {
+    frames: string[];
+    applies_to_brands: string[];
+    source_url: string;
+    raw_signal: string;
+    seeder_brand_suggestion: string | null;
+    capture_intent: string[];
+  },
+): Promise<CaptureResult> {
+  const ocr = await ocrOnly(token, {
+    frames: input.frames,
+    applies_to_brands: input.applies_to_brands,
+  });
+  return capture(token, {
+    source_url: input.source_url,
+    raw_signal: input.raw_signal,
+    seeder_brand_suggestion: input.seeder_brand_suggestion,
+    ocr_text: ocr.ocr_text ?? null,
+    capture_intent: input.capture_intent,
+    handle: null, // eliminado del front (anti-IP)
+  });
 }
