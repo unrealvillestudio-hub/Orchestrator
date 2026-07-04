@@ -248,33 +248,31 @@ async function generateTurn(
         model: MODEL,
         max_tokens: 1024,
         system,
-        messages: [
-          { role: 'user', content: 'Genera la siguiente pieza siguiendo las instrucciones del sistema.' },
-          // Prefill: fuerza salida JSON — el modelo continúa el objeto desde '{'
-          // (claude-sonnet-5 tiende a envolver la pieza creativa en prosa si no).
-          { role: 'assistant', content: '{' },
-        ],
+        messages: [{ role: 'user', content: 'Genera la siguiente pieza siguiendo las instrucciones del sistema.' }],
       }),
     });
   } catch (err) {
     throw new GenError(`red hacia Anthropic: ${String(err)}`);
   }
-  if (!res.ok) throw new GenError(`Anthropic API ${res.status}`);
+  if (!res.ok) {
+    const errBody = (await res.text().catch(() => '')).slice(0, 400);
+    throw new GenError(`Anthropic API ${res.status}: ${errBody}`);
+  }
 
   const data = await res.json();
   const rawText: string = data?.content?.[0]?.type === 'text' ? data.content[0].text : '';
-  // El prefill '{' NO viene en la respuesta: reconstruir el objeto y recortar hasta el
-  // último '}' (defensa ante prosa/markdown residual tras el cierre). Limpia fences por si acaso.
-  const cont = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
-  const reconstructed = `{${cont}`;
-  const end = reconstructed.lastIndexOf('}');
-  const jsonText = end > 0 ? reconstructed.slice(0, end + 1) : reconstructed;
+  // claude-sonnet-5 a veces envuelve la pieza creativa en prosa: extraer el objeto JSON
+  // exterior (primer '{' … último '}') antes de parsear. Limpia fences por si acaso.
+  const cleaned = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
+  const startIdx = cleaned.indexOf('{');
+  const endIdx = cleaned.lastIndexOf('}');
+  const jsonText = startIdx >= 0 && endIdx > startIdx ? cleaned.slice(startIdx, endIdx + 1) : cleaned.trim();
 
   let parsed: { proposed_text?: unknown; technique_used?: unknown };
   try {
     parsed = JSON.parse(jsonText);
   } catch {
-    throw new GenError('respuesta de Anthropic no es JSON parseable');
+    throw new GenError(`respuesta de Anthropic no es JSON parseable: ${jsonText.slice(0, 200)}`);
   }
   const proposed = String(parsed.proposed_text ?? '').trim();
   const technique_used = String(parsed.technique_used ?? '').trim();
