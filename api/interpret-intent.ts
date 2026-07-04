@@ -1,9 +1,14 @@
 /**
- * api/interpret-intent.ts — Orchestrator v2.2
+ * api/interpret-intent.ts — Orchestrator v2.3
+ * Cambios v2.3 (2026-07-04):
+ * - Firma NODE-NATIVE (req: VercelRequest, res: VercelResponse) + res.status().json().
+ *   La firma Web-standard (req: Request): Promise<Response> COLGABA en este proyecto
+ *   Vercel (504 FUNCTION_INVOCATION_TIMEOUT: el runtime Node no emitía el Response
+ *   devuelto) — el endpoint nunca respondía, ni el fallback 0.3. El fix del model ID
+ *   (v2.2) por sí solo no lo revivía; hacía falta la firma. Ahora igual a sign-upload.
+ * - system prompt y lógica de interpretación intactos.
  * Cambios v2.2 (2026-07-04):
  * - model ID retirado (claude-sonnet-4-20250514, retirado abr-2026) → claude-sonnet-5.
- *   El endpoint fallaba en cada llamada (404 de modelo retirado) y caía siempre al
- *   fallback confidence:0.3. Fix quirúrgico: solo el model ID; system prompt y lógica intactos.
  * Cambios v2.1 (2026-05-18):
  * - Nuevo objective: 'email_sequence' con sub-types
  * - Lab 'klaviyo' reconocido como stage destino de email sequences
@@ -11,7 +16,7 @@
  * - Motor: Claude API via fetch directo (sin SDK — consistente con el stack)
  */
 
-declare const process: { env: Record<string, string | undefined> };
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';
 
@@ -92,30 +97,25 @@ FORMATO DE RESPUESTA (JSON puro, sin markdown):
   "confidence": 0.9
 }`;
 
-export default async function handler(req: Request): Promise<Response> {
+export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
   }
 
+  // Vercel Node runtime ya parsea el JSON; tolera string por las dudas (igual que sign-upload).
   let body: { prompt?: string; brand_id?: string };
   try {
-    body = await req.json();
+    body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {});
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    res.status(400).json({ error: 'Invalid JSON' });
+    return;
   }
 
   const userPrompt = body.prompt?.trim();
   if (!userPrompt) {
-    return new Response(JSON.stringify({ error: 'prompt is required' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    res.status(400).json({ error: 'prompt is required' });
+    return;
   }
 
   // Cargar brand IDs válidos desde Supabase
@@ -191,27 +191,21 @@ export default async function handler(req: Request): Promise<Response> {
       }
     }
 
-    return new Response(JSON.stringify(parsed), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    res.status(200).json(parsed);
 
   } catch (err) {
     console.error('[interpret-intent] error:', err);
-    return new Response(
-      JSON.stringify({
-        brandId: null,
-        platforms: ['INSTAGRAM', 'FACEBOOK'],
-        objective: 'social_post',
-        sequence_type: null,
-        sequence_context: null,
-        interpretedIntent: 'No se pudo interpretar el prompt. Revisa la selección de marca y objetivo.',
-        suggestedStages: [],
-        complianceFlags: [],
-        dbVariablesKeys: [],
-        confidence: 0.3,
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
-    );
+    res.status(200).json({
+      brandId: null,
+      platforms: ['INSTAGRAM', 'FACEBOOK'],
+      objective: 'social_post',
+      sequence_type: null,
+      sequence_context: null,
+      interpretedIntent: 'No se pudo interpretar el prompt. Revisa la selección de marca y objetivo.',
+      suggestedStages: [],
+      complianceFlags: [],
+      dbVariablesKeys: [],
+      confidence: 0.3,
+    });
   }
 }
