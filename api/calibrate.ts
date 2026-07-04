@@ -220,7 +220,8 @@ objeción anticipada, testimonio, diagnóstico, principio invertido, etc.).
 IDIOMA: escribe la pieza en el idioma que corresponda a la INTENCIÓN y al EJE FUNDADOR;
 no traduzcas ni cambies de idioma sin motivo.
 
-SALIDA (JSON puro, sin markdown):
+SALIDA — respondé ÚNICAMENTE con el objeto JSON, empezando por { y terminando por },
+sin texto antes ni después y sin markdown:
 { "proposed_text": "la pieza, breve, lista para juzgar", "technique_used": "nombre corto de la técnica que usaste" }`
   );
 }
@@ -247,7 +248,12 @@ async function generateTurn(
         model: MODEL,
         max_tokens: 1024,
         system,
-        messages: [{ role: 'user', content: 'Genera la siguiente pieza siguiendo las instrucciones del sistema.' }],
+        messages: [
+          { role: 'user', content: 'Genera la siguiente pieza siguiendo las instrucciones del sistema.' },
+          // Prefill: fuerza salida JSON — el modelo continúa el objeto desde '{'
+          // (claude-sonnet-5 tiende a envolver la pieza creativa en prosa si no).
+          { role: 'assistant', content: '{' },
+        ],
       }),
     });
   } catch (err) {
@@ -257,11 +263,16 @@ async function generateTurn(
 
   const data = await res.json();
   const rawText: string = data?.content?.[0]?.type === 'text' ? data.content[0].text : '';
-  const cleaned = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+  // El prefill '{' NO viene en la respuesta: reconstruir el objeto y recortar hasta el
+  // último '}' (defensa ante prosa/markdown residual tras el cierre). Limpia fences por si acaso.
+  const cont = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
+  const reconstructed = `{${cont}`;
+  const end = reconstructed.lastIndexOf('}');
+  const jsonText = end > 0 ? reconstructed.slice(0, end + 1) : reconstructed;
 
   let parsed: { proposed_text?: unknown; technique_used?: unknown };
   try {
-    parsed = JSON.parse(cleaned);
+    parsed = JSON.parse(jsonText);
   } catch {
     throw new GenError('respuesta de Anthropic no es JSON parseable');
   }
