@@ -260,7 +260,14 @@ async function generateTurn(
   }
 
   const data = await res.json();
-  const rawText: string = data?.content?.[0]?.type === 'text' ? data.content[0].text : '';
+  // Concatenar TODOS los bloques de texto: claude-sonnet-5 puede anteponer bloques
+  // no-texto (p.ej. thinking), así que leer solo content[0] daría vacío.
+  const blocks: any[] = Array.isArray(data?.content) ? data.content : [];
+  const rawText: string = blocks.filter((b) => b?.type === 'text').map((b) => b?.text ?? '').join('').trim();
+  if (!rawText) {
+    const types = blocks.map((b) => b?.type).join(',') || '(sin content)';
+    throw new GenError(`Anthropic sin texto (stop=${String(data?.stop_reason)}; blocks=[${types}])`);
+  }
   // claude-sonnet-5 a veces envuelve la pieza creativa en prosa: extraer el objeto JSON
   // exterior (primer '{' … último '}') antes de parsear. Limpia fences por si acaso.
   const cleaned = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
