@@ -323,7 +323,10 @@ async function handleStart(body: Record<string, any>): Promise<Response> {
   try {
     gen = await generateTurn(session, technique, []);
   } catch {
-    return json(200, {
+    // 502: fallo de generación (upstream Anthropic). La sesión sigue 'active' y
+    // reintentable — el status HTTP distingue esto de un turno generado con éxito (200)
+    // sin que el front tenga que inspeccionar el body.
+    return json(502, {
       error: 'generation_failed',
       session_id: session.id,
       retry_hint: 'Reintentá la acción start enviando este session_id para regenerar el turno 1.',
@@ -412,7 +415,9 @@ async function handleVerdict(body: Record<string, any>): Promise<Response> {
   } catch {
     // El veredicto ya quedó guardado (red de seguridad). Reintentar la misma acción
     // verdict re-evalúa convergencia (idempotente) y regenera el turno siguiente.
-    return json(200, {
+    // 502: mismo criterio que en start — el status distingue el fallo de generación
+    // (reintentable, sesión intacta) de un turno generado con éxito.
+    return json(502, {
       error: 'generation_failed',
       session_id,
       retry_hint: 'Reintentá la acción verdict con el mismo turn_number; el veredicto ya quedó guardado.',
