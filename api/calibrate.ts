@@ -330,7 +330,8 @@ async function handleStart(body: Record<string, any>): Promise<Reply> {
   let gen: { proposed_text: string; technique_used: string };
   try {
     gen = await generateTurn(session, technique, []);
-  } catch {
+  } catch (err) {
+    console.error('[calibrate] generation_failed (start)', session.id, String(err));
     // 502: fallo de generación (upstream Anthropic). La sesión sigue 'active' y
     // reintentable — el status HTTP distingue esto de un turno generado con éxito (200)
     // sin que el front tenga que inspeccionar el body.
@@ -420,7 +421,8 @@ async function handleVerdict(body: Record<string, any>): Promise<Reply> {
   let gen: { proposed_text: string; technique_used: string };
   try {
     gen = await generateTurn(session, technique, turns);
-  } catch {
+  } catch (err) {
+    console.error('[calibrate] generation_failed (verdict)', session_id, String(err));
     // El veredicto ya quedó guardado (red de seguridad). Reintentar la misma acción
     // verdict re-evalúa convergencia (idempotente) y regenera el turno siguiente.
     // 502: mismo criterio que en start — el status distingue el fallo de generación
