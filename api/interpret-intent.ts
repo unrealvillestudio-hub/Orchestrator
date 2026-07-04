@@ -1,5 +1,9 @@
 /**
- * api/interpret-intent.ts — Orchestrator v2.1
+ * api/interpret-intent.ts — Orchestrator v2.2
+ * Cambios v2.2 (2026-07-04):
+ * - model ID retirado (claude-sonnet-4-20250514, retirado abr-2026) → claude-sonnet-5.
+ *   El endpoint fallaba en cada llamada (404 de modelo retirado) y caía siempre al
+ *   fallback confidence:0.3. Fix quirúrgico: solo el model ID; system prompt y lógica intactos.
  * Cambios v2.1 (2026-05-18):
  * - Nuevo objective: 'email_sequence' con sub-types
  * - Lab 'klaviyo' reconocido como stage destino de email sequences
@@ -157,7 +161,7 @@ export default async function handler(req: Request): Promise<Response> {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-5',
         max_tokens: 1024,
         system: INTERPRET_SYSTEM_PROMPT
           + (brandList ? `\n\nBRANDS VÁLIDAS — ÚNICOS IDs permitidos para brandId: ${brandList}. Si el prompt no menciona ninguna explícitamente, usa brandId: null. NUNCA inventes un brand_id que no esté en esta lista.` : '')
