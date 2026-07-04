@@ -6,13 +6,17 @@
  * LEE el estado de la DB, actúa (genera / evalúa convergencia), PERSISTE y devuelve.
  * El front nunca toca las tablas — todo pasa por aquí.
  *
- * Patrón COPIADO de api/interpret-intent.ts:
- *   - `declare const process` + ANTHROPIC_API_KEY server-side.
+ * Firma NODE-NATIVE (req: VercelRequest, res: VercelResponse) + res.status().json(),
+ * igual que sign-upload/trigger-job/extract-frames. NO se usa la firma Web-standard
+ * (req: Request): Promise<Response> — esa cuelga en este proyecto Vercel (504
+ * FUNCTION_INVOCATION_TIMEOUT; el runtime Node no emite el Response devuelto).
+ *
+ * Del patrón de interpret-intent se conserva solo la lógica de motor (NO su firma rota):
+ *   - process.env.ANTHROPIC_API_KEY server-side (tipos de @vercel/node).
  *   - normalizeSupabaseUrl() + SB_URL() + SB_KEY() (service_role).
  *   - fetch directo a https://api.anthropic.com/v1/messages (headers x-api-key,
  *     anthropic-version: 2023-06-01) + limpieza de fences ```json antes de JSON.parse.
- *   - handler(req: Request): Promise<Response>, abierto server-side con key (sin gating,
- *     igual que interpret-intent — este endpoint corre en Vercel, no es EF, no aplica verify-JWT).
+ *   - abierto server-side con key (sin gating; corre en Vercel, no es EF, no aplica verify-JWT).
  *
  * Modelo canónico (jul-2026): claude-sonnet-5. NO usar IDs retirados (gen ≤4).
  *
@@ -23,7 +27,7 @@
  * 3 acciones (discriminadas por body.action): start | verdict | status.
  */
 
-declare const process: { env: Record<string, string | undefined> };
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';
 const MODEL = 'claude-sonnet-5';
@@ -268,12 +272,16 @@ async function generateTurn(
 }
 
 // ── Respuesta JSON helper ────────────────────────────────────────────────────────
-function json(status: number, obj: unknown): Response {
-  return new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
+// Descriptor { status, body } que el handler top-level emite con res.status().json().
+// Así las sub-acciones siguen con `return json(...)` (lógica intacta) y solo el
+// wrapper HTTP cambia a Node-native.
+interface Reply { status: number; body: unknown; }
+function json(status: number, body: unknown): Reply {
+  return { status, body };
 }
 
 // ── Acción: start ────────────────────────────────────────────────────────────────
-async function handleStart(body: Record<string, any>): Promise<Response> {
+async function handleStart(body: Record<string, any>): Promise<Reply> {
   // Reanudación: si viene session_id de un start previo que falló en generar el turno 1
   // (red de seguridad), se reusa esa sesión en vez de crear una nueva (evita huérfanas).
   let session: SessionRow | null = null;
@@ -349,7 +357,7 @@ async function handleStart(body: Record<string, any>): Promise<Response> {
 }
 
 // ── Acción: verdict ──────────────────────────────────────────────────────────────
-async function handleVerdict(body: Record<string, any>): Promise<Response> {
+async function handleVerdict(body: Record<string, any>): Promise<Reply> {
   const session_id = String(body.session_id ?? '').trim();
   const turn_number = Number(body.turn_number);
   const verdict_voice = String(body.verdict_voice ?? '').trim();
@@ -440,7 +448,7 @@ async function handleVerdict(body: Record<string, any>): Promise<Response> {
 }
 
 // ── Acción: status ───────────────────────────────────────────────────────────────
-async function handleStatus(body: Record<string, any>): Promise<Response> {
+async function handleStatus(body: Record<string, any>): Promise<Reply> {
   const session_id = String(body.session_id ?? '').trim();
   if (!session_id) return json(400, { error: 'invalid_input', detail: 'session_id requerido' });
 
@@ -451,35 +459,38 @@ async function handleStatus(body: Record<string, any>): Promise<Response> {
   return json(200, { session, turns });
 }
 
-// ── Handler ──────────────────────────────────────────────────────────────────────
-export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== 'POST') return json(405, { error: 'Method not allowed' });
+// ── Handler (Node-native: (req, res) → res.status().json()) ──────────────────────
+export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
+  const emit = (r: Reply) => { res.status(r.status).json(r.body); };
+
+  if (req.method !== 'POST') return emit(json(405, { error: 'Method not allowed' }));
 
   if (!SB_URL() || !SB_KEY()) {
-    return json(503, { error: 'config_missing', detail: 'Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY' });
+    return emit(json(503, { error: 'config_missing', detail: 'Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY' }));
   }
 
-  let body: Record<string, any>;
+  // Vercel Node runtime ya parsea el JSON; tolera string por las dudas (igual que sign-upload).
+  let body: Record<string, any> = {};
   try {
-    body = await req.json();
+    body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {});
   } catch {
-    return json(400, { error: 'Invalid JSON' });
+    return emit(json(400, { error: 'Invalid JSON' }));
   }
 
   const action = String(body?.action ?? '').trim();
   try {
     switch (action) {
-      case 'start':   return await handleStart(body);
-      case 'verdict': return await handleVerdict(body);
-      case 'status':  return await handleStatus(body);
-      default:        return json(400, { error: 'invalid_input', detail: "action debe ser 'start' | 'verdict' | 'status'" });
+      case 'start':   return emit(await handleStart(body));
+      case 'verdict': return emit(await handleVerdict(body));
+      case 'status':  return emit(await handleStatus(body));
+      default:        return emit(json(400, { error: 'invalid_input', detail: "action debe ser 'start' | 'verdict' | 'status'" }));
     }
   } catch (err) {
     if (err instanceof SbError) {
       console.error('[calibrate] supabase_error', err.status, err.body);
-      return json(500, { error: 'supabase_error', status: err.status, detail: err.body });
+      return emit(json(500, { error: 'supabase_error', status: err.status, detail: err.body }));
     }
     console.error('[calibrate] error', err);
-    return json(500, { error: 'internal_error', detail: String(err) });
+    return emit(json(500, { error: 'internal_error', detail: String(err) }));
   }
 }
