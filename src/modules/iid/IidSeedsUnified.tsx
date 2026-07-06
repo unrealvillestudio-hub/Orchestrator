@@ -41,7 +41,14 @@ interface Done {
   topic?: string | null; // neutral_topic (solo Seed)
 }
 
-export default function IidSeedsUnified({ session }: { session: IidSession }) {
+export default function IidSeedsUnified({
+  session,
+  onGoCalibrate,
+}: {
+  session: IidSession;
+  /** E5b: salto directo a la vista de calibración del SeederShell (enlace gold). */
+  onGoCalibrate?: () => void;
+}) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ── Post + extracción ────────────────────────────────────────────────────────
@@ -464,14 +471,14 @@ export default function IidSeedsUnified({ session }: { session: IidSession }) {
             </button>
           </div>
 
-          {/* 6 · Enlace gold — visible desde ya, inerte en E5a (su salto nace en E5b). */}
+          {/* 6 · Enlace gold — E5b: activo, salta directo a la vista de calibración (selector). */}
           <button
             type="button"
-            disabled
-            title="Disponible pronto"
+            onClick={onGoCalibrate}
+            disabled={!onGoCalibrate}
             className="w-full flex items-center justify-center gap-1.5 text-[11px] font-body text-amber-300/80 hover:text-amber-300 disabled:cursor-not-allowed transition-colors pt-1"
           >
-            ¿No tenés un post de modelo? Entrá directo a calibrar y hablemos <ArrowRight size={13} />
+            ¿No tenés un post de modelo? Entrá directo a calibrar la voz <ArrowRight size={13} />
           </button>
         </div>
       )}
