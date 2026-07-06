@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout } from 'lucide-react';
+import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna } from 'lucide-react';
 import { useFlowStore } from './store/useFlowStore';
 import { cn, GlowDot } from './ui/components';
 import HubModule from './modules/hub/HubModule';
@@ -11,6 +11,7 @@ import JobMonitorModule from './modules/monitor/JobMonitorModule';
 import EcosystemIntelModule from './modules/intel/EcosystemIntelModule';
 import LoginScreen from './modules/iid/LoginScreen';
 import IidSeedsUnified from './modules/iid/IidSeedsUnified';
+import CalibrationConsole from './modules/iid/CalibrationConsole';
 import type { IidSession } from './services/iidInbound';
 
 const BUILD_TAG = "OR_1.1";
@@ -206,12 +207,24 @@ function SessionControl({ session, onLogout }: { session: IidSession; onLogout: 
   );
 }
 
-// ── Shell del seeder: pestaña única IID Seeds (captura+OCR unificada). ───────────
+// ── Shell del seeder: dos vistas (Capturar / Calibrar voz) ───────────────────────
 //
 // E5a (Sprint #47): colapsa el toggle temporal Basic / "Expert (prueba)" en UN solo
-// flujo. La captura por OCR es común y bifurca al final en dos destinos (Seed /
-// Genoma) dentro de IidSeedsUnified. El header "IID SEEDS / Sembrador" se mantiene.
+// flujo de captura (IidSeedsUnified), común y bifurcado al final en Seed / Genoma.
+// E5b (Sprint #47 Fase 2): añade una SEGUNDA vista —Calibrar voz (bucle Boids)—
+// dentro del mismo shell vía toggle de estado (no router). El enlace gold de
+// IidSeedsUnified salta directo acá (onGoCalibrate). Header "IID SEEDS / Sembrador"
+// se mantiene.
+type SeederView = 'capture' | 'calibrate';
+
 function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () => void }) {
+  const [seederView, setSeederView] = useState<SeederView>('capture');
+
+  const tabs: { id: SeederView; label: string; icon: typeof Sprout }[] = [
+    { id: 'capture',   label: 'Capturar',    icon: Sprout },
+    { id: 'calibrate', label: 'Calibrar voz', icon: Dna },
+  ];
+
   return (
     <div className="min-h-screen bg-[#050508] text-zinc-200 selection:bg-accent/30">
       <header className="h-14 border-b border-zinc-800/60 px-5 flex items-center justify-between sticky top-0 bg-[#050508]/95 backdrop-blur-xl z-50">
@@ -230,7 +243,40 @@ function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () 
         </div>
       </header>
 
-      <IidSeedsUnified session={session} />
+      {/* Toggle de vista (patrón pill-tabs — igual que la nav del admin) */}
+      <div className="flex justify-center pt-6">
+        <nav className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800 rounded-xl p-1">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setSeederView(t.id)}
+              className={cn(
+                'flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all font-body',
+                seederView === t.id
+                  ? 'bg-accent text-black shadow-md shadow-accent/20'
+                  : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800'
+              )}
+            >
+              <t.icon size={13} />
+              {t.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={seederView}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        >
+          {seederView === 'capture'
+            ? <IidSeedsUnified session={session} onGoCalibrate={() => setSeederView('calibrate')} />
+            : <CalibrationConsole session={session} />}
+        </motion.div>
+      </AnimatePresence>
 
       <footer className="fixed bottom-0 left-0 right-0 h-7 border-t border-zinc-800/40 px-5 flex items-center justify-between bg-[#050508]/80 backdrop-blur-sm z-50">
         <div className="flex items-center gap-1.5 text-[9px] font-mono text-zinc-800 uppercase tracking-widest">

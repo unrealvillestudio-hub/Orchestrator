@@ -74,6 +74,18 @@ interface TechniqueRow {
   technique_summary: string | null;
   raw_material: unknown;
 }
+// Fila cruda del SELECT de handleList: cabecera + founder_axis (interno, para derivar
+// has_founder_axis — NO se devuelve al front). El turn_count sale de un segundo select.
+interface SessionListRow {
+  id: string;
+  brand_id: string;
+  intent_label: string | null;
+  entry_gate: 'from_genome' | 'from_scratch';
+  status: 'active' | 'converged' | 'abandoned';
+  operator: string;
+  founder_axis: Record<string, unknown> | null;
+  created_at: string;
+}
 
 class SbError extends Error {
   status: number;
@@ -393,10 +405,14 @@ async function handleVerdict(body: Record<string, any>): Promise<Reply> {
   const target = turns0.find((t) => t.turn_number === turn_number);
   if (!target) return json(400, { error: 'invalid_state', detail: `turno ${turn_number} no existe en la sesión` });
 
-  // 1 · UPDATE del turno actual: veredicto + notas.
+  // 1 · UPDATE del turno actual: veredicto + notas + operador que juzga.
+  // verdict_operator (plan A): quién JUZGA este turno (Marisol al retomar), distinto
+  // del session.operator (quién sembró = Sam). Opcional en el contrato: si el front no
+  // lo manda → null (no rompe filas previas ni el flujo). El front SÍ lo manda siempre.
   await sbPatch(`calibration_turns?id=eq.${target.id}`, {
     verdict_voice,
     notes_intent: body.notes_intent ?? null,
+    verdict_operator: String(body.verdict_operator ?? '').trim() || null,
   });
 
   // 2 · Recalcular estado desde DB.
@@ -477,6 +493,60 @@ async function handleStatus(body: Record<string, any>): Promise<Reply> {
   return json(200, { session, turns });
 }
 
+// ── Acción: list (aditiva) ───────────────────────────────────────────────────────
+// Enumera las sesiones de una marca (default status='active'). Devuelve SOLO cabecera
+// —nunca turnos ni el founder_axis completo— para que el front pinte el selector sin
+// tocar tablas. turn_count sale de UN segundo select (no N+1) — se evita el count
+// embebido de PostgREST porque los agregados pueden estar deshabilitados server-side.
+async function handleList(body: Record<string, any>): Promise<Reply> {
+  const brand_id = String(body.brand_id ?? '').trim();
+  if (!brand_id) return json(400, { error: 'invalid_input', detail: 'brand_id requerido' });
+
+  const status = String(body.status ?? 'active').trim() || 'active';
+  if (status !== 'active' && status !== 'converged' && status !== 'abandoned') {
+    return json(400, { error: 'invalid_input', detail: "status debe ser 'active' | 'converged' | 'abandoned'" });
+  }
+
+  const rows = await sbSelect<SessionListRow>(
+    `calibration_sessions` +
+    `?brand_id=eq.${encodeURIComponent(brand_id)}` +
+    `&status=eq.${status}` +
+    `&select=id,brand_id,intent_label,entry_gate,status,operator,founder_axis,created_at` +
+    `&order=created_at.desc`,
+  );
+
+  // turn_count: un solo select de los session_id de todos los turnos de estas sesiones,
+  // contados en memoria (evita N+1 y no depende de agregados de PostgREST).
+  const counts = new Map<string, number>();
+  if (rows.length) {
+    const ids = rows.map((r) => r.id).join(',');
+    const turnRows = await sbSelect<{ session_id: string }>(
+      `calibration_turns?session_id=in.(${ids})&select=session_id`,
+    );
+    for (const t of turnRows) counts.set(t.session_id, (counts.get(t.session_id) ?? 0) + 1);
+  }
+
+  const sessions = rows.map((r) => {
+    // has_founder_axis: eje no nulo y no {} (distingue sembradas con motor real de vacías).
+    // El founder_axis completo NO se devuelve (material de criterio; el front no lo edita).
+    const axis = r.founder_axis;
+    const has_founder_axis = !!axis && typeof axis === 'object' && Object.keys(axis).length > 0;
+    return {
+      id: r.id,
+      brand_id: r.brand_id,
+      intent_label: r.intent_label,
+      entry_gate: r.entry_gate,
+      status: r.status,
+      operator: r.operator,
+      has_founder_axis,
+      turn_count: counts.get(r.id) ?? 0,
+      created_at: r.created_at,
+    };
+  });
+
+  return json(200, { sessions });
+}
+
 // ── Handler (Node-native: (req, res) → res.status().json()) ──────────────────────
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   const emit = (r: Reply) => { res.status(r.status).json(r.body); };
@@ -501,7 +571,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       case 'start':   return emit(await handleStart(body));
       case 'verdict': return emit(await handleVerdict(body));
       case 'status':  return emit(await handleStatus(body));
-      default:        return emit(json(400, { error: 'invalid_input', detail: "action debe ser 'start' | 'verdict' | 'status'" }));
+      case 'list':    return emit(await handleList(body));
+      default:        return emit(json(400, { error: 'invalid_input', detail: "action debe ser 'start' | 'verdict' | 'status' | 'list'" }));
     }
   } catch (err) {
     if (err instanceof SbError) {
