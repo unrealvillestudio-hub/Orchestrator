@@ -28,6 +28,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { buildBrandKnowledge } from './_genomePromptBuilder';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';
 const MODEL = 'claude-sonnet-5';
@@ -122,6 +123,20 @@ async function sbSelect<T>(path: string): Promise<T[]> {
   if (!res.ok) throw new SbError(`select ${path}`, res.status, (await res.text().catch(() => '')).slice(0, 400));
   return (await res.json()) as T[];
 }
+// Lectura del schema PUBLIC (para el GenomePromptBuilder). Mismo patrón que sbSelect
+// pero con Accept-Profile: public en vez de intel. NO se toca readHeaders() (lo usan las
+// lecturas de intel). El builder recibe esta función inyectada — no abre su propio cliente.
+async function sbSelectPublic<T>(path: string): Promise<T[]> {
+  const res = await fetch(`${SB_URL()}/rest/v1/${path}`, {
+    headers: {
+      apikey: SB_KEY(),
+      Authorization: `Bearer ${SB_KEY()}`,
+      'Accept-Profile': 'public',
+    },
+  });
+  if (!res.ok) throw new SbError(`select public ${path}`, res.status, (await res.text().catch(() => '')).slice(0, 400));
+  return (await res.json()) as T[];
+}
 async function sbInsert<T>(table: string, row: Record<string, unknown>): Promise<T> {
   const res = await fetch(`${SB_URL()}/rest/v1/${table}`, {
     method: 'POST',
@@ -184,8 +199,16 @@ function renderFounderAxis(axis: unknown): string {
     .join('\n');
 }
 
-function buildSystemPrompt(session: SessionRow, technique: TechniqueRow | null, priorTurns: TurnRow[]): string {
+function buildSystemPrompt(
+  session: SessionRow,
+  technique: TechniqueRow | null,
+  priorTurns: TurnRow[],
+  contextBlock: string,
+): string {
   const founderProse = renderFounderAxis(session.founder_axis);
+  // El conocimiento real (capas 1-4) va ANTES del eje fundador, con jerarquía explícita:
+  // los hechos de la marca mandan; el eje es dirección de voz (hipótesis a calibrar).
+  const knowledgeBlock = contextBlock.trim() ? `${contextBlock.trim()}\n\n` : '';
   const usedTechniques = priorTurns.map((t) => t.technique_used).filter(Boolean) as string[];
   const usedBlock = usedTechniques.length ? usedTechniques.join(', ') : '(ninguna todavía)';
 
@@ -220,9 +243,16 @@ juzgue SÍ (suena a la marca) o NO (no suena), y te explique por qué.
 
 MARCA: ${session.brand_id}
 INTENCIÓN DE VOZ BUSCADA: ${session.intent_label ?? '(no especificada)'}
-EJE FUNDADOR (el motor de esta voz — qué defiende, contra qué, para quién):
+
+${knowledgeBlock}EJE FUNDADOR (dirección de voz — hipótesis a calibrar, ajustable por el juicio
+del operador; NO es ley, es el norte que el conocimiento real de arriba encarna):
 ${founderProse}
 ${genomeBlock}${historyBlock}
+REGLA DURA DE VERACIDAD: todo ingrediente, propiedad, dato o claim que menciones
+DEBE salir del CONOCIMIENTO REAL. Está prohibido inventar. Si el conocimiento no
+alcanza para sostener algo, no lo afirmes. El operador es experto de dominio y
+detecta cualquier dato inventado al instante.
+
 TECHO DE PRODUCCIÓN — VOZ CONSTANTE, TÉCNICA VARIABLE:
 La VOZ (identidad, léxico, temperamento) es constante. La TÉCNICA de comunicación DEBE
 variar en cada pieza. Técnicas ya usadas en esta sesión (NO las repitas): ${usedBlock}.
@@ -245,7 +275,25 @@ async function generateTurn(
   priorTurns: TurnRow[],
 ): Promise<{ proposed_text: string; technique_used: string }> {
   if (!ANTHROPIC_API_KEY) throw new GenError('ANTHROPIC_API_KEY ausente en el runtime');
-  const system = buildSystemPrompt(session, technique, priorTurns);
+
+  // Resolver el CONOCIMIENTO REAL de la marca (capas 1-4). Degradación: si la lectura
+  // falla (DB caída), NO se rompe el turno — se loguea y se sigue con contextBlock=''
+  // (el generador cae al comportamiento previo: solo eje). Un turno sin contexto es peor
+  // que con él, pero no es un 500; el operador lo rechazará y se reintenta. NO se propaga
+  // como generation_failed por esto.
+  let contextBlock = '';
+  try {
+    const knowledge = await buildBrandKnowledge(session.brand_id, sbSelectPublic);
+    contextBlock = knowledge.contextBlock;
+    console.log(
+      `[calibrate] brandKnowledge brand=${session.brand_id} sources=[${knowledge.sourcesUsed.join(',')}] ` +
+      `formula=${knowledge.hasFormula} copyProfile=${knowledge.hasCopyProfile} len=${contextBlock.length}`,
+    );
+  } catch (err) {
+    console.error('[calibrate] buildBrandKnowledge falló — sigo con solo-eje', session.brand_id, String(err));
+  }
+
+  const system = buildSystemPrompt(session, technique, priorTurns, contextBlock);
 
   let res: Response;
   try {
@@ -258,7 +306,7 @@ async function generateTurn(
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 1024,
+        max_tokens: 2048,
         system,
         messages: [{ role: 'user', content: 'Genera la siguiente pieza siguiendo las instrucciones del sistema.' }],
       }),
