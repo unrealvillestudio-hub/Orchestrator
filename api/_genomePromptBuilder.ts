@@ -207,10 +207,13 @@ export async function buildBrandKnowledge(
   }
 
   // ── Capa 3 · Producto/fórmula (product_blueprints active) — mata la alucinación ─
+  // OJO: product_blueprints NO tiene columna is_primary (sí la tiene brand_services, capa 4).
+  // Ordenar por ella hacía que PostgREST devolviera 400 → safeRead lo tragaba → formula=false
+  // y el generador nunca veía los ingredientes reales. Se ordena por name (existe, determinista).
   const blueprints = await safeRead<BlueprintRow>(
     `product_blueprints?brand_id=eq.${id}&active=eq.true` +
       `&select=name,category,ingredients,claims,claims_forbidden,description_short,hair_type` +
-      `&order=is_primary.desc.nullslast`,
+      `&order=name.asc`,
     'product_blueprints',
   );
   let hasFormula = false;
