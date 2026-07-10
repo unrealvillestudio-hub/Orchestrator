@@ -28,7 +28,10 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { buildBrandKnowledge } from './_genomePromptBuilder';
+// Extensión .js obligatoria: package.json declara "type": "module", así que @vercel/node
+// compila api/*.ts bajo moduleResolution nodenext, donde ESM no resuelve sin extensión.
+// TS mapea './_genomePromptBuilder.js' al fuente .ts al compilar.
+import { buildBrandKnowledge } from './_genomePromptBuilder.js';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';
 const MODEL = 'claude-sonnet-5';
