@@ -24,7 +24,8 @@
  * (pgrst.db_schemas=public,intel,content) → se selecciona con Accept-Profile (lecturas)
  * y Content-Profile (escrituras).
  *
- * 3 acciones (discriminadas por body.action): start | verdict | status.
+ * 5 acciones (discriminadas por body.action): start | verdict | converge | status | list.
+ * E5c: `converge` es el cierre EXPLÍCITO del operador; el umbral 10+3SÍ ya no auto-cierra.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -179,10 +180,13 @@ const getTechnique = async (id: string): Promise<TechniqueRow | null> =>
  * Devuelve consecutive_si (largo de la racha). Reset a false + set true en la racha.
  */
 async function recomputeMarkers(sessionId: string, turns: TurnRow[]): Promise<number> {
-  const sorted = [...turns].sort((a, b) => a.turn_number - b.turn_number);
+  // La racha se calcula sobre los turnos JUZGADOS (ignora un turno propuesto aún sin
+  // veredicto). E5c: con el cierre diferido, cuando el operador alcanza el umbral el
+  // endpoint genera un turno siguiente PENDIENTE; ese null no debe romper la racha.
+  const judged = [...turns].filter((t) => t.verdict_voice !== null).sort((a, b) => a.turn_number - b.turn_number);
   const runIds: string[] = [];
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    if (sorted[i].verdict_voice === 'si') runIds.push(sorted[i].id);
+  for (let i = judged.length - 1; i >= 0; i--) {
+    if (judged[i].verdict_voice === 'si') runIds.push(judged[i].id);
     else break;
   }
   await sbPatch(`calibration_turns?session_id=eq.${sessionId}`, { is_convergence_marker: false });
@@ -190,6 +194,34 @@ async function recomputeMarkers(sessionId: string, turns: TurnRow[]): Promise<nu
     await sbPatch(`calibration_turns?id=in.(${runIds.join(',')})`, { is_convergence_marker: true });
   }
   return runIds.length;
+}
+
+/**
+ * Largo de la racha final de 'si' entre los turnos JUZGADOS — cálculo PURO, sin escribir
+ * markers. `recomputeMarkers` persiste; ésta solo lee, para acciones que no deben tocar la
+ * DB (status, guardia de converge). Igual que recomputeMarkers, ignora un turno propuesto
+ * sin veredicto (el turno siguiente que el bucle genera tras alcanzar el umbral).
+ */
+function computeConsecutiveSi(turns: TurnRow[]): number {
+  const judged = [...turns].filter((t) => t.verdict_voice !== null).sort((a, b) => a.turn_number - b.turn_number);
+  let n = 0;
+  for (let i = judged.length - 1; i >= 0; i--) {
+    if (judged[i].verdict_voice === 'si') n++;
+    else break;
+  }
+  return n;
+}
+
+/**
+ * Progreso que viaja al front. `can_converge` E5c: el umbral (≥10 turnos juzgados Y
+ * racha final de 3 'si') YA NO cierra el bucle — solo habilita al operador a cerrar
+ * cuando quiera (acción `converge`). El front lo pinta como reflejo, nunca lo recomputa.
+ */
+function computeProgress(turns: TurnRow[]): { turns_done: number; consecutive_si: number; can_converge: boolean } {
+  const turns_done = turns.filter((t) => t.verdict_voice !== null).length;
+  const consecutive_si = computeConsecutiveSi(turns);
+  const can_converge = turns_done >= MIN_TURNS && consecutive_si >= FINAL_SI;
+  return { turns_done, consecutive_si, can_converge };
 }
 
 // ── Generador (Opción X: lee de DB) ──────────────────────────────────────────────
@@ -371,9 +403,15 @@ async function handleStart(body: Record<string, any>): Promise<Reply> {
     if (session.status !== 'active') return json(409, { error: 'invalid_state', detail: `sesión en estado '${session.status}'` });
     const existing = await getTurns(session.id);
     if (existing.length) {
-      // Ya tiene turno 1 (idempotente): devolverlo tal cual.
+      // Ya tiene turno 1 (idempotente): devolverlo tal cual. E5c: incluir progress para
+      // coherencia con status (una sesión reanudada por start podría estar en umbral).
       const t1 = existing[0];
-      return json(200, { session_id: session.id, turn: { turn_number: t1.turn_number, proposed_text: t1.proposed_text }, status: session.status });
+      return json(200, {
+        session_id: session.id,
+        turn: { turn_number: t1.turn_number, proposed_text: t1.proposed_text },
+        status: session.status,
+        progress: computeProgress(existing),
+      });
     }
   } else {
     const brand_id = String(body.brand_id ?? '').trim();
@@ -471,20 +509,14 @@ async function handleVerdict(body: Record<string, any>): Promise<Reply> {
   const consecutiveSi = await recomputeMarkers(session_id, turns);
   const totalVerdict = turns.filter((t) => t.verdict_voice !== null).length;
 
-  // 3 · ¿Convergió? (≥10 turnos con veredicto Y racha final de 3 'si').
-  if (totalVerdict >= MIN_TURNS && consecutiveSi >= FINAL_SI) {
-    await sbPatch(`calibration_sessions?id=eq.${session_id}`, {
-      status: 'converged',
-      converged_at: new Date().toISOString(),
-    });
-    return json(200, {
-      status: 'converged',
-      total_turns: turns.length,
-      message: 'Voz calibrada: convergió tras una racha de 3 SÍ con ≥10 turnos juzgados.',
-    });
-  }
+  // 3 · ¿Alcanzó el umbral de convergencia? (≥10 turnos con veredicto Y racha final de 3 'si').
+  // E5c (Opción B, con Sam): el umbral NO cierra el bucle — solo HABILITA al operador a
+  // cerrarlo cuando quiera (acción `converge`, cierre explícito). El bucle SIEMPRE genera
+  // el turno siguiente. `can_converge` viaja en el progress; si tras cerrar una racha el
+  // operador vota NO, `consecutiveSi` baja y `can_converge` vuelve a false automáticamente.
+  const canConverge = totalVerdict >= MIN_TURNS && consecutiveSi >= FINAL_SI;
 
-  // 4 · No convergió → turno siguiente. Idempotencia: si ya existe (reintento tras
+  // 4 · Turno siguiente. Idempotencia: si ya existe (reintento tras
   // fallo de red en la respuesta), devolverlo en vez de regenerar/duplicar.
   const nextNumber = turn_number + 1;
   const existingNext = turns.find((t) => t.turn_number === nextNumber);
@@ -492,7 +524,7 @@ async function handleVerdict(body: Record<string, any>): Promise<Reply> {
     return json(200, {
       turn: { turn_number: existingNext.turn_number, proposed_text: existingNext.proposed_text },
       status: 'active',
-      progress: { turns_done: totalVerdict, consecutive_si: consecutiveSi },
+      progress: { turns_done: totalVerdict, consecutive_si: consecutiveSi, can_converge: canConverge },
     });
   }
 
@@ -528,7 +560,63 @@ async function handleVerdict(body: Record<string, any>): Promise<Reply> {
   return json(200, {
     turn: { turn_number: next.turn_number, proposed_text: next.proposed_text },
     status: 'active',
-    progress: { turns_done: totalVerdict, consecutive_si: consecutiveSi },
+    progress: { turns_done: totalVerdict, consecutive_si: consecutiveSi, can_converge: canConverge },
+  });
+}
+
+// ── Acción: converge (E5c — cierre EXPLÍCITO del operador) ────────────────────────
+// El único camino que marca status='converged'. El umbral 10+3SÍ ya no cierra solo
+// (ver handleVerdict §3); el operador decide CUÁNDO cerrar, dentro de lo permitido.
+// El backend sigue siendo la autoridad de QUÉ es convergible: si el umbral no se cumple
+// realmente (front desincronizado), rechaza 409 y NO cierra. NO destila genoma (E6 es
+// chat-only bajo HRD de Sam); converge solo marca la sesión.
+async function handleConverge(body: Record<string, any>): Promise<Reply> {
+  const session_id = String(body.session_id ?? '').trim();
+  if (!session_id) return json(400, { error: 'invalid_input', detail: 'session_id requerido' });
+
+  const session = await getSession(session_id);
+  if (!session) return json(404, { error: 'not_found', detail: 'session_id no existe' });
+
+  // Idempotente: ya cerrada → devolver su estado sin re-escribir converged_at.
+  if (session.status === 'converged') {
+    const turns = await getTurns(session_id);
+    return json(200, {
+      status: 'converged',
+      total_turns: turns.length,
+      message: 'La sesión ya estaba calibrada (cerrada).',
+    });
+  }
+  if (session.status !== 'active') {
+    return json(409, { error: 'invalid_state', detail: `sesión en estado '${session.status}'` });
+  }
+
+  // Guardia de integridad: solo se puede cerrar si REALMENTE se cumple el umbral.
+  const turns = await getTurns(session_id);
+  const totalVerdict = turns.filter((t) => t.verdict_voice !== null).length;
+  const consecutiveSi = computeConsecutiveSi(turns);
+  if (!(totalVerdict >= MIN_TURNS && consecutiveSi >= FINAL_SI)) {
+    return json(409, {
+      error: 'not_convergeable',
+      detail: 'La sesión aún no alcanzó 10 turnos + racha de 3 SÍ.',
+    });
+  }
+
+  // Registro de quién cerró (§1.3): se guarda en la columna existente y libre `notes`
+  // (jsonb, sin otro escritor en el código) — NO se crea columna nueva en este sprint.
+  // El operador de cierre es opcional; si no viene, se omite (verdict_operator de los
+  // turnos SÍ ya es evidencia suficiente de quién calibró).
+  const closedBy = String(body.verdict_operator ?? '').trim();
+  const patch: Record<string, unknown> = {
+    status: 'converged',
+    converged_at: new Date().toISOString(),
+  };
+  if (closedBy) patch.notes = { closed_by: closedBy };
+  await sbPatch(`calibration_sessions?id=eq.${session_id}`, patch);
+
+  return json(200, {
+    status: 'converged',
+    total_turns: turns.length,
+    message: 'Voz calibrada: cerrada por el operador tras alcanzar el umbral.',
   });
 }
 
@@ -541,7 +629,9 @@ async function handleStatus(body: Record<string, any>): Promise<Reply> {
   if (!session) return json(404, { error: 'not_found', detail: 'session_id no existe' });
 
   const turns = await getTurns(session_id);
-  return json(200, { session, turns });
+  // E5c: incluir progress (con can_converge) para que al RETOMAR una sesión que ya pasó
+  // el umbral el front ofrezca cerrar sin tener que juzgar otro turno. Reflejo puro.
+  return json(200, { session, turns, progress: computeProgress(turns) });
 }
 
 // ── Acción: list (aditiva) ───────────────────────────────────────────────────────
@@ -619,11 +709,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const action = String(body?.action ?? '').trim();
   try {
     switch (action) {
-      case 'start':   return emit(await handleStart(body));
-      case 'verdict': return emit(await handleVerdict(body));
-      case 'status':  return emit(await handleStatus(body));
-      case 'list':    return emit(await handleList(body));
-      default:        return emit(json(400, { error: 'invalid_input', detail: "action debe ser 'start' | 'verdict' | 'status' | 'list'" }));
+      case 'start':    return emit(await handleStart(body));
+      case 'verdict':  return emit(await handleVerdict(body));
+      case 'converge': return emit(await handleConverge(body));
+      case 'status':   return emit(await handleStatus(body));
+      case 'list':     return emit(await handleList(body));
+      default:         return emit(json(400, { error: 'invalid_input', detail: "action debe ser 'start' | 'verdict' | 'converge' | 'status' | 'list'" }));
     }
   } catch (err) {
     if (err instanceof SbError) {

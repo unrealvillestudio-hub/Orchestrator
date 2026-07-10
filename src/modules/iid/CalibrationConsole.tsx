@@ -7,7 +7,7 @@ import {
 import { cn, Spinner } from '../../ui/components';
 import { listOptions, IidError, type IidSession, type ListOptions } from '../../services/iidInbound';
 import {
-  listSessions, startCalibration, submitVerdict, getStatus,
+  listSessions, startCalibration, submitVerdict, convergeSession, getStatus,
   type CalibrationSessionSummary, type CalibrationTurn, type CalibrationProgress, type VerdictResult,
 } from '../../services/iidCalibrate';
 
@@ -143,6 +143,9 @@ export default function CalibrationConsole({ session }: { session: IidSession })
         setLoopError(`La sesión está en estado '${st.session.status}' y no se puede retomar.`);
         return;
       }
+      // E5c: reflejar el progreso del server (incluye can_converge) para que, si la sesión
+      // ya pasó el umbral, aparezca "Cerrar y calibrar voz" sin juzgar otro turno.
+      if (st.progress) setProgress(st.progress);
       const turns = [...st.turns].sort((a, b) => a.turn_number - b.turn_number);
       if (turns.length === 0) {
         // Sembrada (0 turnos): start con session_id genera el turno 1 desde el founder_axis.
@@ -286,6 +289,32 @@ export default function CalibrationConsole({ session }: { session: IidSession })
     }
   };
 
+  // ── Cerrar y calibrar (E5c — acción explícita del operador) ─────────────────────
+  // Solo se ofrece cuando el server habilitó can_converge. El backend revalida el umbral:
+  // un 409 not_convergeable (front desincronizado) oculta el botón sin cerrar la sesión.
+  const doConverge = async () => {
+    if (!sessionId || busy) return;
+    setBusy(true);
+    setLoopError(null);
+    setRetry(null);
+    try {
+      const vr = await convergeSession(sessionId, session.sub);
+      applyVerdictResult(vr); // shape 'converged' → pantalla de convergencia (E6 en el chat)
+    } catch (err) {
+      if (err instanceof IidError && err.status === 409) {
+        // Aún no se cumple el umbral (o sesión no activa): ocultar el botón y avisar suave.
+        const detail = (err.body?.detail as string | undefined) || 'Aún no se puede cerrar la sesión.';
+        setLoopError(detail);
+        setProgress((p) => (p ? { ...p, can_converge: false } : p));
+        setRetry(null);
+      } else {
+        handleLoopError(err, 'verdict');
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // ════════════════════════════════════════════════════════════════════════════
   // Render
   // ════════════════════════════════════════════════════════════════════════════
@@ -343,6 +372,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
           retry={retry}
           onSend={sendVerdict}
           onRetry={doRetry}
+          onConverge={doConverge}
           onBack={backToSelector}
         />
       )}
@@ -599,7 +629,7 @@ function NewSessionView({
 // ── Bucle de calibración ─────────────────────────────────────────────────────────
 function LoopView({
   turn, busy, pendingVerdict, setPendingVerdict, notes, setNotes, progress,
-  loopError, retry, onSend, onRetry, onBack,
+  loopError, retry, onSend, onRetry, onConverge, onBack,
 }: {
   turn: CalibrationTurn | null;
   busy: boolean;
@@ -612,6 +642,7 @@ function LoopView({
   retry: RetryKind;
   onSend: () => void;
   onRetry: () => void;
+  onConverge: () => void;
   onBack: () => void;
 }) {
   const notesPlaceholder =
@@ -620,6 +651,9 @@ function LoopView({
       : pendingVerdict === 'si'
         ? 'Qué acertó (refuerza el patrón)…'
         : '¿Por qué? (opcional, muy útil)';
+
+  // E5c: el umbral habilita cerrar, no lo fuerza. can_converge es reflejo puro del server.
+  const canConverge = !!progress?.can_converge;
 
   return (
     <div className="space-y-5">
@@ -632,6 +666,11 @@ function LoopView({
             Turnos juzgados: <span className="text-zinc-300">{progress.turns_done}</span>
             <span className="text-zinc-700 mx-1.5">·</span>
             Racha de SÍ: <span className="text-emerald-400">{progress.consecutive_si}/3</span>
+            {canConverge && (
+              <span className="ml-1.5 inline-flex items-center gap-1 text-emerald-400">
+                <span className="text-zinc-700">·</span> <CheckCircle2 size={11} /> lista para cerrar
+              </span>
+            )}
           </p>
         )}
       </div>
@@ -669,6 +708,40 @@ function LoopView({
           <Spinner size={22} />
           <p className="text-sm">Generando la pieza…</p>
         </div>
+      )}
+
+      {/* E5c · Aviso suave "¿cerrás o seguís?" + cierre explícito. Informativo, NO bloquea:
+          el operador puede seguir votando SÍ/NO tranquilamente. El botón es la única vía
+          que cierra la sesión (el umbral ya no auto-cierra). */}
+      {canConverge && !retry && (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-emerald-500/[0.07] border border-emerald-500/30 rounded-2xl px-5 py-4 space-y-3"
+        >
+          <div className="flex items-start gap-2.5">
+            <CheckCircle2 size={18} className="text-emerald-400 shrink-0 mt-0.5" />
+            <p className="text-sm text-emerald-100/90 leading-snug">
+              Ya podés cerrar la voz cuando quieras. ¿Cerramos, o seguís puliendo unos textos más?
+              <span className="block text-[12px] text-emerald-300/60 mt-0.5">
+                Seguir es simplemente juzgar otro turno abajo. Cerrar es una decisión tuya.
+              </span>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onConverge}
+            disabled={busy}
+            className={cn(
+              'w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold font-body border-2 transition-all',
+              busy
+                ? 'border-emerald-500/30 text-emerald-500/50 cursor-not-allowed'
+                : 'border-emerald-500 text-emerald-300 hover:bg-emerald-500 hover:text-black shadow-md shadow-emerald-500/20'
+            )}
+          >
+            {busy ? <><Spinner size={15} /> Cerrando…</> : <><CheckCircle2 size={16} /> Cerrar y calibrar voz</>}
+          </button>
+        </motion.div>
       )}
 
       {/* Tarjeta del turno */}

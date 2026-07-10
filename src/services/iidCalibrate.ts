@@ -45,6 +45,12 @@ export interface CalibrationTurn {
 export interface CalibrationProgress {
   turns_done: number;
   consecutive_si: number;
+  /**
+   * E5c: el umbral (≥10 turnos juzgados Y racha final de 3 SÍ) HABILITA cerrar, ya no
+   * cierra solo. true → el front ofrece "Cerrar y calibrar voz". Reflejo del server; el
+   * front nunca lo recomputa. Vuelve a false si una racha se rompe (voto NO).
+   */
+  can_converge: boolean;
 }
 
 /** Respuesta de `start` / retomada (turno vigente + estado). */
@@ -52,6 +58,8 @@ export interface StartResult {
   session_id: string;
   turn: CalibrationTurn;
   status: string;
+  /** E5c: presente al reanudar por session_id (una sesión reanudada puede estar en umbral). */
+  progress?: CalibrationProgress;
 }
 
 /** Respuesta de `verdict`: turno siguiente (active) O cierre (converged). El front bifurca por `status`. */
@@ -82,6 +90,8 @@ export interface StatusResult {
     is_convergence_marker: boolean;
     [k: string]: unknown;
   }>;
+  /** E5c: progreso derivado (turns_done + consecutive_si + can_converge) para saber al retomar si ya se puede cerrar. */
+  progress?: CalibrationProgress;
 }
 
 // ── Núcleo del fetch (idéntico al callApi de iidExpert.ts) ───────────────────────
@@ -161,6 +171,21 @@ export function submitVerdict(input: {
     verdict_voice: input.verdict_voice,
     notes_intent: input.notes_intent,
     verdict_operator: input.verdict_operator,
+  });
+}
+
+/**
+ * converge — E5c: cierre EXPLÍCITO del operador. Solo válido cuando el server habilitó
+ * `can_converge` (≥10 turnos + racha de 3 SÍ). Devuelve el mismo shape `converged` que un
+ * verdict que cerraba antes, así el front reusa `applyVerdictResult`. El backend valida el
+ * umbral: si el front llamara desincronizado, responde 409 `not_convergeable` (no cierra).
+ * NO destila genoma (E6 es chat-only) — solo marca la sesión como calibrada.
+ */
+export function convergeSession(sessionId: string, verdictOperator: string): Promise<VerdictResult> {
+  return callApi<VerdictResult>('/api/calibrate', {
+    action: 'converge',
+    session_id: sessionId,
+    verdict_operator: verdictOperator,
   });
 }
 
