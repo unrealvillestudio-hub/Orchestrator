@@ -7,6 +7,12 @@
     },
     "api/sign-upload.ts": {
       "maxDuration": 15
+    },
+    "api/trigger-job.ts": {
+      "maxDuration": 15
+    },
+    "api/approve-job.ts": {
+      "maxDuration": 30
     }
   }
 }
