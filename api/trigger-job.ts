@@ -1,9 +1,26 @@
 /**
- * UNRLVL Orchestrator — api/trigger-job.ts v4.1
+ * UNRLVL Orchestrator — api/trigger-job.ts v4.2
  *
  * Thin wrapper: valida input + INSERT en public.lab_jobs + 202 inmediato.
  * Todo el pipeline corre en lab-worker EF de Supabase. El pg_net trigger
  * sobre lab_jobs despierta a lab-worker automáticamente.
+ *
+ * ── PATRÓN CICATRIZ (v4.2, 2026-07-17) ────────────────────────────────────
+ * Hasta v4.1 este handler usaba la firma Web API `(req: Request): Promise<Response>`.
+ * En el runtime Node de Vercel ESA FIRMA NO EXISTE: Vercel invoca al handler con
+ * `(IncomingMessage, ServerResponse)`. El código hacía `await req.json()` —que no es
+ * un método de IncomingMessage—, el `catch` devolvía un objeto `Response`, y ese
+ * Response no lo consumía nadie porque nunca se llamó `res.end()`. Resultado: la
+ * función colgaba hasta el timeout. Verificado en producción (2026-07-16):
+ *   OPTIONS/POST → cuelgan >50s; runtime log → "Task timed out after 300 seconds".
+ * El header de v4.1 afirmaba "Web APIs funcionan en Node 18+". Existen en Node, sí;
+ * lo que no existe es que Vercel te las PASE al handler. Es la misma cicatriz que ya
+ * documentan extract-frames.ts y sign-upload.ts.
+ *
+ * v4.2 migra a la firma Node-native `(req: VercelRequest, res: VercelResponse)`,
+ * la misma de extract-frames.ts / sign-upload.ts (los dos endpoints del repo que
+ * SÍ responden). El carril lab_jobs → lab-worker NO se jubila: el desacople async
+ * es correcto y es el que usa Ayra. Se cura la firma, se conserva el diseño.
  *
  * POST /api/trigger-job
  * Body: {
@@ -45,7 +62,7 @@
  *   - status='rejected'         → leer rejected_reason
  */
 
-declare const process: { env: Record<string, string | undefined> };
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // Normalize SUPABASE_URL — same defensive parse used by ImageLab and CopyLab.
 // Tolerates the three shapes commonly pasted into Vercel env panels:
@@ -67,12 +84,15 @@ function normalizeSupabaseUrl(raw: string | undefined): string {
 const SB_URL = () => normalizeSupabaseUrl(process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL);
 const SB_KEY = () => process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
 
-const CORS = {
-  'Content-Type': 'application/json',
+// Content-Type lo pone res.json() — aquí solo van las cabeceras CORS.
+const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, x-trigger-secret',
 };
+function applyCors(res: VercelResponse) {
+  for (const [k, v] of Object.entries(CORS)) res.setHeader(k, v);
+}
 
 type JobType  = 'content' | 'teaser' | 'announcement';
 type Language = 'EN' | 'ES' | 'EN+ES';
@@ -117,29 +137,34 @@ async function insertOrchestratorJob(payload: Record<string, unknown>): Promise<
   }
 }
 
-export default async function handler(req: Request): Promise<Response> {
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  applyCors(res);
+  if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'POST only' }), { status: 405, headers: CORS });
+    return res.status(405).json({ error: 'POST only' });
   }
 
-  // Auth opcional
+  // Auth opcional.
+  // Node baja los nombres de header a minúsculas y puede devolver string[] si el
+  // header viene repetido; normalizamos a un único string antes de comparar.
   const secret = process.env.TRIGGER_SECRET;
   if (secret) {
-    const auth = req.headers.get('x-trigger-secret') ?? '';
+    const raw = req.headers['x-trigger-secret'];
+    const auth = (Array.isArray(raw) ? raw[0] : raw) ?? '';
     if (auth !== secret) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS });
+      return res.status(401).json({ error: 'Unauthorized' });
     }
   }
 
+  // Vercel parsea el JSON body; tolera string por las dudas (igual que sign-upload.ts).
   let body: TriggerBody = {};
-  try { body = await req.json(); } catch { /* keep empty */ }
+  try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
   if (!body.brand_id) {
-    return new Response(JSON.stringify({ error: 'brand_id required' }), { status: 400, headers: CORS });
+    return res.status(400).json({ error: 'brand_id required' });
   }
   if (!body.prompt) {
-    return new Response(JSON.stringify({ error: 'prompt required' }), { status: 400, headers: CORS });
+    return res.status(400).json({ error: 'prompt required' });
   }
 
   const platforms    = body.platforms    ?? ['INSTAGRAM', 'FACEBOOK'];
@@ -168,20 +193,14 @@ export default async function handler(req: Request): Promise<Response> {
   });
 
   if (!jobId) {
-    return new Response(
-      JSON.stringify({ error: 'Failed to enqueue job in Supabase' }),
-      { status: 500, headers: CORS }
-    );
+    return res.status(500).json({ error: 'Failed to enqueue job in Supabase' });
   }
 
-  return new Response(
-    JSON.stringify({
-      job_id:   jobId,
-      status:   'queued',
-      brand_id: body.brand_id,
-      prompt:   body.prompt,
-      note:     'Pipeline corriendo. Lee public.lab_jobs WHERE id=job_id para status.',
-    }),
-    { status: 202, headers: CORS }
-  );
+  return res.status(202).json({
+    job_id:   jobId,
+    status:   'queued',
+    brand_id: body.brand_id,
+    prompt:   body.prompt,
+    note:     'Pipeline corriendo. Lee public.lab_jobs WHERE id=job_id para status.',
+  });
 }
