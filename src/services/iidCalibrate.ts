@@ -41,6 +41,24 @@ export interface CalibrationTurn {
   proposed_text: string;
 }
 
+/**
+ * Sprint CRAFT-01: artefacto de destino declarado. `mode` selecciona el módulo de canal del
+ * arsenal (written|oral) en el backend. El FRONT lo deriva del canal elegido — nunca el
+ * backend por adivinación (§3). Guion de video/TikTok/podcast → 'oral'; el resto → 'written'.
+ */
+export interface TargetArtifact {
+  channel: string;
+  format: string;
+  length_hint: string;
+  mode: 'written' | 'oral';
+}
+
+/** Las 4 familias psicológicas reales (TAG_TO_FAMILY). Selector del módulo psy_<FAMILIA>. */
+export type PsyFamily = 'CONVERSION' | 'COMMUNITY' | 'AUTHORITY' | 'BRIDGE';
+
+/** Los 4 tipos de voz. Hoy solo 'conversion' tiene módulo; los otros degradan limpiamente. */
+export type VoiceType = 'conversion' | 'editorial' | 'educative' | 'professional';
+
 /** Progreso que devuelve el server tras un veredicto (solo reflejo — el front no lo recomputa). */
 export interface CalibrationProgress {
   turns_done: number;
@@ -60,11 +78,13 @@ export interface StartResult {
   status: string;
   /** E5c: presente al reanudar por session_id (una sesión reanudada puede estar en umbral). */
   progress?: CalibrationProgress;
+  /** CRAFT-01 §5.4: avisos NO bloqueantes del modo degradado (dato de contexto no declarado). */
+  craft_warnings?: string[];
 }
 
 /** Respuesta de `verdict`: turno siguiente (active) O cierre (converged). El front bifurca por `status`. */
 export type VerdictResult =
-  | { turn: CalibrationTurn; status: 'active'; progress: CalibrationProgress }
+  | { turn: CalibrationTurn; status: 'active'; progress: CalibrationProgress; craft_warnings?: string[] }
   | { status: 'converged'; total_turns: number; message: string };
 
 /** Respuesta de `status`: cabecera cruda + turnos (para reconstruir una sesión al retomar). */
@@ -136,7 +156,17 @@ export function listSessions(
  */
 export function startCalibration(
   input:
-    | { brand_id: string; operator: string; intent_label: string; founder_axis: Record<string, unknown> }
+    | {
+        brand_id: string;
+        operator: string;
+        intent_label: string;
+        founder_axis: Record<string, unknown>;
+        // CRAFT-01: los 3 selectores declarados. Opcionales — el operador puede no elegir y
+        // la sesión corre en modo degradado (§7). null se manda explícito (nunca se adivina).
+        voice_type?: VoiceType | null;
+        target_artifact?: TargetArtifact | null;
+        psy_family?: PsyFamily | null;
+      }
     | { session_id: string },
 ): Promise<StartResult> {
   const body: Record<string, unknown> =
@@ -149,6 +179,9 @@ export function startCalibration(
           operator: input.operator,
           intent_label: input.intent_label,
           founder_axis: input.founder_axis,
+          voice_type: input.voice_type ?? null,
+          target_artifact: input.target_artifact ?? null,
+          psy_family: input.psy_family ?? null,
         };
   return callApi<StartResult>('/api/calibrate', body);
 }

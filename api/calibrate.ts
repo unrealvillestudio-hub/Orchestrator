@@ -33,6 +33,10 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 // compila api/*.ts bajo moduleResolution nodenext, donde ESM no resuelve sin extensión.
 // TS mapea './_genomePromptBuilder.js' al fuente .ts al compilar.
 import { buildBrandKnowledge } from './_genomePromptBuilder.js';
+// Sprint CRAFT-01: arsenal de comunicación seleccionado por contexto declarado. Función
+// PURA y SÍNCRONA (lee .md locales, no la DB) — no necesita el lector inyectado. Ver
+// _craftModules.ts para la técnica de carga (fs.readFileSync + includeFiles en vercel.json).
+import { buildCraftModules, declaredSummary, type SkipRecord } from './_craftModules.js';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';
 const MODEL = 'claude-sonnet-5';
@@ -40,6 +44,11 @@ const MODEL = 'claude-sonnet-5';
 // Convergencia (leída de DB, no de estado en memoria):
 const MIN_TURNS = 10;   // mínimo de turnos con veredicto
 const FINAL_SI = 3;     // los últimos N turnos (por turn_number) todos 'si'
+
+// Sprint CRAFT-01: dominios de los selectores declarados. Se validan en el endpoint
+// (handleStart), NO en la DB (sin CHECK — ver §3). Las 4 familias reales de TAG_TO_FAMILY.
+const CRAFT_PSY_FAMILIES = ['CONVERSION', 'COMMUNITY', 'AUTHORITY', 'BRIDGE'];
+const CRAFT_VOICE_TYPES = ['conversion', 'editorial', 'educative', 'professional'];
 
 // Normalize SUPABASE_URL — tolerates bare project ref, bare hostname, or full URL.
 function normalizeSupabaseUrl(raw: string | undefined): string {
@@ -64,6 +73,11 @@ interface SessionRow {
   source_technique_id: string | null;
   status: 'active' | 'converged' | 'abandoned';
   operator: string;
+  // Sprint CRAFT-01 (aditivo, nullable, sin backfill). NULL = modo degradado (§5): la
+  // sesión opera solo con core+structure. NUNCA se infieren estos valores.
+  voice_type: string | null;
+  target_artifact: Record<string, unknown> | null;
+  psy_family: string | null;
 }
 interface TurnRow {
   id: string;
@@ -234,16 +248,59 @@ function renderFounderAxis(axis: unknown): string {
     .join('\n');
 }
 
+/**
+ * ARTEFACTO DE DESTINO (§6.5b). Cuando `target_artifact` NO es NULL, declara canal/formato/
+ * extensión como restricción DURA de forma. Cuando es NULL, se omite la sección ENTERA (sin
+ * encabezado vacío) — igual criterio que buildBrandKnowledge con sus capas. Nunca se adivina.
+ */
+function renderArtifact(artifact: Record<string, unknown> | null): string {
+  if (!artifact || typeof artifact !== 'object') return '';
+  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  const channel = str(artifact.channel);
+  const format = str(artifact.format);
+  const lengthHint = str(artifact.length_hint);
+  const lines: string[] = [];
+  if (channel) lines.push(`- Canal: ${channel}`);
+  if (format) lines.push(`- Formato: ${format}`);
+  if (lengthHint) lines.push(`- Extensión: ${lengthHint}`);
+  if (!lines.length) return '';
+  return (
+    `ARTEFACTO DE DESTINO (restricción dura — la extensión y el canal cambian la\n` +
+    `ESTRUCTURA, no solo el recorte):\n` +
+    lines.join('\n')
+  );
+}
+
+/**
+ * craft_warnings (§5.4): avisos NO bloqueantes para el operador, derivados de `skipped`
+ * (ausencia DECLARADA de dato) — NUNCA de `errors` (los fallos de lectura son problema de
+ * infra, no del operador). Array vacío cuando todo está declarado. El Seeder los pinta.
+ */
+function craftWarnings(skipped: SkipRecord[]): string[] {
+  return skipped.map((s) => {
+    if (s.module === 'psy') return 'familia PSY no declarada';
+    if (s.module === 'profile') return 'tipo de voz no declarado';
+    // 'written|oral'
+    return s.reason === 'MODO NO DECLARADO' ? 'modo (escrito/oral) no declarado' : 'artefacto no declarado';
+  });
+}
+
+/**
+ * Ensambla el system prompt en DOS partes para habilitar prompt caching (§6.7):
+ *   - `stable`: prefijo constante entre turnos de una misma sesión (intro + conocimiento +
+ *     eje + artefacto + arsenal + genoma). Se cachea con cache_control ephemeral.
+ *   - `volatile`: sufijo que cambia cada turno (historia + reglas). NO se cachea.
+ * Orden de bloques §6.6: knowledge → eje → artefacto → craftBlock → genome (estable) →
+ * history → veracidad → techo → idioma → salida (volátil).
+ */
 function buildSystemPrompt(
   session: SessionRow,
   technique: TechniqueRow | null,
   priorTurns: TurnRow[],
   contextBlock: string,
-): string {
+  craftBlock: string,
+): { stable: string; volatile: string } {
   const founderProse = renderFounderAxis(session.founder_axis);
-  // El conocimiento real (capas 1-4) va ANTES del eje fundador, con jerarquía explícita:
-  // los hechos de la marca mandan; el eje es dirección de voz (hipótesis a calibrar).
-  const knowledgeBlock = contextBlock.trim() ? `${contextBlock.trim()}\n\n` : '';
   const usedTechniques = priorTurns.map((t) => t.technique_used).filter(Boolean) as string[];
   const usedBlock = usedTechniques.length ? usedTechniques.join(', ') : '(ninguna todavía)';
 
@@ -253,9 +310,9 @@ function buildSystemPrompt(
       ? technique.raw_material
       : JSON.stringify(technique.raw_material ?? {}, null, 2);
     genomeBlock =
-      `\nMATERIAL DE REFERENCIA (técnica capturada de un experto — insumo de aprendizaje de\n` +
+      `MATERIAL DE REFERENCIA (técnica capturada de un experto — insumo de aprendizaje de\n` +
       `MÉTODO, NUNCA a reescribir ni republicar):\n` +
-      `${technique.technique_summary ?? '(sin resumen)'}\n${raw.slice(0, 2000)}\n`;
+      `${technique.technique_summary ?? '(sin resumen)'}\n${raw.slice(0, 2000)}`;
   }
 
   let historyBlock = '';
@@ -265,42 +322,73 @@ function buildSystemPrompt(
       return `Turno ${t.turn_number} | veredicto: ${v} | operador dijo: ${t.notes_intent ?? '—'} | técnica usada: ${t.technique_used ?? '—'}`;
     });
     historyBlock =
-      `\nHISTORIA DE LA CALIBRACIÓN (turnos previos con el juicio del operador):\n` +
+      `HISTORIA DE LA CALIBRACIÓN (turnos previos con el juicio del operador):\n` +
       `${lines.join('\n')}\n` +
       `- Los SÍ confirman qué funciona: refuérzalo.\n` +
-      `- Los NO + su porqué corrigen: NO repitas lo que el operador rechazó.\n`;
+      `- Los NO + su porqué corrigen: NO repitas lo que el operador rechazó.`;
   }
 
-  return (
+  const intro =
 `Eres el mejor comunicador de marca del mundo. Tu tarea: generar UNA sola pieza breve
 que encarne una HIPÓTESIS de la voz de esta marca, para que un experto de dominio la
 juzgue SÍ (suena a la marca) o NO (no suena), y te explique por qué.
 
 MARCA: ${session.brand_id}
-INTENCIÓN DE VOZ BUSCADA: ${session.intent_label ?? '(no especificada)'}
+INTENCIÓN DE VOZ BUSCADA: ${session.intent_label ?? '(no especificada)'}`;
 
-${knowledgeBlock}EJE FUNDADOR (dirección de voz — hipótesis a calibrar, ajustable por el juicio
+  // El conocimiento real (capas 1-4) va ANTES del eje fundador, con jerarquía explícita:
+  // los hechos de la marca mandan; el eje es dirección de voz (hipótesis a calibrar).
+  const ejeBlock =
+`EJE FUNDADOR (dirección de voz — hipótesis a calibrar, ajustable por el juicio
 del operador; NO es ley, es el norte que el conocimiento real de arriba encarna):
-${founderProse}
-${genomeBlock}${historyBlock}
-REGLA DURA DE VERACIDAD: todo ingrediente, propiedad, dato o claim que menciones
+${founderProse}`;
+
+  const artifactBlock = renderArtifact(session.target_artifact);
+
+  // ── Prefijo ESTABLE (cacheable) ──────────────────────────────────────────────────
+  const stable = [
+    intro,
+    contextBlock.trim(),
+    ejeBlock,
+    artifactBlock,
+    craftBlock.trim(),
+    genomeBlock.trim(),
+  ].filter((s) => s && s.trim()).join('\n\n');
+
+  const veracity =
+`REGLA DURA DE VERACIDAD: todo ingrediente, propiedad, dato o claim que menciones
 DEBE salir del CONOCIMIENTO REAL. Está prohibido inventar. Si el conocimiento no
 alcanza para sostener algo, no lo afirmes. El operador es experto de dominio y
-detecta cualquier dato inventado al instante.
+detecta cualquier dato inventado al instante.`;
 
-TECHO DE PRODUCCIÓN — VOZ CONSTANTE, TÉCNICA VARIABLE:
+  // (a) Techo craft-aware: si hay arsenal, se OPERA el declarado arriba; si no (craftBlock
+  // vacío por columnas NULL o módulos ilegibles), se conserva el paréntesis enumerativo
+  // actual como fallback (§5.3, §6.5a). La lógica anti-repetición (usedBlock) no se toca.
+  const techniqueLine = craftBlock.trim()
+    ? `Elegí una técnica DISTINTA y OPERALA desde el ARSENAL DE COMUNICACIÓN declarado
+arriba: no la nombres ni la etiquetes — encarnala en la pieza.`
+    : `Elige una técnica DISTINTA (escena, contraste, analogía, dato-ancla, reencuadre,
+objeción anticipada, testimonio, diagnóstico, principio invertido, etc.).`;
+  const techo =
+`TECHO DE PRODUCCIÓN — VOZ CONSTANTE, TÉCNICA VARIABLE:
 La VOZ (identidad, léxico, temperamento) es constante. La TÉCNICA de comunicación DEBE
 variar en cada pieza. Técnicas ya usadas en esta sesión (NO las repitas): ${usedBlock}.
-Elige una técnica DISTINTA (escena, contraste, analogía, dato-ancla, reencuadre,
-objeción anticipada, testimonio, diagnóstico, principio invertido, etc.).
+${techniqueLine}`;
 
-IDIOMA: escribe la pieza en el idioma que corresponda a la INTENCIÓN y al EJE FUNDADOR;
-no traduzcas ni cambies de idioma sin motivo.
+  const idioma =
+`IDIOMA: escribe la pieza en el idioma que corresponda a la INTENCIÓN y al EJE FUNDADOR;
+no traduzcas ni cambies de idioma sin motivo.`;
 
-SALIDA — respondé ÚNICAMENTE con el objeto JSON, empezando por { y terminando por },
+  const salida =
+`SALIDA — respondé ÚNICAMENTE con el objeto JSON, empezando por { y terminando por },
 sin texto antes ni después y sin markdown:
-{ "proposed_text": "la pieza, breve, lista para juzgar", "technique_used": "nombre corto de la técnica que usaste" }`
-  );
+{ "proposed_text": "la pieza, breve, lista para juzgar", "technique_used": "nombre corto de la técnica que usaste" }`;
+
+  // ── Sufijo VOLÁTIL (no cacheable) ────────────────────────────────────────────────
+  const volatile = [historyBlock.trim(), veracity, techo, idioma, salida]
+    .filter((s) => s && s.trim()).join('\n\n');
+
+  return { stable, volatile };
 }
 
 /** Llama a Claude y parsea { proposed_text, technique_used }. Lanza GenError si falla. */
@@ -308,7 +396,7 @@ async function generateTurn(
   session: SessionRow,
   technique: TechniqueRow | null,
   priorTurns: TurnRow[],
-): Promise<{ proposed_text: string; technique_used: string }> {
+): Promise<{ proposed_text: string; technique_used: string; craftSkipped: SkipRecord[] }> {
   if (!ANTHROPIC_API_KEY) throw new GenError('ANTHROPIC_API_KEY ausente en el runtime');
 
   // Resolver el CONOCIMIENTO REAL de la marca (capas 1-4). Degradación: si la lectura
@@ -328,7 +416,24 @@ async function generateTurn(
     console.error('[calibrate] buildBrandKnowledge falló — sigo con solo-eje', session.brand_id, String(err));
   }
 
-  const system = buildSystemPrompt(session, technique, priorTurns, contextBlock);
+  // Sprint CRAFT-01: seleccionar el arsenal por contexto DECLARADO. Síncrono y NO lanza
+  // (los fallos de lectura van en craft.errors) → sin try/catch. Log §5.2: DEBE listar lo
+  // omitido (skipped) y lo que falló (errors), no solo lo inyectado — así el bug se ve en la
+  // línea, no de memoria. `declared` distingue "no hay dato" (skipped) de "falló leer" (errors).
+  const craftSelectors = {
+    voiceType: session.voice_type,
+    targetArtifact: session.target_artifact,
+    psyFamily: session.psy_family,
+  };
+  const craft = buildCraftModules(craftSelectors);
+  console.log(
+    `[craftModules] session=${session.id} declared=[${declaredSummary(craftSelectors)}] ` +
+    `injected=[${craft.injected.join(', ')}] ` +
+    `skipped=[${craft.skipped.map((s) => `${s.module}: ${s.reason}`).join(', ')}] ` +
+    `errors=[${craft.errors.join('; ')}]`,
+  );
+
+  const { stable, volatile } = buildSystemPrompt(session, technique, priorTurns, contextBlock, craft.craftBlock);
 
   let res: Response;
   try {
@@ -339,10 +444,20 @@ async function generateTurn(
         'x-api-key': ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01',
       },
+      // system como ARRAY de bloques (§6.7): el prefijo estable (conocimiento + eje +
+      // artefacto + arsenal + genoma) lleva cache_control ephemeral → los turnos 2+ de una
+      // misma sesión reusan ese prefijo cacheado (~10% del coste). El sufijo volátil
+      // (historia + reglas) va sin cache_control porque cambia cada turno.
+      // §6.8 (riesgo previsto, NO aplicado): si en QA aparecen truncados por el bloque
+      // `thinking` de claude-sonnet-5 contando contra max_tokens, esta tarea es determinista
+      // (no exploratoria) → añadir `thinking: { type: 'disabled' }` a este body.
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 2048,
-        system,
+        system: [
+          { type: 'text', text: stable, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: volatile },
+        ],
         messages: [{ role: 'user', content: 'Genera la siguiente pieza siguiendo las instrucciones del sistema.' }],
       }),
     });
@@ -379,7 +494,7 @@ async function generateTurn(
   const proposed = String(parsed.proposed_text ?? '').trim();
   const technique_used = String(parsed.technique_used ?? '').trim();
   if (!proposed) throw new GenError('proposed_text vacío');
-  return { proposed_text: proposed, technique_used };
+  return { proposed_text: proposed, technique_used, craftSkipped: craft.skipped };
 }
 
 // ── Respuesta JSON helper ────────────────────────────────────────────────────────
@@ -411,6 +526,7 @@ async function handleStart(body: Record<string, any>): Promise<Reply> {
         turn: { turn_number: t1.turn_number, proposed_text: t1.proposed_text },
         status: session.status,
         progress: computeProgress(existing),
+        craft_warnings: [], // idempotente: no se generó turno nuevo → sin avisos frescos
       });
     }
   } else {
@@ -425,6 +541,17 @@ async function handleStart(body: Record<string, any>): Promise<Reply> {
     if (entry_gate === 'from_genome' && !body.source_technique_id) {
       return json(400, { error: 'invalid_input', detail: 'source_technique_id requerido con entry_gate=from_genome' });
     }
+    // Sprint CRAFT-01: validar los 3 selectores en el ENDPOINT, no en la DB (sin CHECK
+    // constraint — los 3 últimos perfiles no existen aún; un CHECK los bloquearía al
+    // crearlos, §3). NULL SIEMPRE es válido (es el modo degradado). Un valor presente pero
+    // fuera del dominio → 400. `target_artifact` se acepta tal cual (jsonb libre); su `mode`
+    // lo deriva el FRONT del canal, nunca el backend por adivinación.
+    if (body.psy_family != null && !CRAFT_PSY_FAMILIES.includes(String(body.psy_family))) {
+      return json(400, { error: 'invalid_input', detail: `psy_family debe ser ${CRAFT_PSY_FAMILIES.join(' | ')} o null` });
+    }
+    if (body.voice_type != null && !CRAFT_VOICE_TYPES.includes(String(body.voice_type))) {
+      return json(400, { error: 'invalid_input', detail: `voice_type debe ser ${CRAFT_VOICE_TYPES.join(' | ')} o null` });
+    }
     session = await sbInsert<SessionRow>('calibration_sessions', {
       brand_id,
       operator,
@@ -432,6 +559,10 @@ async function handleStart(body: Record<string, any>): Promise<Reply> {
       intent_label: body.intent_label ?? null,
       founder_axis: body.founder_axis ?? {},
       source_technique_id: body.source_technique_id ?? null,
+      // Aditivo: NULL cuando el front (o una reanudación de sesión vieja) no los manda.
+      voice_type: body.voice_type ?? null,
+      target_artifact: body.target_artifact ?? null,
+      psy_family: body.psy_family ?? null,
     });
   }
 
@@ -444,7 +575,7 @@ async function handleStart(body: Record<string, any>): Promise<Reply> {
   // Generar turno 1. La sesión ya está persistida (red de seguridad): si Anthropic falla,
   // NO se rompe — se devuelve generation_failed + session_id y se puede reintentar
   // (llamando start de nuevo con este session_id → reanuda sin crear otra sesión).
-  let gen: { proposed_text: string; technique_used: string };
+  let gen: { proposed_text: string; technique_used: string; craftSkipped: SkipRecord[] };
   try {
     gen = await generateTurn(session, technique, []);
   } catch (err) {
@@ -471,6 +602,9 @@ async function handleStart(body: Record<string, any>): Promise<Reply> {
     session_id: session.id,
     turn: { turn_number: turn.turn_number, proposed_text: turn.proposed_text },
     status: 'active',
+    // §5.4: avisos NO bloqueantes del modo degradado, para que el operador (Marisol, que no
+    // lee logs de Vercel) vea que faltó declarar contexto. Derivado de skipped, no de errors.
+    craft_warnings: craftWarnings(gen.craftSkipped),
   });
 }
 
@@ -525,6 +659,7 @@ async function handleVerdict(body: Record<string, any>): Promise<Reply> {
       turn: { turn_number: existingNext.turn_number, proposed_text: existingNext.proposed_text },
       status: 'active',
       progress: { turns_done: totalVerdict, consecutive_si: consecutiveSi, can_converge: canConverge },
+      craft_warnings: [], // idempotente: turno ya existía → sin avisos frescos
     });
   }
 
@@ -533,7 +668,7 @@ async function handleVerdict(body: Record<string, any>): Promise<Reply> {
     technique = await getTechnique(session.source_technique_id);
   }
 
-  let gen: { proposed_text: string; technique_used: string };
+  let gen: { proposed_text: string; technique_used: string; craftSkipped: SkipRecord[] };
   try {
     gen = await generateTurn(session, technique, turns);
   } catch (err) {
@@ -561,6 +696,7 @@ async function handleVerdict(body: Record<string, any>): Promise<Reply> {
     turn: { turn_number: next.turn_number, proposed_text: next.proposed_text },
     status: 'active',
     progress: { turns_done: totalVerdict, consecutive_si: consecutiveSi, can_converge: canConverge },
+    craft_warnings: craftWarnings(gen.craftSkipped), // §5.4 — aviso NO bloqueante del modo degradado
   });
 }
 
