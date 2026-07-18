@@ -68,6 +68,17 @@ const PSY_OPTIONS: { value: PsyFamily; label: string; help: string }[] = [
   { value: 'BRIDGE', label: 'BRIDGE', help: 'conectar lo conocido con lo nuevo' },
 ];
 
+// CRAFT-01 ajuste 3: mapa a texto legible para el operador. El backend (api/calibrate.ts
+// craftWarnings) ya reduce los skipped[].reason (de LOG, en mayúsculas) a estas frases; acá
+// se traducen a lenguaje llano. Si llega una frase sin mapa, se muestra tal cual (no rompe).
+const WARNING_TEXT: Record<string, string> = {
+  'artefacto no declarado': 'No dijiste dónde se publica',
+  'modo (escrito/oral) no declarado': 'No está claro si es texto o guion hablado',
+  'familia PSY no declarada': 'No declaraste el objetivo psicológico',
+  'tipo de voz no declarado': 'No declaraste el tipo de voz',
+};
+const humanizeWarning = (w: string): string => WARNING_TEXT[w] ?? w;
+
 export default function CalibrationConsole({ session }: { session: IidSession }) {
   const [mode, setMode] = useState<Mode>('select');
 
@@ -277,7 +288,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
   const handleLoopError = (err: unknown, kind: Exclude<RetryKind, null>) => {
     if (err instanceof IidError && err.status === 502) {
       setRetry(kind);
-      setLoopError('No se pudo generar la siguiente pieza (fallo temporal del generador).');
+      setLoopError('No se pudo generar el siguiente texto (fallo temporal del generador).');
       return;
     }
     if (err instanceof IidError && err.status === 409) {
@@ -380,7 +391,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
           <Dna size={22} className="text-accent" /> Calibrar la voz de la marca
         </h2>
         <p className="text-sm text-zinc-500 mt-1">
-          El generador propone piezas; vos juzgás si suenan a la marca. Cuando converge, la voz queda
+          El generador propone textos; vos juzgás si suenan a la marca. Cuando converge, la voz queda
           calibrada. El original nunca se republica.
         </p>
       </div>
@@ -757,8 +768,8 @@ function NewSessionView({
           <div className="flex items-start gap-2.5 bg-amber-500/[0.06] border border-amber-500/25 rounded-xl px-4 py-3">
             <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
             <p className="text-[12px] text-amber-200/90 leading-snug">
-              Podés arrancar igual. Lo que no declares corre en <span className="font-semibold">modo degradado</span> —
-              el generador usa solo el piso del arsenal para esa dimensión. Podés declararlo ahora o dejarlo así.
+              Podés arrancar igual. Lo que dejes sin declarar, el generador lo trabaja con menos
+              información — funciona, pero afina menos. Podés completarlo ahora o más adelante.
             </p>
           </div>
         )}
@@ -775,7 +786,7 @@ function NewSessionView({
             : 'bg-accent text-black hover:bg-accent/90 shadow-md shadow-accent/20'
         )}
       >
-        {busy ? <><Spinner size={15} /> Generando primera pieza…</> : <><Sparkles size={15} /> Comenzar calibración</>}
+        {busy ? <><Spinner size={15} /> Generando el primer texto…</> : <><Sparkles size={15} /> Comenzar calibración</>}
       </button>
     </div>
   );
@@ -837,7 +848,7 @@ function LoopView({
         <div className="flex items-start gap-2.5 bg-amber-500/[0.05] border border-amber-500/20 rounded-xl px-4 py-2.5">
           <AlertTriangle size={15} className="text-amber-400/80 shrink-0 mt-0.5" />
           <p className="text-[12px] text-amber-200/80 leading-snug">
-            Modo degradado: {craftWarnings.join(' · ')}. La pieza se generó igual, con el piso del arsenal.
+            Se generó igual, con menos información: {craftWarnings.map(humanizeWarning).join(' · ')}.
           </p>
         </div>
       )}
@@ -873,7 +884,7 @@ function LoopView({
       {!turn && busy && !retry && (
         <div className="flex flex-col items-center justify-center py-16 gap-3 text-zinc-600">
           <Spinner size={22} />
-          <p className="text-sm">Generando la pieza…</p>
+          <p className="text-sm">Generando el texto…</p>
         </div>
       )}
 
