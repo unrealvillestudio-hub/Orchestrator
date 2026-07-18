@@ -693,7 +693,7 @@ function NewSessionView({
       {/* ── CRAFT-01: contexto de la pieza (opcional — degrada limpiamente) ── */}
       <div className="pt-1 border-t border-zinc-800/70 space-y-4">
         <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">
-          Contexto de la pieza <span className="text-zinc-600 normal-case tracking-normal font-body">— opcional, afina el arsenal</span>
+          Contexto <span className="text-zinc-600 normal-case tracking-normal font-body">— opcional, ayuda al generador a afinar</span>
         </p>
 
         {/* Tipo de voz */}
@@ -725,9 +725,9 @@ function NewSessionView({
 
         {/* Artefacto de destino */}
         <div>
-          <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">Artefacto de destino</span>
+          <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">Dónde se publica</span>
           <span className="block text-[10px] text-zinc-600 mt-0.5 mb-2 font-body normal-case tracking-normal">
-            La extensión y el canal cambian la ESTRUCTURA, no solo el recorte.
+            Un texto para Instagram y uno para un blog no se escriben igual. Decir dónde va cambia cómo se escribe.
           </span>
           <div className="space-y-2">
             <select
@@ -741,13 +741,13 @@ function NewSessionView({
             <input
               value={format}
               onChange={(e) => setFormat(e.target.value)}
-              placeholder="formato — ej. caption + hashtags, carrusel 6 slides…"
+              placeholder="formato — ej. caption con hashtags, carrusel de 6 slides…"
               className="w-full bg-[#050508] border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-700 outline-none focus:border-accent/60 transition-colors"
             />
             <input
               value={lengthHint}
               onChange={(e) => setLengthHint(e.target.value)}
-              placeholder="extensión — ej. ≤280 caracteres, 600-800 palabras…"
+              placeholder="largo aproximado — ej. máximo 280 caracteres, 600 a 800 palabras…"
               className="w-full bg-[#050508] border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-700 outline-none focus:border-accent/60 transition-colors"
             />
           </div>
