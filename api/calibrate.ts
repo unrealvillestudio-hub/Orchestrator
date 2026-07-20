@@ -473,6 +473,16 @@ async function generateTurn(
   }
 
   const data = await res.json();
+  // Diagnóstico de QA (CRAFT-01 cierre §6.7/§6.8): loguea el usage y el stop_reason de
+  // Anthropic. cache_read_input_tokens>0 en turnos 2+ confirma que el prefijo estable se
+  // está cacheando; stop=max_tokens delata truncados (el bloque `thinking` cuenta contra
+  // max_tokens). Sin behavior change — solo observabilidad, mismo estilo que los otros logs.
+  const usage = data?.usage ?? {};
+  console.log(
+    `[calibrate] anthropic session=${session.id} stop=${String(data?.stop_reason)} ` +
+    `in=${usage.input_tokens} out=${usage.output_tokens} ` +
+    `cache_read=${usage.cache_read_input_tokens} cache_write=${usage.cache_creation_input_tokens}`,
+  );
   // Concatenar TODOS los bloques de texto: claude-sonnet-5 puede anteponer bloques
   // no-texto (p.ej. thinking), así que leer solo content[0] daría vacío.
   const blocks: any[] = Array.isArray(data?.content) ? data.content : [];
