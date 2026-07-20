@@ -451,12 +451,18 @@ async function generateTurn(
       // artefacto + arsenal + genoma) lleva cache_control ephemeral → los turnos 2+ de una
       // misma sesión reusan ese prefijo cacheado (~10% del coste). El sufijo volátil
       // (historia + reglas) va sin cache_control porque cambia cada turno.
-      // §6.8 (riesgo previsto, NO aplicado): si en QA aparecen truncados por el bloque
-      // `thinking` de claude-sonnet-5 contando contra max_tokens, esta tarea es determinista
-      // (no exploratoria) → añadir `thinking: { type: 'disabled' }` a este body.
+      // §6.8 (mitigación APLICADA tras el QA del cierre CRAFT-01):
+      //  - `thinking: { type: 'disabled' }` — esta tarea es DETERMINISTA (generar una pieza
+      //    siguiendo restricciones declaradas), no exploratoria; el thinking no aporta y con
+      //    los módulos reales consumía el presupuesto entero → turnos truncados (stop=max_tokens,
+      //    0 bloques de texto o JSON cortado). Verificado en vivo en el Preview de PR #13.
+      //  - max_tokens 2048 → 4096 — aun sin thinking el margen era estrecho: el prefijo real
+      //    trepa a ~6k (5 módulos) y ~8.3k (NeuroneSCF); max_tokens es TECHO, no consumo, así que
+      //    el coste marginal es cero y evita que el truncado vuelva con marcas de knowledge grande.
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 2048,
+        max_tokens: 4096,
+        thinking: { type: 'disabled' },
         system: [
           { type: 'text', text: stable, cache_control: { type: 'ephemeral' } },
           { type: 'text', text: volatile },
@@ -473,10 +479,13 @@ async function generateTurn(
   }
 
   const data = await res.json();
-  // Diagnóstico de QA (CRAFT-01 cierre §6.7/§6.8): loguea el usage y el stop_reason de
-  // Anthropic. cache_read_input_tokens>0 en turnos 2+ confirma que el prefijo estable se
-  // está cacheando; stop=max_tokens delata truncados (el bloque `thinking` cuenta contra
-  // max_tokens). Sin behavior change — solo observabilidad, mismo estilo que los otros logs.
+  // Instrumentación PERMANENTE (CRAFT-01 cierre §6.7/§6.8): loguea usage + stop_reason de
+  // Anthropic en cada turno. NO es andamio de QA — sin esta línea el truncado por max_tokens
+  // era invisible desde afuera (vivía solo en la respuesta interna de Anthropic) y un QA de
+  // caja negra reportaba "verde" con el feature roto. cache_read_input_tokens>0 en turnos 2+
+  // confirma que el prefijo estable se cachea; stop=max_tokens delata cualquier truncado
+  // futuro (p.ej. una marca con brandKnowledge aún más grande que NeuroneSCF). Sin behavior
+  // change — solo observabilidad, mismo estilo que [calibrate]/[craftModules].
   const usage = data?.usage ?? {};
   console.log(
     `[calibrate] anthropic session=${session.id} stop=${String(data?.stop_reason)} ` +
