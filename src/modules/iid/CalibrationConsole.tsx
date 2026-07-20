@@ -9,6 +9,7 @@ import { listOptions, IidError, type IidSession, type ListOptions } from '../../
 import {
   listSessions, startCalibration, submitVerdict, convergeSession, getStatus,
   type CalibrationSessionSummary, type CalibrationTurn, type CalibrationProgress, type VerdictResult,
+  type VoiceType, type PsyFamily, type TargetArtifact, type CraftWarning,
 } from '../../services/iidCalibrate';
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -39,6 +40,48 @@ const CORE_AXIS: AxisPair[] = [
   { key: 'para_quien', value: '', fixed: true },
 ];
 
+// ── CRAFT-01: opciones de los 3 selectores declarados ──────────────────────────────
+// El FRONT deriva `mode` del canal (§3): guion/podcast → 'oral'; el resto → 'written'.
+const CHANNELS: { value: string; label: string; mode: 'written' | 'oral' }[] = [
+  { value: 'ig_feed', label: 'Instagram — feed (caption)', mode: 'written' },
+  { value: 'ig_carousel', label: 'Instagram — carrusel', mode: 'written' },
+  { value: 'email', label: 'Email', mode: 'written' },
+  { value: 'blog', label: 'Blog / artículo largo', mode: 'written' },
+  { value: 'x_thread', label: 'X / hilo', mode: 'written' },
+  { value: 'landing', label: 'Landing / web', mode: 'written' },
+  { value: 'video_script', label: 'Guion de video (Reel / TikTok)', mode: 'oral' },
+  { value: 'podcast', label: 'Podcast / audio', mode: 'oral' },
+  { value: 'yt_script', label: 'Guion de YouTube', mode: 'oral' },
+];
+
+const VOICE_OPTIONS: { value: VoiceType; label: string }[] = [
+  { value: 'conversion', label: 'Conversión' },
+  { value: 'editorial', label: 'Editorial' },
+  { value: 'educative', label: 'Educativa' },
+  { value: 'professional', label: 'Profesional' },
+];
+
+const PSY_OPTIONS: { value: PsyFamily; label: string; help: string }[] = [
+  { value: 'CONVERSION', label: 'CONVERSION', help: 'mover a una acción concreta' },
+  { value: 'COMMUNITY', label: 'COMMUNITY', help: 'construir pertenencia / “nosotros”' },
+  { value: 'AUTHORITY', label: 'AUTHORITY', help: 'establecer criterio y credibilidad' },
+  { value: 'BRIDGE', label: 'BRIDGE', help: 'conectar lo conocido con lo nuevo' },
+];
+
+// CRAFT-01 #75: mapa a texto legible para el operador, keyeado sobre el CÓDIGO ESTABLE
+// (`reason`, en MAYÚSCULAS) que manda el backend — NO sobre una frase intermedia. Antes había
+// dos capas de traducción encadenadas (backend frase→minúscula, front frase→legible); si la
+// frase intermedia cambiaba, este mapa fallaba EN SILENCIO. Ahora se traduce UNA sola vez,
+// sobre `reason`. Fallback obligatorio: un `reason` sin mapa se muestra tal cual (no se
+// descarta ni rompe).
+const WARNING_TEXT: Record<string, string> = {
+  'ARTEFACTO NO DECLARADO': 'No dijiste dónde se publica',
+  'MODO NO DECLARADO': 'No está claro si es texto o guion hablado',
+  'FAMILIA NO DECLARADA': 'No declaraste el objetivo psicológico',
+  'TIPO DE VOZ NO DECLARADO': 'No declaraste el tipo de voz',
+};
+const humanizeWarning = (w: CraftWarning): string => WARNING_TEXT[w.reason] ?? w.reason;
+
 export default function CalibrationConsole({ session }: { session: IidSession }) {
   const [mode, setMode] = useState<Mode>('select');
 
@@ -52,6 +95,14 @@ export default function CalibrationConsole({ session }: { session: IidSession })
   // ── Sesión nueva (from_scratch) ─────────────────────────────────────────────────
   const [intentLabel, setIntentLabel] = useState('');
   const [axis, setAxis] = useState<AxisPair[]>(CORE_AXIS.map((p) => ({ ...p })));
+  // CRAFT-01: los 3 selectores declarados. '' = no elegido → se manda null → modo degradado
+  // (§7). No bloquean el inicio; el aviso de degradación es visible pero no obligatorio.
+  const [voiceType, setVoiceType] = useState<VoiceType | ''>('');
+  const [psyFamily, setPsyFamily] = useState<PsyFamily | ''>('');
+  const [channel, setChannel] = useState('');
+  const [format, setFormat] = useState('');
+  const [lengthHint, setLengthHint] = useState('');
+  const resetCraft = () => { setVoiceType(''); setPsyFamily(''); setChannel(''); setFormat(''); setLengthHint(''); };
 
   // ── Bucle ────────────────────────────────────────────────────────────────────
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -65,6 +116,9 @@ export default function CalibrationConsole({ session }: { session: IidSession })
 
   // ── Convergencia ────────────────────────────────────────────────────────────────
   const [converged, setConverged] = useState<{ message: string; total_turns: number } | null>(null);
+
+  // CRAFT-01 §5.4: avisos NO bloqueantes del modo degradado, derivados de `skipped` server-side.
+  const [craftWarnings, setCraftWarnings] = useState<CraftWarning[]>([]);
 
   // Marcas del scope (la EF list_options ya filtra por brand_scope — mismo patrón que Unified).
   useEffect(() => {
@@ -101,6 +155,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
     setLoopError(null);
     setRetry(null);
     setConverged(null);
+    setCraftWarnings([]);
     // Refrescar el listado (los turn_count pueden haber cambiado).
     if (selectedBrand) void onPickBrand(selectedBrand);
   };
@@ -114,6 +169,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
     }
     setTurn(r.turn);
     setProgress(r.progress);
+    setCraftWarnings(r.craft_warnings ?? []);
     setPendingVerdict(null);
     setNotes('');
   };
@@ -128,6 +184,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
     setProgress(null);
     setLoopError(null);
     setRetry(null);
+    setCraftWarnings([]);
     setBusy(true);
     try {
       const st = await getStatus(sid);
@@ -198,15 +255,24 @@ export default function CalibrationConsole({ session }: { session: IidSession })
     setLoopError(null);
     setRetry(null);
     try {
+      // CRAFT-01: el front deriva `mode` del canal (§3). Sin canal → target_artifact null.
+      const chan = CHANNELS.find((c) => c.value === channel);
+      const target_artifact: TargetArtifact | null = chan
+        ? { channel: chan.label, format: format.trim(), length_hint: lengthHint.trim(), mode: chan.mode }
+        : null;
       const r = await startCalibration({
         brand_id: selectedBrand,
         operator: session.sub,
         intent_label: intentLabel.trim(),
         founder_axis: axisObject(),
+        voice_type: voiceType || null,
+        psy_family: psyFamily || null,
+        target_artifact,
       });
       setSessionId(r.session_id);
       setTurn(r.turn);
       setProgress(null);
+      setCraftWarnings(r.craft_warnings ?? []);
       setPendingVerdict(null);
       setNotes('');
       setMode('loop');
@@ -225,7 +291,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
   const handleLoopError = (err: unknown, kind: Exclude<RetryKind, null>) => {
     if (err instanceof IidError && err.status === 502) {
       setRetry(kind);
-      setLoopError('No se pudo generar la siguiente pieza (fallo temporal del generador).');
+      setLoopError('No se pudo generar el siguiente texto (fallo temporal del generador).');
       return;
     }
     if (err instanceof IidError && err.status === 409) {
@@ -270,6 +336,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
       if (retry === 'start') {
         const r = await startCalibration({ session_id: sessionId });
         setTurn(r.turn);
+        setCraftWarnings(r.craft_warnings ?? []);
         setRetry(null);
       } else if (retry === 'verdict' && turn && pendingVerdict) {
         const vr = await submitVerdict({
@@ -327,7 +394,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
           <Dna size={22} className="text-accent" /> Calibrar la voz de la marca
         </h2>
         <p className="text-sm text-zinc-500 mt-1">
-          El generador propone piezas; vos juzgás si suenan a la marca. Cuando converge, la voz queda
+          El generador propone textos; vos juzgás si suenan a la marca. Cuando converge, la voz queda
           calibrada. El original nunca se republica.
         </p>
       </div>
@@ -341,7 +408,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
           loading={loadingSessions}
           error={selectError}
           onResume={enterSession}
-          onNew={() => { setIntentLabel(''); setAxis(CORE_AXIS.map((p) => ({ ...p }))); setMode('new'); }}
+          onNew={() => { setIntentLabel(''); setAxis(CORE_AXIS.map((p) => ({ ...p }))); resetCraft(); setMode('new'); }}
         />
       )}
 
@@ -352,6 +419,16 @@ export default function CalibrationConsole({ session }: { session: IidSession })
           setIntentLabel={setIntentLabel}
           axis={axis}
           setAxis={setAxis}
+          voiceType={voiceType}
+          setVoiceType={setVoiceType}
+          psyFamily={psyFamily}
+          setPsyFamily={setPsyFamily}
+          channel={channel}
+          setChannel={setChannel}
+          format={format}
+          setFormat={setFormat}
+          lengthHint={lengthHint}
+          setLengthHint={setLengthHint}
           ready={newReady}
           busy={busy}
           onStart={startNew}
@@ -368,6 +445,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
           notes={notes}
           setNotes={setNotes}
           progress={progress}
+          craftWarnings={craftWarnings}
           loopError={loopError}
           retry={retry}
           onSend={sendVerdict}
@@ -507,18 +585,35 @@ function SelectorView({
 
 // ── Sesión nueva ────────────────────────────────────────────────────────────────
 function NewSessionView({
-  brandLabel, intentLabel, setIntentLabel, axis, setAxis, ready, busy, onStart, onCancel,
+  brandLabel, intentLabel, setIntentLabel, axis, setAxis,
+  voiceType, setVoiceType, psyFamily, setPsyFamily, channel, setChannel,
+  format, setFormat, lengthHint, setLengthHint,
+  ready, busy, onStart, onCancel,
 }: {
   brandLabel: string;
   intentLabel: string;
   setIntentLabel: (v: string) => void;
   axis: AxisPair[];
   setAxis: React.Dispatch<React.SetStateAction<AxisPair[]>>;
+  voiceType: VoiceType | '';
+  setVoiceType: (v: VoiceType | '') => void;
+  psyFamily: PsyFamily | '';
+  setPsyFamily: (v: PsyFamily | '') => void;
+  channel: string;
+  setChannel: (v: string) => void;
+  format: string;
+  setFormat: (v: string) => void;
+  lengthHint: string;
+  setLengthHint: (v: string) => void;
   ready: boolean;
   busy: boolean;
   onStart: () => void;
   onCancel: () => void;
 }) {
+  // CRAFT-01 §7: los 3 selectores son OPCIONALES. Lo no declarado corre en modo degradado
+  // (el backend usa solo core+structure para eso). Aviso visible, nunca bloqueante.
+  const psyHelp = PSY_OPTIONS.find((o) => o.value === psyFamily)?.help ?? '';
+  const degraded = !voiceType || !psyFamily || !channel;
   const label: Record<string, string> = {
     defiende: 'Qué defiende',
     contra_que: 'Contra qué',
@@ -609,6 +704,80 @@ function NewSessionView({
         </button>
       </div>
 
+      {/* ── CRAFT-01: contexto de la pieza (opcional — degrada limpiamente) ── */}
+      <div className="pt-1 border-t border-zinc-800/70 space-y-4">
+        <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">
+          Contexto <span className="text-zinc-600 normal-case tracking-normal font-body">— opcional, ayuda al generador a afinar</span>
+        </p>
+
+        {/* Tipo de voz */}
+        <label className="block">
+          <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">Tipo de voz</span>
+          <select
+            value={voiceType}
+            onChange={(e) => setVoiceType(e.target.value as VoiceType | '')}
+            className="mt-1.5 w-full bg-[#050508] border border-zinc-800 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-accent/60 transition-colors"
+          >
+            <option value="">— sin declarar —</option>
+            {VOICE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+
+        {/* Objetivo psicológico */}
+        <label className="block">
+          <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">Objetivo psicológico</span>
+          <select
+            value={psyFamily}
+            onChange={(e) => setPsyFamily(e.target.value as PsyFamily | '')}
+            className="mt-1.5 w-full bg-[#050508] border border-zinc-800 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-accent/60 transition-colors"
+          >
+            <option value="">— sin declarar —</option>
+            {PSY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          {psyHelp && <span className="block text-[10px] text-zinc-600 mt-1 font-body">{psyHelp}</span>}
+        </label>
+
+        {/* Artefacto de destino */}
+        <div>
+          <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">Dónde se publica</span>
+          <span className="block text-[10px] text-zinc-600 mt-0.5 mb-2 font-body normal-case tracking-normal">
+            Un texto para Instagram y uno para un blog no se escriben igual. Decir dónde va cambia cómo se escribe.
+          </span>
+          <div className="space-y-2">
+            <select
+              value={channel}
+              onChange={(e) => setChannel(e.target.value)}
+              className="w-full bg-[#050508] border border-zinc-800 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-accent/60 transition-colors"
+            >
+              <option value="">— canal sin declarar —</option>
+              {CHANNELS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+            <input
+              value={format}
+              onChange={(e) => setFormat(e.target.value)}
+              placeholder="formato — ej. caption con hashtags, carrusel de 6 slides…"
+              className="w-full bg-[#050508] border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-700 outline-none focus:border-accent/60 transition-colors"
+            />
+            <input
+              value={lengthHint}
+              onChange={(e) => setLengthHint(e.target.value)}
+              placeholder="largo aproximado — ej. máximo 280 caracteres, 600 a 800 palabras…"
+              className="w-full bg-[#050508] border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-700 outline-none focus:border-accent/60 transition-colors"
+            />
+          </div>
+        </div>
+
+        {degraded && (
+          <div className="flex items-start gap-2.5 bg-amber-500/[0.06] border border-amber-500/25 rounded-xl px-4 py-3">
+            <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-[12px] text-amber-200/90 leading-snug">
+              Podés arrancar igual. Lo que dejes sin declarar, el generador lo trabaja con menos
+              información — funciona, pero afina menos. Podés completarlo ahora o más adelante.
+            </p>
+          </div>
+        )}
+      </div>
+
       <button
         type="button"
         onClick={onStart}
@@ -620,7 +789,7 @@ function NewSessionView({
             : 'bg-accent text-black hover:bg-accent/90 shadow-md shadow-accent/20'
         )}
       >
-        {busy ? <><Spinner size={15} /> Generando primera pieza…</> : <><Sparkles size={15} /> Comenzar calibración</>}
+        {busy ? <><Spinner size={15} /> Generando el primer texto…</> : <><Sparkles size={15} /> Comenzar calibración</>}
       </button>
     </div>
   );
@@ -628,7 +797,7 @@ function NewSessionView({
 
 // ── Bucle de calibración ─────────────────────────────────────────────────────────
 function LoopView({
-  turn, busy, pendingVerdict, setPendingVerdict, notes, setNotes, progress,
+  turn, busy, pendingVerdict, setPendingVerdict, notes, setNotes, progress, craftWarnings,
   loopError, retry, onSend, onRetry, onConverge, onBack,
 }: {
   turn: CalibrationTurn | null;
@@ -638,6 +807,7 @@ function LoopView({
   notes: string;
   setNotes: (v: string) => void;
   progress: CalibrationProgress | null;
+  craftWarnings: CraftWarning[];
   loopError: string | null;
   retry: RetryKind;
   onSend: () => void;
@@ -675,6 +845,17 @@ function LoopView({
         )}
       </div>
 
+      {/* CRAFT-01 §5.4: aviso NO bloqueante del modo degradado (contexto no declarado).
+          Derivado de skipped server-side; NUNCA de errors (fallo de lectura = infra). */}
+      {craftWarnings.length > 0 && (
+        <div className="flex items-start gap-2.5 bg-amber-500/[0.05] border border-amber-500/20 rounded-xl px-4 py-2.5">
+          <AlertTriangle size={15} className="text-amber-400/80 shrink-0 mt-0.5" />
+          <p className="text-[12px] text-amber-200/80 leading-snug">
+            Se generó igual, con menos información: {craftWarnings.map(humanizeWarning).join(' · ')}.
+          </p>
+        </div>
+      )}
+
       {/* Banner de reintento (502) */}
       {retry && (
         <div className="flex items-start gap-3 bg-amber-500/[0.07] border border-amber-500/30 rounded-xl px-4 py-3.5">
@@ -706,7 +887,7 @@ function LoopView({
       {!turn && busy && !retry && (
         <div className="flex flex-col items-center justify-center py-16 gap-3 text-zinc-600">
           <Spinner size={22} />
-          <p className="text-sm">Generando la pieza…</p>
+          <p className="text-sm">Generando el texto…</p>
         </div>
       )}
 
