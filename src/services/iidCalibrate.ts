@@ -56,6 +56,18 @@ export interface TargetArtifact {
 /** Las 4 familias psicológicas reales (TAG_TO_FAMILY). Selector del módulo psy_<FAMILIA>. */
 export type PsyFamily = 'CONVERSION' | 'COMMUNITY' | 'AUTHORITY' | 'BRIDGE';
 
+/**
+ * CRAFT-01 #75: un aviso de modo degradado. El backend manda el CÓDIGO estable, no una frase:
+ *   - `module`: 'written|oral' | 'psy' | 'profile' (qué módulo se omitió).
+ *   - `reason`: código canónico en MAYÚSCULAS ('ARTEFACTO NO DECLARADO' | 'MODO NO DECLARADO' |
+ *     'FAMILIA NO DECLARADA' | 'TIPO DE VOZ NO DECLARADO'). El front traduce sobre `reason` una
+ *     sola vez; un `reason` sin mapeo se muestra tal cual (no se descarta ni rompe).
+ */
+export interface CraftWarning {
+  module: string;
+  reason: string;
+}
+
 /** Los 4 tipos de voz. Hoy solo 'conversion' tiene módulo; los otros degradan limpiamente. */
 export type VoiceType = 'conversion' | 'editorial' | 'educative' | 'professional';
 
@@ -78,13 +90,13 @@ export interface StartResult {
   status: string;
   /** E5c: presente al reanudar por session_id (una sesión reanudada puede estar en umbral). */
   progress?: CalibrationProgress;
-  /** CRAFT-01 §5.4: avisos NO bloqueantes del modo degradado (dato de contexto no declarado). */
-  craft_warnings?: string[];
+  /** CRAFT-01 §5.4 / #75: avisos NO bloqueantes del modo degradado (código estable, no frase). */
+  craft_warnings?: CraftWarning[];
 }
 
 /** Respuesta de `verdict`: turno siguiente (active) O cierre (converged). El front bifurca por `status`. */
 export type VerdictResult =
-  | { turn: CalibrationTurn; status: 'active'; progress: CalibrationProgress; craft_warnings?: string[] }
+  | { turn: CalibrationTurn; status: 'active'; progress: CalibrationProgress; craft_warnings?: CraftWarning[] }
   | { status: 'converged'; total_turns: number; message: string };
 
 /** Respuesta de `status`: cabecera cruda + turnos (para reconstruir una sesión al retomar). */

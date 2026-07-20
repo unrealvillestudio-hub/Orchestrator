@@ -275,14 +275,17 @@ function renderArtifact(artifact: Record<string, unknown> | null): string {
  * craft_warnings (§5.4): avisos NO bloqueantes para el operador, derivados de `skipped`
  * (ausencia DECLARADA de dato) — NUNCA de `errors` (los fallos de lectura son problema de
  * infra, no del operador). Array vacío cuando todo está declarado. El Seeder los pinta.
+ *
+ * #75: viaja el CÓDIGO estable (`SkipRecord` = `{ module, reason }`, con `reason` en su forma
+ * canónica en MAYÚSCULAS: ARTEFACTO/MODO/FAMILIA/TIPO DE VOZ NO DECLARADO), NO una frase
+ * traducida. Antes esta función reducía cada SkipRecord a una frase en minúscula y el front la
+ * volvía a mapear a texto legible: dos capas de traducción encadenadas. Si alguien tocaba la
+ * frase intermedia, el mapa del front dejaba de acertar EN SILENCIO y el operador veía el texto
+ * intermedio — el mismo patrón de fallo enmascarado que este sprint persigue. Ahora el front
+ * traduce UNA sola vez, sobre `reason` (código estable), con fallback a mostrar el código crudo.
  */
-function craftWarnings(skipped: SkipRecord[]): string[] {
-  return skipped.map((s) => {
-    if (s.module === 'psy') return 'familia PSY no declarada';
-    if (s.module === 'profile') return 'tipo de voz no declarado';
-    // 'written|oral'
-    return s.reason === 'MODO NO DECLARADO' ? 'modo (escrito/oral) no declarado' : 'artefacto no declarado';
-  });
+function craftWarnings(skipped: SkipRecord[]): SkipRecord[] {
+  return skipped.map((s) => ({ module: s.module, reason: s.reason }));
 }
 
 /**

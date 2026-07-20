@@ -9,7 +9,7 @@ import { listOptions, IidError, type IidSession, type ListOptions } from '../../
 import {
   listSessions, startCalibration, submitVerdict, convergeSession, getStatus,
   type CalibrationSessionSummary, type CalibrationTurn, type CalibrationProgress, type VerdictResult,
-  type VoiceType, type PsyFamily, type TargetArtifact,
+  type VoiceType, type PsyFamily, type TargetArtifact, type CraftWarning,
 } from '../../services/iidCalibrate';
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -68,16 +68,19 @@ const PSY_OPTIONS: { value: PsyFamily; label: string; help: string }[] = [
   { value: 'BRIDGE', label: 'BRIDGE', help: 'conectar lo conocido con lo nuevo' },
 ];
 
-// CRAFT-01 ajuste 3: mapa a texto legible para el operador. El backend (api/calibrate.ts
-// craftWarnings) ya reduce los skipped[].reason (de LOG, en mayúsculas) a estas frases; acá
-// se traducen a lenguaje llano. Si llega una frase sin mapa, se muestra tal cual (no rompe).
+// CRAFT-01 #75: mapa a texto legible para el operador, keyeado sobre el CÓDIGO ESTABLE
+// (`reason`, en MAYÚSCULAS) que manda el backend — NO sobre una frase intermedia. Antes había
+// dos capas de traducción encadenadas (backend frase→minúscula, front frase→legible); si la
+// frase intermedia cambiaba, este mapa fallaba EN SILENCIO. Ahora se traduce UNA sola vez,
+// sobre `reason`. Fallback obligatorio: un `reason` sin mapa se muestra tal cual (no se
+// descarta ni rompe).
 const WARNING_TEXT: Record<string, string> = {
-  'artefacto no declarado': 'No dijiste dónde se publica',
-  'modo (escrito/oral) no declarado': 'No está claro si es texto o guion hablado',
-  'familia PSY no declarada': 'No declaraste el objetivo psicológico',
-  'tipo de voz no declarado': 'No declaraste el tipo de voz',
+  'ARTEFACTO NO DECLARADO': 'No dijiste dónde se publica',
+  'MODO NO DECLARADO': 'No está claro si es texto o guion hablado',
+  'FAMILIA NO DECLARADA': 'No declaraste el objetivo psicológico',
+  'TIPO DE VOZ NO DECLARADO': 'No declaraste el tipo de voz',
 };
-const humanizeWarning = (w: string): string => WARNING_TEXT[w] ?? w;
+const humanizeWarning = (w: CraftWarning): string => WARNING_TEXT[w.reason] ?? w.reason;
 
 export default function CalibrationConsole({ session }: { session: IidSession }) {
   const [mode, setMode] = useState<Mode>('select');
@@ -115,7 +118,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
   const [converged, setConverged] = useState<{ message: string; total_turns: number } | null>(null);
 
   // CRAFT-01 §5.4: avisos NO bloqueantes del modo degradado, derivados de `skipped` server-side.
-  const [craftWarnings, setCraftWarnings] = useState<string[]>([]);
+  const [craftWarnings, setCraftWarnings] = useState<CraftWarning[]>([]);
 
   // Marcas del scope (la EF list_options ya filtra por brand_scope — mismo patrón que Unified).
   useEffect(() => {
@@ -804,7 +807,7 @@ function LoopView({
   notes: string;
   setNotes: (v: string) => void;
   progress: CalibrationProgress | null;
-  craftWarnings: string[];
+  craftWarnings: CraftWarning[];
   loopError: string | null;
   retry: RetryKind;
   onSend: () => void;
