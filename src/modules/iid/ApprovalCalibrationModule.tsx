@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  RefreshCw, Inbox, CheckCircle2, XCircle, AlertTriangle, ChevronLeft, ChevronRight,
+  RefreshCw, Inbox, CheckCircle2, XCircle, AlertTriangle, ChevronLeft, ChevronRight, ShieldCheck, ShieldAlert,
 } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import type { IidSession } from '../../services/iidInbound';
@@ -166,6 +166,29 @@ function BrandPill({ label, count, active, onClick }: { label: string; count: nu
   );
 }
 
+// ── Etiqueta de la primera opinión del watcher ───────────────────────────────────
+// Informativa: NO condiciona los botones. Sam puede aprobar lo que el watcher rechazó
+// (el dato valioso: "watcher se equivocó") o rechazar lo que el watcher aprobó.
+function WatcherBadge({ result, gate }: { result: 'PASS' | 'REJECT' | null; gate: string | null }) {
+  if (result === 'REJECT') {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/30 text-rose-300"
+            title="El watcher rechazó esta pieza. Si creés que se equivocó, aprobala igual — ese es el dato valioso.">
+        <ShieldAlert size={10} /> Watcher: RECHAZÓ{gate ? ` · ${gate}` : ''}
+      </span>
+    );
+  }
+  if (result === 'PASS') {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400/80"
+            title="El watcher aprobó esta pieza.">
+        <ShieldCheck size={10} /> Watcher: OK
+      </span>
+    );
+  }
+  return null;
+}
+
 // ── Card de calibración ──────────────────────────────────────────────────────────
 function CalibrationCard({ piece, token, onResolved }: {
   piece: CalibrationPiece; token: string; onResolved: (id: string) => void;
@@ -225,14 +248,16 @@ function CalibrationCard({ piece, token, onResolved }: {
     );
   }
 
+  const rejected = piece.watcher_result === 'REJECT';
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
       className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden"
-      style={{ borderLeftWidth: 3, borderLeftColor: '#FFAB00' }}
+      style={{ borderLeftWidth: 3, borderLeftColor: rejected ? '#f43f5e' : '#FFAB00' }}
     >
       <div className="p-4 space-y-4">
-        {/* Contexto */}
+        {/* Contexto + primera opinión del watcher */}
         <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono text-zinc-600">
           <span className="text-accent/80 font-semibold">{piece.brand_id}</span>
           {piece.platform && <span>· {piece.platform}</span>}
@@ -240,6 +265,7 @@ function CalibrationCard({ piece, token, onResolved }: {
           {piece.voice && <span>· voice:{piece.voice}</span>}
           {piece.domain && <span>· {piece.domain}</span>}
           {piece.psycho_preset && <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">{piece.psycho_preset}</span>}
+          <WatcherBadge result={piece.watcher_result} gate={piece.watcher_gate} />
         </div>
 
         {/* Artefacto embebido */}

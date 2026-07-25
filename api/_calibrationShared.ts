@@ -111,10 +111,17 @@ export function publicArtifactUrl(brandId: string, pieceId: string): string {
 }
 
 // ── Tipos de pieza ────────────────────────────────────────────────────────────
+// Fuente = content.orchestrator_jobs (superset: contiene TANTO las piezas que el
+// watcher aprobó, status='awaiting_approval', COMO las que rechazó por criterio de
+// marca, status='failed' + assets.watcher.result='REJECT'). content_pieces sólo tiene
+// las aprobadas — insuficiente para calibrar. El id de la pieza en el corpus es el
+// orchestrator_jobs.id (estable también para las rechazadas, que no tienen fila en
+// content_pieces).
 export interface PieceAssets {
   copy?: { aife_filtered?: string; raw?: string; title?: string };
   image?: { url?: string };
   builder_meta?: { psycho_preset?: string; audience_frame?: string };
+  watcher?: { result?: string; failed_gate?: string | null };
 }
 export interface ContentPiece {
   id: string;
@@ -123,7 +130,38 @@ export interface ContentPiece {
   platform?: string | null;
   format?: string | null;
   domain?: string | null;
+  status?: string | null;
   assets?: PieceAssets | null;
+}
+
+/** Veredicto del watcher normalizado (primera opinión que Sam valida o corrige). */
+export interface WatcherVerdict {
+  result: 'PASS' | 'REJECT' | null;
+  gate: string | null;
+}
+export function watcherOf(piece: ContentPiece): WatcherVerdict {
+  const w = piece.assets?.watcher;
+  const raw = typeof w?.result === 'string' ? w.result.toUpperCase() : null;
+  const result = raw === 'PASS' || raw === 'REJECT' ? raw : null;
+  return { result, gate: (result === 'REJECT' ? (w?.failed_gate ?? null) : null) };
+}
+
+/**
+ * Criterio EXACTO de "material de calibración" (verificado contra la DB en vivo):
+ *  (a) aprobada por watcher  → status='awaiting_approval', o
+ *  (b) rechazada por CRITERIO DE MARCA → status='failed' + watcher.result='REJECT'
+ *      + copy.aife_filtered presente (hubo texto real que evaluar).
+ * Se EXCLUYE: failed sin REJECT (fallo técnico), y cualquier pieza sin aife_filtered.
+ */
+export function isCalibrationMaterial(piece: ContentPiece): boolean {
+  const status = piece.status ?? null;
+  if (status === 'awaiting_approval') return true;
+  if (status === 'failed') {
+    const w = watcherOf(piece);
+    const hasAife = typeof piece.assets?.copy?.aife_filtered === 'string' && piece.assets.copy.aife_filtered.length > 0;
+    return w.result === 'REJECT' && hasAife;
+  }
+  return false;
 }
 
 /** Contexto plano de una pieza (lo que la bandeja muestra y el corpus copia). */
@@ -138,10 +176,14 @@ export interface PieceContext {
   audience_frame: string | null;
   title: string | null;
   artifact_url: string;
+  // Primera opinión del watcher (informativa; NO condiciona los botones de Sam).
+  watcher_result: 'PASS' | 'REJECT' | null;
+  watcher_gate: string | null;
 }
 
 export function toContext(piece: ContentPiece): PieceContext {
   const a = piece.assets ?? {};
+  const w = watcherOf(piece);
   return {
     piece_id: piece.id,
     brand_id: piece.brand_id,
@@ -153,6 +195,8 @@ export function toContext(piece: ContentPiece): PieceContext {
     audience_frame: a.builder_meta?.audience_frame ?? null,
     title: a.copy?.title ?? null,
     artifact_url: publicArtifactUrl(piece.brand_id, piece.id),
+    watcher_result: w.result,
+    watcher_gate: w.gate,
   };
 }
 
@@ -234,35 +278,40 @@ export function buildHtml(piece: ContentPiece): string {
 }
 
 // ── Acceso a datos (PostgREST, service_role) ──────────────────────────────────────
-const PIECE_SELECT = 'id,brand_id,voice,platform,format,domain,assets';
+// Fuente = content.orchestrator_jobs (ver nota en "Tipos de pieza"). Expuesta por
+// PostgREST vía Accept-Profile: content.
+const PIECE_SELECT = 'id,brand_id,voice,platform,format,domain,status,assets';
 
-/** Lee UNA pieza del schema content. null si no existe. Lanza en error de red/HTTP. */
+/** Lee UN orchestrator_job. null si no existe. Lanza en error de red/HTTP. */
 export async function fetchPiece(pieceId: string): Promise<ContentPiece | null> {
-  const url = `${SB_URL()}/rest/v1/content_pieces?id=eq.${encodeURIComponent(pieceId)}&select=${PIECE_SELECT}&limit=1`;
+  const url = `${SB_URL()}/rest/v1/orchestrator_jobs?id=eq.${encodeURIComponent(pieceId)}&select=${PIECE_SELECT}&limit=1`;
   const res = await fetch(url, {
     headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': 'content' },
   });
-  if (!res.ok) throw new Error(`content_pieces read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
+  if (!res.ok) throw new Error(`orchestrator_jobs read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
   const rows = (await res.json().catch(() => [])) as ContentPiece[];
   return Array.isArray(rows) && rows.length ? rows[0] : null;
 }
 
 /**
- * Lee TODAS las piezas awaiting_approval (opcionalmente por marca), ordenadas por
- * created_at asc. En Fase 1 el volumen lo permite (docenas). Cap defensivo para no
- * traer sin límite; si se supera, el llamante lo registra.
+ * Lee las piezas candidatas a calibración (opcionalmente por marca), ordenadas por
+ * created_at asc: status in (awaiting_approval, failed). El criterio fino
+ * (isCalibrationMaterial: failed exige REJECT + aife) se aplica en JS — PostgREST no
+ * expresa cómodamente el AND sobre jsonb + el OR con status. En Fase 1 el volumen lo
+ * permite (docenas). Cap defensivo; si se supera, el llamante lo registra.
  */
 export const AWAITING_CAP = 2000;
-export async function fetchAwaitingPieces(brand?: string): Promise<ContentPiece[]> {
+export async function fetchCalibrationPieces(brand?: string): Promise<ContentPiece[]> {
   const brandFilter = brand ? `&brand_id=eq.${encodeURIComponent(brand)}` : '';
-  const url = `${SB_URL()}/rest/v1/content_pieces?status=eq.awaiting_approval${brandFilter}`
+  const url = `${SB_URL()}/rest/v1/orchestrator_jobs?status=in.(awaiting_approval,failed)${brandFilter}`
     + `&select=${PIECE_SELECT}&order=created_at.asc&limit=${AWAITING_CAP}`;
   const res = await fetch(url, {
     headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': 'content' },
   });
-  if (!res.ok) throw new Error(`awaiting read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
+  if (!res.ok) throw new Error(`orchestrator_jobs read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
   const rows = (await res.json().catch(() => [])) as ContentPiece[];
-  return Array.isArray(rows) ? rows : [];
+  // Filtro fino: sólo material de calibración real (excluye fallos técnicos y sin-copy).
+  return (Array.isArray(rows) ? rows : []).filter(isCalibrationMaterial);
 }
 
 /** IDs de piezas ya evaluadas (existe fila en el corpus). Set para diff O(1). */
@@ -317,6 +366,8 @@ export async function upsertVerdict(row: {
   platform: string | null; format: string | null; psycho_preset: string | null;
   audience_frame: string | null; artifact_url: string; verdict: 'approved' | 'rejected';
   criterion: string | null; evaluated_by: string;
+  // Primera opinión del watcher, copiada de la pieza para poder comparar después.
+  watcher_result: 'PASS' | 'REJECT' | null; watcher_gate: string | null;
 }): Promise<Record<string, unknown>> {
   const url = `${SB_URL()}/rest/v1/approval_calibration?on_conflict=piece_id`;
   const res = await fetch(url, {

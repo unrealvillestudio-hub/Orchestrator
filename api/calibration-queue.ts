@@ -1,12 +1,16 @@
 /**
  * UNRLVL Orchestrator — api/calibration-queue.ts  (B4 · Fase 1, Pieza 3)
  *
- * Cola de calibración: piezas en `content.content_pieces` con status
- * `awaiting_approval` que AÚN no tienen fila en `intel.approval_calibration`
- * (= pendientes de evaluar). La fuente de verdad de "ya evaluada" es la existencia
- * de la fila en el corpus — no un flag en content_pieces.
+ * Cola de calibración: la bandeja ve TODO el material de calibración de
+ * `content.orchestrator_jobs` que AÚN no tiene fila en `intel.approval_calibration`:
+ *   (a) aprobadas por watcher   → status='awaiting_approval'
+ *   (b) rechazadas por watcher  → status='failed' + assets.watcher.result='REJECT'
+ *                                 + copy.aife_filtered presente (criterio de marca, no
+ *                                   fallo técnico)
+ * (ver isCalibrationMaterial en _calibrationShared.ts). La fuente de verdad de "ya
+ * evaluada" es la existencia de la fila en el corpus.
  *
- * El diff (awaiting − corpus) se hace en JS (sin RPC SECURITY DEFINER). Paginado en
+ * El diff (material − corpus) se hace en JS (sin RPC SECURITY DEFINER). Paginado en
  * bloques (default 50) para que Sam evalúe, cierre y vuelva donde quedó.
  *
  * GET /api/calibration-queue?limit=50&offset=0&brand=<opcional>
@@ -24,7 +28,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   applyCors, extractToken, requireAdmin,
-  fetchAwaitingPieces, fetchEvaluatedIds, toContext, AWAITING_CAP,
+  fetchCalibrationPieces, fetchEvaluatedIds, toContext, AWAITING_CAP,
   type ContentPiece,
 } from './_calibrationShared.js';
 
@@ -52,14 +56,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const brand = strParam(req.query.brand);
 
   try {
-    // Diff en JS: awaiting_approval − corpus. Evaluated se lee completo (todos los brands)
-    // para que el desglose by_brand sea global y estable aunque venga filtro de marca.
-    const [awaitingAll, evaluated] = await Promise.all([
-      fetchAwaitingPieces(),   // sin filtro → base para by_brand + total
+    // Diff en JS: material de calibración − corpus. Evaluated se lee completo (todos los
+    // brands) para que el desglose by_brand sea global y estable aunque venga filtro de marca.
+    const [materialAll, evaluated] = await Promise.all([
+      fetchCalibrationPieces(),   // sin filtro → base para by_brand + total (PASS + REJECT)
       fetchEvaluatedIds(),
     ]);
 
-    const pendingAll: ContentPiece[] = awaitingAll.filter((p) => !evaluated.has(p.id));
+    const pendingAll: ContentPiece[] = materialAll.filter((p) => !evaluated.has(p.id));
 
     const by_brand: Record<string, number> = {};
     for (const p of pendingAll) by_brand[p.brand_id] = (by_brand[p.brand_id] ?? 0) + 1;
@@ -69,8 +73,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const pagepieces = pendingScoped.slice(offset, offset + limit).map(toContext);
 
-    if (awaitingAll.length >= AWAITING_CAP) {
-      console.warn(`[calibration-queue] awaiting hit cap ${AWAITING_CAP} — la cola puede estar truncada`);
+    if (materialAll.length >= AWAITING_CAP) {
+      console.warn(`[calibration-queue] material hit cap ${AWAITING_CAP} — la cola puede estar truncada`);
     }
 
     return res.status(200).json({
@@ -79,7 +83,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       limit,
       offset,
       pieces: pagepieces,
-      ...(awaitingAll.length >= AWAITING_CAP ? { truncated: true } : {}),
+      ...(materialAll.length >= AWAITING_CAP ? { truncated: true } : {}),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

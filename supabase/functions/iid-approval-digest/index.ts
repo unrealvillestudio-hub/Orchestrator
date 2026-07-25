@@ -3,9 +3,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 // iid-approval-digest — B4 · Fase 1, Pieza 4 (el despertador de las 7am EST)
 //
 // UN email diario mínimo: NO lleva enlaces a piezas. Lleva el conteo de pendientes
-// (piezas en content.content_pieces status='awaiting_approval' SIN fila en el corpus
-// intel.approval_calibration), su desglose por marca, y UN botón → la bandeja de
-// calibración del Orchestrator. Es un despertador, no una carga de trabajo.
+// (material de calibración de content.orchestrator_jobs SIN fila en el corpus
+// intel.approval_calibration: aprobadas por watcher + rechazadas por criterio de marca),
+// su desglose por marca, y UN botón → la bandeja del Orchestrator. Despertador, no carga.
 //
 // Si hay 0 pendientes → NO envía (no molestar con bandeja vacía).
 //
@@ -27,7 +27,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 //   IID_CRON_SECRET                            → validar el x-cron-secret del cron
 //   RESEND_UNRLVL_KEY                          → enviar el email (cuenta UNRLVL)
 //   DIGEST_TO      (opcional, default content-approval@unrealvillestudio.com)
-//   DIGEST_FROM    (opcional, default "UNRLVL Calibración <no-reply@unrealvillestudio.com>")
+//   DIGEST_FROM    (opcional, default "Content Queue <content@unrealvillestudio.com>" — sender verificado)
 //   ORCHESTRATOR_URL (opcional, default https://orchestrator-unrlvl.vercel.app)
 
 const SB_URL      = Deno.env.get("SUPABASE_URL")!;
@@ -35,7 +35,7 @@ const SB_KEY      = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CRON_SECRET = Deno.env.get("IID_CRON_SECRET") ?? "";
 const RESEND      = Deno.env.get("RESEND_UNRLVL_KEY") ?? "";
 const DIGEST_TO   = Deno.env.get("DIGEST_TO") ?? "content-approval@unrealvillestudio.com";
-const DIGEST_FROM = Deno.env.get("DIGEST_FROM") ?? "UNRLVL Calibración <no-reply@unrealvillestudio.com>";
+const DIGEST_FROM = Deno.env.get("DIGEST_FROM") ?? "Content Queue <content@unrealvillestudio.com>";
 const ORCH_URL    = (Deno.env.get("ORCHESTRATOR_URL") ?? "https://orchestrator-unrlvl.vercel.app").replace(/\/+$/, "");
 
 const INBOX_URL = `${ORCH_URL}?view=calibration`;
@@ -56,26 +56,46 @@ function nyHour(): number {
   return parseInt(h, 10);
 }
 
-/** Diff awaiting_approval − corpus, agrupado por marca. */
+// Mismo criterio que api/_calibrationShared.ts (la bandeja ve TODO): material de
+// calibración = aprobada por watcher (awaiting_approval) o rechazada por criterio de
+// marca (failed + assets.watcher.result='REJECT' + copy.aife_filtered presente).
+type OJ = {
+  id: string;
+  brand_id: string;
+  status?: string | null;
+  assets?: { copy?: { aife_filtered?: string }; watcher?: { result?: string } } | null;
+};
+function isCalibrationMaterial(p: OJ): boolean {
+  if (p.status === "awaiting_approval") return true;
+  if (p.status === "failed") {
+    const rej = String(p.assets?.watcher?.result ?? "").toUpperCase() === "REJECT";
+    const hasAife = typeof p.assets?.copy?.aife_filtered === "string" && p.assets.copy.aife_filtered.length > 0;
+    return rej && hasAife;
+  }
+  return false;
+}
+
+/** Diff (material de calibración − corpus) sobre orchestrator_jobs, agrupado por marca. */
 async function pendingByBrand(): Promise<{ total: number; by_brand: Record<string, number> }> {
-  const [awaitingRes, corpusRes] = await Promise.all([
-    fetch(`${SB_URL}/rest/v1/content_pieces?status=eq.awaiting_approval&select=id,brand_id&limit=100000`, {
+  const [materialRes, corpusRes] = await Promise.all([
+    fetch(`${SB_URL}/rest/v1/orchestrator_jobs?status=in.(awaiting_approval,failed)&select=id,brand_id,status,assets&limit=100000`, {
       headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Accept-Profile": "content" },
     }),
     fetch(`${SB_URL}/rest/v1/approval_calibration?select=piece_id&limit=100000`, {
       headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Accept-Profile": "intel" },
     }),
   ]);
-  if (!awaitingRes.ok) throw new Error(`awaiting read failed: ${awaitingRes.status} ${(await awaitingRes.text().catch(() => "")).slice(0, 200)}`);
+  if (!materialRes.ok) throw new Error(`orchestrator_jobs read failed: ${materialRes.status} ${(await materialRes.text().catch(() => "")).slice(0, 200)}`);
   if (!corpusRes.ok) throw new Error(`corpus read failed: ${corpusRes.status} ${(await corpusRes.text().catch(() => "")).slice(0, 200)}`);
 
-  const awaiting = (await awaitingRes.json()) as Array<{ id: string; brand_id: string }>;
+  const rows = (await materialRes.json()) as OJ[];
   const corpus = (await corpusRes.json()) as Array<{ piece_id: string }>;
   const evaluated = new Set(corpus.map((r) => r.piece_id));
 
   const by_brand: Record<string, number> = {};
   let total = 0;
-  for (const p of awaiting) {
+  for (const p of rows) {
+    if (!isCalibrationMaterial(p)) continue;
     if (evaluated.has(p.id)) continue;
     by_brand[p.brand_id] = (by_brand[p.brand_id] ?? 0) + 1;
     total++;

@@ -1,10 +1,11 @@
 /**
  * UNRLVL Orchestrator — api/preview-render.ts  (B4 · Fase 1, Pieza 2)
  *
- * Renderiza el ARTEFACTO de preview de una content_piece (HTML autocontenido) y lo
+ * Renderiza el ARTEFACTO de preview de un orchestrator_job (HTML autocontenido) y lo
  * sube al Storage CDN (`unrlvl-media`). Muestra la pieza TAL COMO SALDRÍA: marca +
- * plataforma, imagen si la hay, título, texto completo. Evaluador-agnóstico (vive en
- * el CDN, independiente de quién juzga). Regla de veracidad: literal, no re-escribe.
+ * plataforma, imagen si la hay, título, texto completo — SIN el veredicto del watcher
+ * (eso es UX de la bandeja, no del artefacto). Evaluador-agnóstico (vive en el CDN,
+ * independiente de quién juzga). Regla de veracidad: literal, no re-escribe.
  *
  * Timing = LAZY (opción b del brief): se genera bajo demanda desde la bandeja la
  * primera vez que se muestra la pieza. NO toca el carril validado. Idempotente.
