@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna } from 'lucide-react';
+import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck } from 'lucide-react';
 import { useFlowStore } from './store/useFlowStore';
 import { cn, GlowDot } from './ui/components';
 import HubModule from './modules/hub/HubModule';
@@ -12,18 +12,29 @@ import EcosystemIntelModule from './modules/intel/EcosystemIntelModule';
 import LoginScreen from './modules/iid/LoginScreen';
 import IidSeedsUnified from './modules/iid/IidSeedsUnified';
 import CalibrationConsole from './modules/iid/CalibrationConsole';
+import ApprovalCalibrationModule from './modules/iid/ApprovalCalibrationModule';
 import type { IidSession } from './services/iidInbound';
 
 const BUILD_TAG = "OR_1.1";
 
-type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel";
+type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" | "calibration";
 
 const NAV_ITEMS = [
-  { id: "hub" as View,       label: "Orchestrator", icon: LayoutGrid },
-  { id: "launchpad" as View, label: "Launchpad",    icon: Layers },
-  { id: "monitor" as View,   label: "Monitor",      icon: History },
-  { id: "intel" as View,     label: "IID Intel",    icon: Telescope },
+  { id: "hub" as View,         label: "Orchestrator", icon: LayoutGrid },
+  { id: "launchpad" as View,   label: "Launchpad",    icon: Layers },
+  { id: "monitor" as View,     label: "Monitor",      icon: History },
+  { id: "intel" as View,       label: "IID Intel",    icon: Telescope },
+  { id: "calibration" as View, label: "Calibración",  icon: ClipboardCheck },
 ];
+
+// Deep-link ?view=calibration → abre la bandeja directo (botón del email despertador).
+function initialView(): View {
+  try {
+    const v = new URLSearchParams(window.location.search).get('view');
+    if (v === 'calibration') return 'calibration';
+  } catch { /* SSR / entorno sin window */ }
+  return 'hub';
+}
 
 const Logo = () => (
   <div className="flex items-center gap-2.5">
@@ -38,7 +49,7 @@ const Logo = () => (
 );
 
 export default function App() {
-  const [view, setView] = useState<View>("hub");
+  const [view, setView] = useState<View>(initialView);
   const [session, setSession] = useState<IidSession | null>(null);
   const { activePlan, completedFlows, isInterpreting } = useFlowStore();
 
@@ -62,8 +73,9 @@ export default function App() {
     planner:   "Revisar plan",
     executor:  "Ejecutando",
     launchpad: "Launchpad",
-    monitor:   "Monitor",
-    intel:     "Ecosystem Intel",
+    monitor:     "Monitor",
+    intel:       "Ecosystem Intel",
+    calibration: "Calibración",
   };
 
   const goHub = () => setView("hub");
@@ -163,9 +175,10 @@ export default function App() {
               onReset={() => setView("hub")}
             />
           )}
-          {view === "launchpad" && <LaunchpadModule />}
-          {view === "monitor"   && <JobMonitorModule />}
-          {view === "intel"     && <EcosystemIntelModule session={session} />}
+          {view === "launchpad"   && <LaunchpadModule />}
+          {view === "monitor"     && <JobMonitorModule />}
+          {view === "intel"       && <EcosystemIntelModule session={session} />}
+          {view === "calibration" && <ApprovalCalibrationModule session={session} />}
         </motion.div>
       </AnimatePresence>
 
