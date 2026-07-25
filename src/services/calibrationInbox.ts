@@ -26,6 +26,9 @@ export interface CalibrationPiece {
   audience_frame: string | null;
   title: string | null;
   artifact_url: string;
+  // Primera opinión del watcher (informativa; no condiciona los botones de Sam).
+  watcher_result: 'PASS' | 'REJECT' | null;
+  watcher_gate: string | null;
 }
 
 export interface QueueResult {

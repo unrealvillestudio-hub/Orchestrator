@@ -7,6 +7,18 @@ Instrumento que captura el criterio humano (SÍ/NO + prosa) atado al `piece_id`,
 entrenamiento para la futura aprobación automática. **NO publica nada.** El email y la bandeja son
 andamio; lo que persiste es el corpus `intel.approval_calibration`.
 
+> **Addendum (rama `feat/b4-inbox-see-all`, 2026-07-25): la bandeja ve TODO.**
+> La fuente pasa de `content.content_pieces` a **`content.orchestrator_jobs`** (superset), y el
+> `piece_id` del corpus es el **`orchestrator_jobs.id`**. La cola ahora incluye TANTO las piezas
+> que el watcher **aprobó** (`status='awaiting_approval'`) COMO las que **rechazó por criterio de
+> marca** (`status='failed'` + `assets.watcher.result='REJECT'` + `copy.aife_filtered` presente).
+> Se excluyen los fallos técnicos (failed sin REJECT) y las piezas sin copy. Cada tarjeta muestra
+> la **primera opinión del watcher** (etiqueta "Watcher: RECHAZÓ · gate" / "Watcher: OK"),
+> informativa — NO condiciona los botones. El corpus gana `watcher_result` + `watcher_gate` para
+> comparar Sam vs watcher. El watcher NO se ajusta en esta fase (Sam lo revisa al final con el
+> corpus recogido). Verificado en vivo: 7 pendientes (ForumPHs 4 + NeuroneSCF 3 · 2 PASS + 5 REJECT).
+> Sender del digest: `Content Queue <content@unrealvillestudio.com>`.
+
 ---
 
 ## 1. Qué se construyó

@@ -78,6 +78,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       verdict,
       criterion: criterion || null, // approved sin comentario → null
       evaluated_by,
+      // Primera opinión del watcher, copiada de la pieza (para comparar Sam vs watcher).
+      watcher_result: ctx.watcher_result,
+      watcher_gate: ctx.watcher_gate,
     });
 
     return res.status(200).json({ ok: true, row });
