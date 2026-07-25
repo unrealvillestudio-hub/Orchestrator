@@ -15,7 +15,8 @@
  *
  * POST /api/preview-render
  * Body: { piece_id: string, session_token?: string }   (token también vía Authorization: Bearer)
- * Returns: { ok: true, piece_id, artifact_url }         (200) · 404 si la pieza no existe.
+ * Returns: { ok: true, piece_id, artifact_url, html }   (200) · 404 si la pieza no existe.
+ *   html = el HTML crudo, para render vía <iframe srcdoc> (el CDN sirve text/plain).
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -38,8 +39,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!pieceId) return res.status(400).json({ error: 'piece_id required' });
 
   try {
-    const { artifact_url } = await ensureArtifact(pieceId);
-    return res.status(200).json({ ok: true, piece_id: pieceId, artifact_url });
+    const { artifact_url, html } = await ensureArtifact(pieceId);
+    return res.status(200).json({ ok: true, piece_id: pieceId, artifact_url, html });
   } catch (err) {
     if (err instanceof PieceNotFound) return res.status(404).json({ error: 'piece_not_found', piece_id: pieceId });
     const message = err instanceof Error ? err.message : String(err);

@@ -193,7 +193,10 @@ function WatcherBadge({ result, gate }: { result: 'PASS' | 'REJECT' | null; gate
 function CalibrationCard({ piece, token, onResolved }: {
   piece: CalibrationPiece; token: string; onResolved: (id: string) => void;
 }) {
-  // Render lazy del artefacto: aseguramos que el HTML existe en el CDN antes de embeberlo.
+  // Render lazy del artefacto. Guardamos el HTML crudo (para <iframe srcdoc>) y la URL
+  // del CDN (link durable). NO se usa src={cdn_url}: Supabase sirve el objeto como
+  // text/plain + nosniff, así que embeber por src mostraría el código, no la pieza.
+  const [artHtml, setArtHtml] = useState<string | null>(null);
   const [artUrl, setArtUrl]   = useState<string | null>(null);
   const [artErr, setArtErr]   = useState<string | null>(null);
 
@@ -206,7 +209,7 @@ function CalibrationCard({ piece, token, onResolved }: {
   useEffect(() => {
     let alive = true;
     renderArtifact(token, piece.piece_id)
-      .then((r) => { if (alive) setArtUrl(r.artifact_url); })
+      .then((r) => { if (alive) { setArtHtml(r.html); setArtUrl(r.artifact_url); } })
       .catch((err) => { if (alive) setArtErr(err instanceof CalibrationError ? err.message : 'No se pudo renderizar el artefacto.'); });
     return () => { alive = false; };
   }, [piece.piece_id, token]);
@@ -274,13 +277,15 @@ function CalibrationCard({ piece, token, onResolved }: {
             <div className="p-4 text-[11px] text-rose-400/90 font-mono flex items-center gap-2">
               <AlertTriangle size={13} /> {artErr}
             </div>
-          ) : !artUrl ? (
+          ) : artHtml === null ? (
             <div className="flex items-center justify-center py-16 text-zinc-700"><Spinner size={18} /></div>
           ) : (
+            // srcdoc (no src): renderiza el HTML directo. El CDN sirve text/plain, así que
+            // embeber por src mostraría el código en vez de la pieza.
             <iframe
-              src={artUrl}
+              srcDoc={artHtml}
               title={`preview-${piece.piece_id}`}
-              sandbox="allow-same-origin"
+              sandbox=""
               className="w-full"
               style={{ height: 480, border: 'none', background: '#050508' }}
             />
