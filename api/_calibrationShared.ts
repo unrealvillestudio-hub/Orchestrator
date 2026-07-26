@@ -325,7 +325,12 @@ export async function fetchEvaluatedIds(): Promise<Set<string>> {
   return new Set((Array.isArray(rows) ? rows : []).map((r) => r.piece_id));
 }
 
-/** Sube el HTML al bucket público (idempotente vía x-upsert). */
+/**
+ * Sube el HTML al bucket público (idempotente vía x-upsert).
+ * Content-Type EXACTAMENTE 'text/html' (sin '; charset=utf-8'): Storage compara el
+ * header COMPLETO contra allowed_mime_types=['text/html'] y el sufijo charset da
+ * 415 invalid_mime_type. El charset ya va en el <meta charset> del propio HTML.
+ */
 export async function uploadArtifact(brandId: string, pieceId: string, html: string): Promise<void> {
   const path = encodePath(artifactPath(brandId, pieceId));
   const res = await fetch(`${SB_URL()}/storage/v1/object/${BUCKET}/${path}`, {
@@ -333,7 +338,7 @@ export async function uploadArtifact(brandId: string, pieceId: string, html: str
     headers: {
       apikey: SB_KEY(),
       Authorization: `Bearer ${SB_KEY()}`,
-      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Type': 'text/html',
       'x-upsert': 'true',
     },
     body: html,
@@ -347,14 +352,24 @@ export class PieceNotFound extends Error {
 }
 
 /**
- * Genera (o regenera) el artefacto de una pieza y devuelve su URL pública + contexto.
+ * Genera (o regenera) el artefacto de una pieza: lo sube al CDN (durable, evaluador-
+ * agnóstico — es el artifact_url del corpus) y devuelve TAMBIÉN el HTML crudo.
+ *
+ * El HTML se devuelve porque Supabase sirve los objetos públicos como
+ * `text/plain` + `X-Content-Type-Options: nosniff` (medida de seguridad de la
+ * plataforma: no se puede servir HTML vivo desde supabase.co). Por eso la bandeja NO
+ * puede embeber el artefacto con `<iframe src={cdn_url}>` (mostraría el código); lo
+ * renderiza con `<iframe srcdoc={html}>`, que dibuja el HTML directo sin depender del
+ * content-type con que el CDN lo sirva.
+ *
  * Lanza PieceNotFound si la pieza no existe.
  */
-export async function ensureArtifact(pieceId: string): Promise<{ artifact_url: string; piece: ContentPiece }> {
+export async function ensureArtifact(pieceId: string): Promise<{ artifact_url: string; piece: ContentPiece; html: string }> {
   const piece = await fetchPiece(pieceId);
   if (!piece) throw new PieceNotFound(pieceId);
-  await uploadArtifact(piece.brand_id, piece.id, buildHtml(piece));
-  return { artifact_url: publicArtifactUrl(piece.brand_id, piece.id), piece };
+  const html = buildHtml(piece);
+  await uploadArtifact(piece.brand_id, piece.id, html);
+  return { artifact_url: publicArtifactUrl(piece.brand_id, piece.id), piece, html };
 }
 
 /**

@@ -106,8 +106,12 @@ export function fetchQueue(
   return req<QueueResult>(`/api/calibration-queue${qs ? `?${qs}` : ''}`, token);
 }
 
-/** Garantiza el artefacto de una pieza y devuelve su URL pública (render lazy). */
-export function renderArtifact(token: string, piece_id: string): Promise<{ ok: true; piece_id: string; artifact_url: string }> {
+/**
+ * Garantiza el artefacto de una pieza (render lazy). Devuelve su URL pública en el CDN
+ * (artifact_url, durable) y el HTML crudo (para render vía <iframe srcdoc>, porque el
+ * CDN sirve los objetos como text/plain y no se pueden embeber con src).
+ */
+export function renderArtifact(token: string, piece_id: string): Promise<{ ok: true; piece_id: string; artifact_url: string; html: string }> {
   return req('/api/preview-render', token, { method: 'POST', body: { piece_id } });
 }
 
