@@ -29,6 +29,10 @@ export interface CalibrationPiece {
   // Primera opinión del watcher (informativa; no condiciona los botones de Sam).
   watcher_result: 'PASS' | 'REJECT' | null;
   watcher_gate: string | null;
+  // Detalle por reglas enumeradas (piezas post content-run-stage v56). El badge muestra
+  // los códigos de regla; cae a watcher_gate cuando failed_rules viene vacío (piezas viejas).
+  watcher_failed_rules: string[];
+  watcher_rules_evaluated: number | null;
 }
 
 export interface QueueResult {
