@@ -169,12 +169,28 @@ function BrandPill({ label, count, active, onClick }: { label: string; count: nu
 // ── Etiqueta de la primera opinión del watcher ───────────────────────────────────
 // Informativa: NO condiciona los botones. Sam puede aprobar lo que el watcher rechazó
 // (el dato valioso: "watcher se equivocó") o rechazar lo que el watcher aprobó.
-function WatcherBadge({ result, gate }: { result: 'PASS' | 'REJECT' | null; gate: string | null }) {
+function WatcherBadge({ result, gate, failedRules, rulesEvaluated }: {
+  result: 'PASS' | 'REJECT' | null;
+  gate: string | null;
+  failedRules?: string[] | null;
+  rulesEvaluated?: number | null;
+}) {
   if (result === 'REJECT') {
+    // Detalle primario: los CÓDIGOS de regla incumplidos (content-run-stage v56+). Si
+    // vienen varios, se muestran todos. Si vienen vacíos/ausentes (piezas anteriores al
+    // deploy), caemos al nombre del gate — nunca a `undefined` ni a pantalla en blanco.
+    const codes = (Array.isArray(failedRules) ? failedRules : []).filter(Boolean);
+    const detail = codes.length ? codes.join(', ') : (gate ?? null);
     return (
       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/30 text-rose-300"
             title="El watcher rechazó esta pieza. Si creés que se equivocó, aprobala igual — ese es el dato valioso.">
-        <ShieldAlert size={10} /> Watcher: RECHAZÓ{gate ? ` · ${gate}` : ''}
+        <ShieldAlert size={10} /> Watcher: RECHAZÓ{detail ? ` · ${detail}` : ''}
+        {typeof rulesEvaluated === 'number' && (
+          <span className="text-rose-300/45"
+                title="Contra cuántas reglas enumeradas se juzgó esta pieza.">
+            · {rulesEvaluated} regla{rulesEvaluated === 1 ? '' : 's'}
+          </span>
+        )}
       </span>
     );
   }
@@ -268,7 +284,12 @@ function CalibrationCard({ piece, token, onResolved }: {
           {piece.voice && <span>· voice:{piece.voice}</span>}
           {piece.domain && <span>· {piece.domain}</span>}
           {piece.psycho_preset && <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">{piece.psycho_preset}</span>}
-          <WatcherBadge result={piece.watcher_result} gate={piece.watcher_gate} />
+          <WatcherBadge
+            result={piece.watcher_result}
+            gate={piece.watcher_gate}
+            failedRules={piece.watcher_failed_rules}
+            rulesEvaluated={piece.watcher_rules_evaluated}
+          />
         </div>
 
         {/* Artefacto embebido */}

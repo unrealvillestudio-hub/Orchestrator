@@ -121,7 +121,15 @@ export interface PieceAssets {
   copy?: { aife_filtered?: string; raw?: string; title?: string };
   image?: { url?: string };
   builder_meta?: { psycho_preset?: string; audience_frame?: string };
-  watcher?: { result?: string; failed_gate?: string | null };
+  watcher?: {
+    result?: string;
+    failed_gate?: string | null;
+    // P4 (content-run-stage v56+): códigos de regla BLOQUEANTES del gate que falló
+    // (gate_detail[failed_gate].violated) y cuántas reglas enumeradas aplicaban a la
+    // pieza (ctx.rules.length). Ausentes en piezas anteriores al deploy de v56.
+    failed_rules?: string[] | null;
+    rules_evaluated?: number | null;
+  };
 }
 export interface ContentPiece {
   id: string;
@@ -138,12 +146,28 @@ export interface ContentPiece {
 export interface WatcherVerdict {
   result: 'PASS' | 'REJECT' | null;
   gate: string | null;
+  // Códigos de regla incumplidos (P4). El badge los prefiere al nombre del gate. SIEMPRE
+  // array (nunca undefined hacia el front); vacío en piezas previas a content-run-stage v56
+  // → el badge cae a `gate`.
+  failed_rules: string[];
+  // Contra cuántas reglas enumeradas se juzgó la pieza (ctx.rules.length). null en piezas viejas.
+  rules_evaluated: number | null;
 }
 export function watcherOf(piece: ContentPiece): WatcherVerdict {
   const w = piece.assets?.watcher;
   const raw = typeof w?.result === 'string' ? w.result.toUpperCase() : null;
   const result = raw === 'PASS' || raw === 'REJECT' ? raw : null;
-  return { result, gate: (result === 'REJECT' ? (w?.failed_gate ?? null) : null) };
+  // Defensivo: solo strings no vacíos entran; cualquier otra forma → []. Nunca undefined.
+  const failed_rules = Array.isArray(w?.failed_rules)
+    ? w!.failed_rules.filter((c): c is string => typeof c === 'string' && c.length > 0)
+    : [];
+  const rules_evaluated = typeof w?.rules_evaluated === 'number' ? w.rules_evaluated : null;
+  return {
+    result,
+    gate: (result === 'REJECT' ? (w?.failed_gate ?? null) : null),
+    failed_rules,
+    rules_evaluated,
+  };
 }
 
 /**
@@ -179,6 +203,10 @@ export interface PieceContext {
   // Primera opinión del watcher (informativa; NO condiciona los botones de Sam).
   watcher_result: 'PASS' | 'REJECT' | null;
   watcher_gate: string | null;
+  // Detalle por reglas enumeradas (content-run-stage v56+). El badge muestra los códigos
+  // si vienen; si no (piezas viejas), cae a watcher_gate.
+  watcher_failed_rules: string[];
+  watcher_rules_evaluated: number | null;
 }
 
 export function toContext(piece: ContentPiece): PieceContext {
@@ -197,6 +225,8 @@ export function toContext(piece: ContentPiece): PieceContext {
     artifact_url: publicArtifactUrl(piece.brand_id, piece.id),
     watcher_result: w.result,
     watcher_gate: w.gate,
+    watcher_failed_rules: w.failed_rules,
+    watcher_rules_evaluated: w.rules_evaluated,
   };
 }
 
