@@ -26,7 +26,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   applyCors, extractToken, requireAdmin,
-  ensureArtifact, toContext, upsertVerdict, PieceNotFound,
+  ensureArtifact, toContext, watcherRulesForCorpus, upsertVerdict, PieceNotFound,
 } from './_calibrationShared.js';
 
 type Verdict = 'approved' | 'rejected';
@@ -64,6 +64,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Garantiza el artefacto y trae la pieza (fail-loud si no existe).
     const { artifact_url, piece } = await ensureArtifact(pieceId);
     const ctx = toContext(piece); // ya incluye artifact_url determinística (coincide con el garantizado)
+    // Nivel de regla, en forma nullable para el corpus (NULL si el bloque no lo trae; nunca []).
+    const corpusRules = watcherRulesForCorpus(piece);
 
     const row = await upsertVerdict({
       piece_id: ctx.piece_id,
@@ -81,6 +83,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Primera opinión del watcher, copiada de la pieza (para comparar Sam vs watcher).
       watcher_result: ctx.watcher_result,
       watcher_gate: ctx.watcher_gate,
+      // Nivel de regla: qué códigos dispararon y contra cuántas se juzgó. NULL = no registrado.
+      watcher_rules: corpusRules.rules,
+      watcher_rules_evaluated: corpusRules.rules_evaluated,
     });
 
     return res.status(200).json({ ok: true, row });

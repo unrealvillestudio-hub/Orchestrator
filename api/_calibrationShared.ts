@@ -171,6 +171,31 @@ export function watcherOf(piece: ContentPiece): WatcherVerdict {
 }
 
 /**
+ * Reglas del watcher en la forma que EL CORPUS necesita: preserva la distinción
+ * NULL vs array vacío que `watcherOf()` colapsa (para el badge del front, ausente → []).
+ *
+ *   null → NO se registró (pieza pre-v56: `assets.watcher.failed_rules` ausente).
+ *   []   → SÍ se registró y no disparó ninguna regla.
+ *
+ * Esa diferencia es el punto de todo el brief: una etiqueta no se recupera. Por eso el
+ * corpus NO puede guardar `[]` como sustituto de "no hay dato" — solo cuando el dato
+ * existe y está vacío de verdad. Se copia tal cual venga en assets (sin condicionar a
+ * REJECT: un PASS con rules_evaluated=N y failed_rules=[] es información válida y buscada).
+ */
+export interface WatcherRulesForCorpus {
+  rules: string[] | null;
+  rules_evaluated: number | null;
+}
+export function watcherRulesForCorpus(piece: ContentPiece): WatcherRulesForCorpus {
+  const w = piece.assets?.watcher;
+  const rules = Array.isArray(w?.failed_rules)
+    ? w!.failed_rules.filter((c): c is string => typeof c === 'string' && c.length > 0)
+    : null; // ausente → NULL (nunca []): "no se registró" ≠ "no disparó ninguna"
+  const rules_evaluated = typeof w?.rules_evaluated === 'number' ? w.rules_evaluated : null;
+  return { rules, rules_evaluated };
+}
+
+/**
  * Criterio EXACTO de "material de calibración" (verificado contra la DB en vivo):
  *  (a) aprobada por watcher  → status='awaiting_approval', o
  *  (b) rechazada por CRITERIO DE MARCA → status='failed' + watcher.result='REJECT'
@@ -413,6 +438,9 @@ export async function upsertVerdict(row: {
   criterion: string | null; evaluated_by: string;
   // Primera opinión del watcher, copiada de la pieza para poder comparar después.
   watcher_result: 'PASS' | 'REJECT' | null; watcher_gate: string | null;
+  // Nivel de REGLA (de assets.watcher.failed_rules / rules_evaluated). NULL ≠ [] a propósito:
+  // NULL = no registrado (pre-v56); [] = registrado, sin regla disparada. Ver watcherRulesForCorpus().
+  watcher_rules: string[] | null; watcher_rules_evaluated: number | null;
 }): Promise<Record<string, unknown>> {
   const url = `${SB_URL()}/rest/v1/approval_calibration?on_conflict=piece_id`;
   const res = await fetch(url, {
