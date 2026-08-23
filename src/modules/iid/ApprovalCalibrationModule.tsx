@@ -1,16 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import {
-  RefreshCw, Inbox, CheckCircle2, XCircle, AlertTriangle, ChevronLeft, ChevronRight,
-  ShieldCheck, ShieldAlert, Copy, Check, Archive, Clock, GitBranch, History,
-} from 'lucide-react';
+import { RefreshCw, Inbox, CheckCircle2, XCircle, AlertTriangle, Archive } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import type { IidSession } from '../../services/iidInbound';
 import {
   fetchQueue, saveVerdict, discardPiece, renderArtifact, CalibrationError,
   type CalibrationPiece, type QueueResult, type QueueOrder, type VerdictFilter,
-  type GenerationFilter, type FlowGeneration,
+  type GenerationFilter,
 } from '../../services/calibrationInbox';
+// Presentación compartida con la bandeja de publicación: la procedencia se cuenta igual
+// en las dos vistas o no sirve para compararlas.
+import {
+  CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, shortId,
+} from './pieceUi';
 
 const PAGE = 20;
 
@@ -91,10 +93,6 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
   const byBrand  = data?.by_brand ?? {};
   const pieces   = data?.pieces ?? [];
   const brands   = useMemo(() => Object.keys(byBrand).sort(), [byBrand]);
-  const pages    = Math.max(1, Math.ceil(total / PAGE));
-  const pageNo   = Math.min(pages, Math.floor(offset / PAGE) + 1);
-  const hasPrev  = offset > 0;
-  const hasNext  = offset + PAGE < total;
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-2">
@@ -124,9 +122,9 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
       {/* Filtro por marca — las marcas se descubren del dato, nunca se enumeran acá. */}
       {brands.length > 0 && (
         <div className="flex items-center gap-1 flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-3">
-          <BrandPill label="Todas" count={Object.values(byBrand).reduce((a, b) => a + b, 0)} active={brand === ''} onClick={() => apply({ brand: '' })} />
+          <CountPill label="Todas" count={Object.values(byBrand).reduce((a, b) => a + b, 0)} active={brand === ''} onClick={() => apply({ brand: '' })} />
           {brands.map((b) => (
-            <BrandPill key={b} label={b} count={byBrand[b]} active={brand === b} onClick={() => apply({ brand: b })} />
+            <CountPill key={b} label={b} count={byBrand[b]} active={brand === b} onClick={() => apply({ brand: b })} />
           ))}
         </div>
       )}
@@ -159,16 +157,7 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
       </div>
 
       {/* Por qué la generación puede venir sin dato — se dice, no se disimula. */}
-      {data && data.cutoffs_source !== 'seeded' && (
-        <div className="flex items-start gap-2 text-[11px] text-amber-400/80 bg-amber-500/[0.05] border border-amber-500/20 rounded-xl px-3 py-2 mb-4 font-mono leading-snug">
-          <History size={13} className="shrink-0 mt-0.5" />
-          <span>
-            {data.cutoffs_source === 'unavailable'
-              ? 'intel.pipeline_cutoffs no está disponible todavía — la generación del flujo se muestra como «sin corte».'
-              : 'intel.pipeline_cutoffs está vacía — sembrá los cortes para que la generación del flujo se calcule.'}
-          </span>
-        </div>
-      )}
+      {data && <CutoffsNotice source={data.cutoffs_source} />}
 
       {error && (
         <div className="flex items-start gap-2 text-[12px] text-rose-400/90 bg-rose-500/[0.06] border border-rose-500/20 rounded-xl px-3 py-2 mb-4">
@@ -193,252 +182,9 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
         </div>
       )}
 
-      {/* Paginación — SIEMPRE visible. Un botón deshabilitado sigue siendo un botón que
-          se lee: nadie puede orientarse en una lista cuyos controles desaparecen. */}
-      <div className="flex items-center justify-between gap-3 mt-6 text-[11px] font-mono">
-        <PageButton
-          onClick={() => goPage(Math.max(0, offset - PAGE))}
-          disabled={!hasPrev || loading}
-          label="Anterior"
-          icon={<ChevronLeft size={13} />}
-        />
-        <span className="text-zinc-400">
-          Página <span className="text-zinc-200">{pageNo}</span> de <span className="text-zinc-200">{pages}</span>
-          <span className="text-zinc-600"> · {total} pieza{total === 1 ? '' : 's'}</span>
-        </span>
-        <PageButton
-          onClick={() => goPage(offset + PAGE)}
-          disabled={!hasNext || loading}
-          label="Siguiente"
-          icon={<ChevronRight size={13} />}
-          iconRight
-        />
-      </div>
+      {/* Paginación — SIEMPRE visible, con "N de M". */}
+      <Pager offset={offset} pageSize={PAGE} total={total} loading={loading} onGo={goPage} />
     </div>
-  );
-}
-
-// ── Pill de marca ──────────────────────────────────────────────────────────────
-function BrandPill({ label, count, active, onClick }: { label: string; count: number; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all font-body',
-        active ? 'bg-accent text-black shadow' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
-      )}
-    >
-      {label}
-      <span className={cn(
-        'text-[9px] font-mono px-1.5 py-0.5 rounded-full',
-        active ? 'bg-black/20 text-black' : 'bg-zinc-800 text-zinc-600'
-      )}>{count}</span>
-    </button>
-  );
-}
-
-// ── Selector de orden / filtro ───────────────────────────────────────────────────
-function Selector({ label, value, onChange, options }: {
-  label: string; value: string; onChange: (v: string) => void; options: Array<[string, string]>;
-}) {
-  return (
-    <label className="flex items-center gap-2">
-      <span className="text-zinc-600">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1 text-zinc-300 outline-none focus:border-accent/50 transition-colors"
-      >
-        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-    </label>
-  );
-}
-
-// ── Botón de paginación (visible aunque esté deshabilitado) ──────────────────────
-function PageButton({ onClick, disabled, label, icon, iconRight }: {
-  onClick: () => void; disabled: boolean; label: string; icon: React.ReactNode; iconRight?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        'flex items-center gap-1 px-3 py-1.5 rounded-lg border transition-colors',
-        disabled
-          ? 'border-zinc-800/70 bg-zinc-900/40 text-zinc-600 cursor-not-allowed'
-          : 'border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-white'
-      )}
-    >
-      {!iconRight && icon}{label}{iconRight && icon}
-    </button>
-  );
-}
-
-// ── Fechas: hora local del operador, con la hora visible (no sólo el día) ────────
-const DT = new Intl.DateTimeFormat(undefined, {
-  year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-});
-function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '—' : DT.format(d);
-}
-/** Id corto: lo que Sam le pasa a Claude en el chat para que escriba el criterio. */
-function shortId(id: string | null | undefined): string {
-  return id ? id.slice(0, 8) : '—';
-}
-
-// ── Id copiable ──────────────────────────────────────────────────────────────────
-function CopyableId({ id, title }: { id: string; title: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(id);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
-    } catch {
-      // Sin permiso de portapapeles: el id sigue visible y seleccionable a mano.
-      setCopied(false);
-    }
-  };
-  return (
-    <button
-      onClick={copy}
-      title={`${title}: ${id} — clic para copiar`}
-      className={cn(
-        'inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono transition-colors',
-        copied ? 'bg-emerald-500/15 text-emerald-300' : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white'
-      )}
-    >
-      {copied ? <Check size={10} /> : <Copy size={10} />}
-      {shortId(id)}
-    </button>
-  );
-}
-
-// ── Generación del flujo ─────────────────────────────────────────────────────────
-function GenerationBadge({ generation, label, at }: {
-  generation: FlowGeneration; label: string | null; at: string | null;
-}) {
-  if (generation === 'previous') {
-    return (
-      <span
-        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/40 text-amber-300"
-        title={label ? `Anterior al corte «${label}» (${fmtDate(at)}). La juzgó un flujo que ya se arregló.` : 'Anterior al último corte del flujo.'}
-      >
-        <History size={10} /> Flujo anterior
-      </span>
-    );
-  }
-  if (generation === 'current') {
-    return (
-      <span
-        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/25 text-sky-300/85"
-        title={label ? `Posterior al corte «${label}» (${fmtDate(at)}).` : 'Posterior al último corte del flujo.'}
-      >
-        <GitBranch size={10} /> Flujo corregido
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800/70 border border-zinc-700/60 text-zinc-500"
-          title="No hay ningún corte de flujo aplicable a esta pieza: no se puede afirmar de qué generación es.">
-      <GitBranch size={10} /> Flujo: sin corte
-    </span>
-  );
-}
-
-// ── Etiqueta de la primera opinión del watcher ───────────────────────────────────
-// Informativa: NO condiciona los botones. Sam puede aprobar lo que el watcher rechazó
-// (el dato valioso: "watcher se equivocó") o rechazar lo que el watcher aprobó.
-function WatcherBadge({ result, gate, failedRules, rulesEvaluated }: {
-  result: 'PASS' | 'REJECT' | null;
-  gate: string | null;
-  failedRules?: string[] | null;
-  rulesEvaluated?: number | null;
-}) {
-  if (result === 'REJECT') {
-    // Detalle primario: los CÓDIGOS de regla incumplidos (content-run-stage v56+). Si
-    // vienen varios, se muestran todos. Si vienen vacíos/ausentes (piezas anteriores al
-    // deploy), caemos al nombre del gate — nunca a `undefined` ni a pantalla en blanco.
-    const codes = (Array.isArray(failedRules) ? failedRules : []).filter(Boolean);
-    const detail = codes.length ? codes.join(', ') : (gate ?? null);
-    return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/30 text-rose-300"
-            title="El watcher rechazó esta pieza. Si creés que se equivocó, aprobala igual — ese es el dato valioso.">
-        <ShieldAlert size={10} /> Watcher: RECHAZÓ{detail ? ` · ${detail}` : ''}
-        {typeof rulesEvaluated === 'number' && (
-          <span className="text-rose-300/45"
-                title="Contra cuántas reglas enumeradas se juzgó esta pieza.">
-            · {rulesEvaluated} regla{rulesEvaluated === 1 ? '' : 's'}
-          </span>
-        )}
-      </span>
-    );
-  }
-  if (result === 'PASS') {
-    return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400/80"
-            title="El watcher aprobó esta pieza.">
-        <ShieldCheck size={10} /> Watcher: OK
-      </span>
-    );
-  }
-  return null;
-}
-
-// ── Procedencia: de dónde salió esta pieza y contra qué se la juzgó ──────────────
-function Provenance({ piece }: { piece: CalibrationPiece }) {
-  const codes = piece.gate_evaluated_codes ?? [];
-  return (
-    <div className="rounded-xl border border-zinc-800/80 bg-[#08080c] px-3 py-2.5 text-[10px] font-mono text-zinc-500 space-y-1.5">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-        <Field label="pieza"><CopyableId id={piece.piece_id} title="piece_id" /></Field>
-        {piece.job_id && <Field label="job"><CopyableId id={piece.job_id} title="orchestrator_job_id" /></Field>}
-        {piece.finding_id && (
-          <Field label="hallazgo" hint="intel.iid_findings.id — el hallazgo del que salió esta pieza.">
-            <CopyableId id={piece.finding_id} title="finding_id" />
-          </Field>
-        )}
-        {typeof piece.attempts === 'number' && (
-          <Field label="intentos" hint="Jobs corridos sobre la misma fila de cola. Los reintentos no son piezas.">
-            <span className={cn('text-zinc-300', piece.attempts > 1 && 'text-amber-300/90')}>{piece.attempts}</span>
-          </Field>
-        )}
-        {piece.status && <Field label="estado"><span className="text-zinc-400">{piece.status}</span></Field>}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-        <Field label="creada" hint="content_pieces.created_at, en tu hora local.">
-          <span className="inline-flex items-center gap-1 text-zinc-400"><Clock size={9} /> {fmtDate(piece.created_at)}</span>
-        </Field>
-        <Field label="veredicto" hint="watcher_log.created_at, en tu hora local.">
-          <span className="inline-flex items-center gap-1 text-zinc-400"><Clock size={9} /> {fmtDate(piece.watcher_verdict_at)}</span>
-        </Field>
-        {typeof piece.gate_rules_evaluated === 'number' && (
-          <Field label="reglas evaluadas"><span className="text-zinc-300">{piece.gate_rules_evaluated}</span></Field>
-        )}
-      </div>
-
-      {codes.length > 0 && (
-        <div className="flex flex-wrap items-start gap-1.5 pt-0.5">
-          <span className="text-zinc-700 pt-0.5">códigos</span>
-          {codes.map((c) => (
-            <span key={c} className="px-1 py-0.5 rounded bg-zinc-800/80 text-zinc-400">{c}</span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1.5" title={hint}>
-      <span className="text-zinc-700">{label}</span>
-      {children}
-    </span>
   );
 }
 
