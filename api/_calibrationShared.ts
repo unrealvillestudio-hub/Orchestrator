@@ -1,16 +1,32 @@
 /**
- * UNRLVL Orchestrator — api/_calibrationShared.ts  (B4 · Fase 1)
+ * UNRLVL Orchestrator — api/_calibrationShared.ts  (B4 · Fase 1 · CALIB-UI-01)
  *
- * Helpers compartidos por los 3 endpoints de calibración (preview-render,
- * calibration-queue, calibration-verdict). Prefijo `_` = módulo, NO ruta Vercel
- * (mismo patrón que _craftModules.ts / _genomePromptBuilder.ts).
+ * Helpers compartidos por los endpoints de calibración (preview-render,
+ * calibration-queue, calibration-verdict, calibration-discard). Prefijo `_` = módulo,
+ * NO ruta Vercel (mismo patrón que _craftModules.ts / _genomePromptBuilder.ts).
  *
  * Contiene: parse defensivo de Supabase URL, auth HS256 (admin), CORS, encode de
  * paths, construcción del artefacto HTML, y el acceso a datos vía PostgREST con
  * service_role + Accept-Profile/Content-Profile (schemas content/intel expuestos).
  *
- * NO hay RPCs SECURITY DEFINER: el diff "awaiting_approval − corpus" se hace en JS
+ * NO hay RPCs SECURITY DEFINER: el diff "pendientes − corpus" se hace en JS
  * (evita la superficie confused-deputy que documenta docs/D6-crons-35-36-runbook.md).
+ *
+ * ── CALIB-UI-01: la fuente es content_pieces, no orchestrator_jobs ────────────────
+ * Hasta este cambio la bandeja leía `content.orchestrator_jobs`. Un job NO es una
+ * pieza: cada reintento sobre la misma fila de cola produce otro job, y la bandeja
+ * mostraba una tarjeta por intento — cientos de versiones muertas de un puñado de
+ * piezas (medido el 2026-08-23: 489 tarjetas para 15 piezas reales).
+ *
+ * La fuente correcta es `content.content_pieces`, con tres filtros:
+ *   1. `discarded_at IS NULL`                       — lo descartado sale de la bandeja
+ *   2. sin fila en `intel.approval_calibration`     — lo ya calibrado sale de la bandeja
+ *   3. la última versión por `queue_id`             — una tarjeta por pieza, no por intento
+ *
+ * El id del corpus sigue siendo el mismo que ya usa: verificado contra la base el
+ * 2026-08-23, las 9 filas de `intel.approval_calibration` referencian
+ * `content_pieces.id` (0 referencian `orchestrator_jobs.id`). El cambio de fuente no
+ * invalida ninguna fila existente.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -111,12 +127,6 @@ export function publicArtifactUrl(brandId: string, pieceId: string): string {
 }
 
 // ── Tipos de pieza ────────────────────────────────────────────────────────────
-// Fuente = content.orchestrator_jobs (superset: contiene TANTO las piezas que el
-// watcher aprobó, status='awaiting_approval', COMO las que rechazó por criterio de
-// marca, status='failed' + assets.watcher.result='REJECT'). content_pieces sólo tiene
-// las aprobadas — insuficiente para calibrar. El id de la pieza en el corpus es el
-// orchestrator_jobs.id (estable también para las rechazadas, que no tienen fila en
-// content_pieces).
 export interface PieceAssets {
   copy?: { aife_filtered?: string; raw?: string; title?: string };
   image?: { url?: string };
@@ -134,11 +144,21 @@ export interface PieceAssets {
 export interface ContentPiece {
   id: string;
   brand_id: string;
+  // Fila de cola de la que salió. Varias piezas con el mismo queue_id son VERSIONES
+  // de la misma pieza: la bandeja se queda con la última (ver latestPerQueue).
+  queue_id?: string | null;
+  // Hallazgo que la originó (intel.iid_findings). Se expone para trazabilidad.
+  finding_id?: string | null;
+  // Job del carril que la produjo. Enlaza con intel.watcher_log.job_id.
+  orchestrator_job_id?: string | null;
   voice?: string | null;
   platform?: string | null;
   format?: string | null;
   domain?: string | null;
   status?: string | null;
+  created_at?: string | null;
+  discarded_at?: string | null;
+  discarded_reason?: string | null;
   assets?: PieceAssets | null;
 }
 
@@ -195,22 +215,81 @@ export function watcherRulesForCorpus(piece: ContentPiece): WatcherRulesForCorpu
   return { rules, rules_evaluated };
 }
 
+// ── Procedencia: traza del watcher (intel.watcher_log) ────────────────────────────
 /**
- * Criterio EXACTO de "material de calibración" (verificado contra la DB en vivo):
- *  (a) aprobada por watcher  → status='awaiting_approval', o
- *  (b) rechazada por CRITERIO DE MARCA → status='failed' + watcher.result='REJECT'
- *      + copy.aife_filtered presente (hubo texto real que evaluar).
- * Se EXCLUYE: failed sin REJECT (fallo técnico), y cualquier pieza sin aife_filtered.
+ * Lo que la tarjeta necesita del LOG del watcher, que no está en `assets`:
+ *   verdict_at      — cuándo se emitió el veredicto (assets no lo guarda)
+ *   rules_evaluated — `gate_detail->'hard_rules'->>'evaluated'`
+ *   evaluated_codes — `gate_detail->'hard_rules'->'evaluated_codes'` (campo del PR #79;
+ *                     ausente en filas anteriores → [])
  */
-export function isCalibrationMaterial(piece: ContentPiece): boolean {
-  const status = piece.status ?? null;
-  if (status === 'awaiting_approval') return true;
-  if (status === 'failed') {
-    const w = watcherOf(piece);
-    const hasAife = typeof piece.assets?.copy?.aife_filtered === 'string' && piece.assets.copy.aife_filtered.length > 0;
-    return w.result === 'REJECT' && hasAife;
+export interface WatcherTrace {
+  verdict_at: string | null;
+  result: 'PASS' | 'REJECT' | null;
+  rules_evaluated: number | null;
+  evaluated_codes: string[];
+}
+export const EMPTY_TRACE: WatcherTrace = { verdict_at: null, result: null, rules_evaluated: null, evaluated_codes: [] };
+
+// ── Generación del flujo (intel.pipeline_cutoffs) ─────────────────────────────────
+/**
+ * Un corte de flujo: el momento desde el cual rige un arreglo. Vive en DATO
+ * (`intel.pipeline_cutoffs`), nunca en código — un arreglo futuro entra sembrando una
+ * fila, sin tocar ni redeployar este archivo.
+ *
+ * `scope`: NULL/vacío = alcance de ECOSISTEMA (aplica a toda marca); cualquier otro
+ * texto se compara contra `brand_id`. No hay enumeración de marcas ni centinela.
+ */
+export interface PipelineCutoff {
+  id?: string;
+  label: string;
+  effective_at: string;
+  scope: string | null;
+  notes?: string | null;
+}
+
+export type FlowGeneration = 'current' | 'previous' | 'unknown';
+
+export interface GenerationInfo {
+  generation: FlowGeneration;
+  cutoff_label: string | null;
+  cutoff_at: string | null;
+}
+export const UNKNOWN_GENERATION: GenerationInfo = { generation: 'unknown', cutoff_label: null, cutoff_at: null };
+
+function millis(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * ¿Esta pieza es del flujo corregido? Corte de referencia = el corte aplicable más
+ * reciente (aplicable = alcance de ecosistema, o alcance igual al brand_id de la pieza).
+ * Sin cortes aplicables, o sin created_at, la respuesta honesta es `unknown` — no
+ * `current`: no se afirma lo que no se sabe.
+ */
+export function generationOf(piece: ContentPiece, cutoffs: PipelineCutoff[]): GenerationInfo {
+  const pieceAt = millis(piece.created_at);
+  if (pieceAt === null) return UNKNOWN_GENERATION;
+
+  let ref: PipelineCutoff | null = null;
+  let refAt = -Infinity;
+  for (const c of cutoffs) {
+    const scope = typeof c.scope === 'string' ? c.scope.trim() : '';
+    const applies = scope === '' || scope === piece.brand_id;
+    if (!applies) continue;
+    const at = millis(c.effective_at);
+    if (at === null) continue;
+    if (at > refAt) { refAt = at; ref = c; }
   }
-  return false;
+  if (!ref) return UNKNOWN_GENERATION;
+
+  return {
+    generation: pieceAt >= refAt ? 'current' : 'previous',
+    cutoff_label: ref.label,
+    cutoff_at: ref.effective_at,
+  };
 }
 
 /** Contexto plano de una pieza (lo que la bandeja muestra y el corpus copia). */
@@ -232,11 +311,35 @@ export interface PieceContext {
   // si vienen; si no (piezas viejas), cae a watcher_gate.
   watcher_failed_rules: string[];
   watcher_rules_evaluated: number | null;
+
+  // ── Procedencia (CALIB-UI-01 §4.2) ──────────────────────────────────────────
+  status: string | null;
+  created_at: string | null;        // content_pieces.created_at
+  queue_id: string | null;
+  job_id: string | null;            // content_pieces.orchestrator_job_id
+  finding_id: string | null;
+  watcher_verdict_at: string | null; // watcher_log.created_at (última fila del job)
+  attempts: number | null;           // orchestrator_jobs con el mismo queue_id
+  gate_rules_evaluated: number | null; // gate_detail->hard_rules->evaluated
+  gate_evaluated_codes: string[];      // gate_detail->hard_rules->evaluated_codes (PR #79)
+  // Generación del flujo (intel.pipeline_cutoffs, leída en runtime).
+  generation: FlowGeneration;
+  cutoff_label: string | null;
+  cutoff_at: string | null;
 }
 
-export function toContext(piece: ContentPiece): PieceContext {
+/** Datos que no viven en la fila de la pieza y se resuelven aparte (traza, intentos, corte). */
+export interface ContextExtras {
+  trace?: WatcherTrace;
+  attempts?: number | null;
+  generation?: GenerationInfo;
+}
+
+export function toContext(piece: ContentPiece, extras: ContextExtras = {}): PieceContext {
   const a = piece.assets ?? {};
   const w = watcherOf(piece);
+  const trace = extras.trace ?? EMPTY_TRACE;
+  const gen = extras.generation ?? UNKNOWN_GENERATION;
   return {
     piece_id: piece.id,
     brand_id: piece.brand_id,
@@ -252,6 +355,19 @@ export function toContext(piece: ContentPiece): PieceContext {
     watcher_gate: w.gate,
     watcher_failed_rules: w.failed_rules,
     watcher_rules_evaluated: w.rules_evaluated,
+
+    status: piece.status ?? null,
+    created_at: piece.created_at ?? null,
+    queue_id: piece.queue_id ?? null,
+    job_id: piece.orchestrator_job_id ?? null,
+    finding_id: piece.finding_id ?? null,
+    watcher_verdict_at: trace.verdict_at,
+    attempts: extras.attempts ?? null,
+    gate_rules_evaluated: trace.rules_evaluated,
+    gate_evaluated_codes: trace.evaluated_codes,
+    generation: gen.generation,
+    cutoff_label: gen.cutoff_label,
+    cutoff_at: gen.cutoff_at,
   };
 }
 
@@ -333,51 +449,157 @@ export function buildHtml(piece: ContentPiece): string {
 }
 
 // ── Acceso a datos (PostgREST, service_role) ──────────────────────────────────────
-// Fuente = content.orchestrator_jobs (ver nota en "Tipos de pieza"). Expuesta por
-// PostgREST vía Accept-Profile: content.
-const PIECE_SELECT = 'id,brand_id,voice,platform,format,domain,status,assets';
+// Fuente = content.content_pieces (ver la nota del encabezado). Expuesta por PostgREST
+// vía Accept-Profile: content.
+const PIECE_SELECT = 'id,brand_id,queue_id,finding_id,orchestrator_job_id,voice,platform,format,domain,status,created_at,discarded_at,discarded_reason,assets';
 
-/** Lee UN orchestrator_job. null si no existe. Lanza en error de red/HTTP. */
+function sbHeaders(profile: 'content' | 'intel', extra: Record<string, string> = {}): Record<string, string> {
+  return { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': profile, ...extra };
+}
+
+/** Lee UNA pieza. null si no existe. Lanza en error de red/HTTP. */
 export async function fetchPiece(pieceId: string): Promise<ContentPiece | null> {
-  const url = `${SB_URL()}/rest/v1/orchestrator_jobs?id=eq.${encodeURIComponent(pieceId)}&select=${PIECE_SELECT}&limit=1`;
-  const res = await fetch(url, {
-    headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': 'content' },
-  });
-  if (!res.ok) throw new Error(`orchestrator_jobs read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
+  const url = `${SB_URL()}/rest/v1/content_pieces?id=eq.${encodeURIComponent(pieceId)}&select=${PIECE_SELECT}&limit=1`;
+  const res = await fetch(url, { headers: sbHeaders('content') });
+  if (!res.ok) throw new Error(`content_pieces read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
   const rows = (await res.json().catch(() => [])) as ContentPiece[];
   return Array.isArray(rows) && rows.length ? rows[0] : null;
 }
 
 /**
- * Lee las piezas candidatas a calibración (opcionalmente por marca), ordenadas por
- * created_at asc: status in (awaiting_approval, failed). El criterio fino
- * (isCalibrationMaterial: failed exige REJECT + aife) se aplica en JS — PostgREST no
- * expresa cómodamente el AND sobre jsonb + el OR con status. En Fase 1 el volumen lo
- * permite (docenas). Cap defensivo; si se supera, el llamante lo registra.
+ * Piezas candidatas a calibración: TODAS las no descartadas, ordenadas por created_at
+ * desc. El resto de los filtros (corpus, última versión por queue_id, marca, veredicto,
+ * generación) se aplican en JS sobre este conjunto — PostgREST no expresa cómodamente el
+ * anti-join contra el corpus ni el DISTINCT ON por queue_id.
+ *
+ * Cap defensivo; si se supera, el llamante lo registra y marca la respuesta como truncada.
  */
-export const AWAITING_CAP = 2000;
+export const PIECES_CAP = 2000;
 export async function fetchCalibrationPieces(brand?: string): Promise<ContentPiece[]> {
   const brandFilter = brand ? `&brand_id=eq.${encodeURIComponent(brand)}` : '';
-  const url = `${SB_URL()}/rest/v1/orchestrator_jobs?status=in.(awaiting_approval,failed)${brandFilter}`
-    + `&select=${PIECE_SELECT}&order=created_at.asc&limit=${AWAITING_CAP}`;
-  const res = await fetch(url, {
-    headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': 'content' },
-  });
-  if (!res.ok) throw new Error(`orchestrator_jobs read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
+  const url = `${SB_URL()}/rest/v1/content_pieces?discarded_at=is.null${brandFilter}`
+    + `&select=${PIECE_SELECT}&order=created_at.desc&limit=${PIECES_CAP}`;
+  const res = await fetch(url, { headers: sbHeaders('content') });
+  if (!res.ok) throw new Error(`content_pieces read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
   const rows = (await res.json().catch(() => [])) as ContentPiece[];
-  // Filtro fino: sólo material de calibración real (excluye fallos técnicos y sin-copy).
-  return (Array.isArray(rows) ? rows : []).filter(isCalibrationMaterial);
+  return Array.isArray(rows) ? rows : [];
+}
+
+/**
+ * Una tarjeta por PIEZA, no por intento: de cada `queue_id` sobrevive la versión con
+ * `created_at` más alto. Una pieza sin `queue_id` no tiene versiones — es su propio grupo.
+ * Empate de timestamp → gana la primera del input (el llamante lo entrega ya ordenado).
+ */
+export function latestPerQueue(pieces: ContentPiece[]): ContentPiece[] {
+  const best = new Map<string, ContentPiece>();
+  for (const p of pieces) {
+    const key = p.queue_id ? `queue:${p.queue_id}` : `piece:${p.id}`;
+    const cur = best.get(key);
+    if (!cur) { best.set(key, p); continue; }
+    const a = millis(p.created_at) ?? -Infinity;
+    const b = millis(cur.created_at) ?? -Infinity;
+    if (a > b) best.set(key, p);
+  }
+  return Array.from(best.values());
 }
 
 /** IDs de piezas ya evaluadas (existe fila en el corpus). Set para diff O(1). */
 export async function fetchEvaluatedIds(): Promise<Set<string>> {
   const url = `${SB_URL()}/rest/v1/approval_calibration?select=piece_id&limit=100000`;
-  const res = await fetch(url, {
-    headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': 'intel' },
-  });
+  const res = await fetch(url, { headers: sbHeaders('intel') });
   if (!res.ok) throw new Error(`corpus read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
   const rows = (await res.json().catch(() => [])) as Array<{ piece_id: string }>;
   return new Set((Array.isArray(rows) ? rows : []).map((r) => r.piece_id));
+}
+
+/**
+ * Cortes del flujo. `null` = la tabla no se pudo consultar (todavía no migrada): la
+ * bandeja degrada a generación `unknown` en vez de romperse. `[]` = tabla presente y
+ * vacía, que produce el mismo `unknown` pero por una razón distinta y verificable.
+ */
+export async function fetchPipelineCutoffs(): Promise<PipelineCutoff[] | null> {
+  const url = `${SB_URL()}/rest/v1/pipeline_cutoffs?select=id,label,effective_at,scope,notes&order=effective_at.desc&limit=1000`;
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: sbHeaders('intel') });
+  } catch {
+    return null;
+  }
+  if (!res.ok) {
+    // 404 / PGRST205 = la tabla aún no existe en el schema cache. No es un fallo del
+    // endpoint: es un corte que todavía no se sembró.
+    console.warn(`[calibration] pipeline_cutoffs no disponible (${res.status}) — generación = unknown`);
+    return null;
+  }
+  const rows = (await res.json().catch(() => [])) as PipelineCutoff[];
+  return Array.isArray(rows) ? rows : [];
+}
+
+/**
+ * Traza del watcher por job. Se pide sólo para los jobs de la página visible (el `in.()`
+ * de PostgREST crece con la lista). De cada job sobrevive la ÚLTIMA fila del log: un job
+ * puede tener varias (verificado en base — reintentos internos del watcher).
+ */
+export async function fetchWatcherTraces(jobIds: string[]): Promise<Map<string, WatcherTrace>> {
+  const out = new Map<string, WatcherTrace>();
+  const ids = Array.from(new Set(jobIds.filter((id): id is string => typeof id === 'string' && !!id)));
+  if (!ids.length) return out;
+
+  const list = ids.map((id) => `"${id}"`).join(',');
+  const url = `${SB_URL()}/rest/v1/watcher_log?job_id=in.(${encodeURIComponent(list)})`
+    + `&select=job_id,result,gate_detail,created_at&order=created_at.desc&limit=${ids.length * 20}`;
+  const res = await fetch(url, { headers: sbHeaders('intel') });
+  if (!res.ok) {
+    console.warn(`[calibration] watcher_log read failed: ${res.status} — procedencia parcial`);
+    return out;
+  }
+  const rows = (await res.json().catch(() => [])) as Array<{
+    job_id: string | null; result: string | null; gate_detail: any; created_at: string;
+  }>;
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row.job_id || out.has(row.job_id)) continue; // order desc → la primera es la última
+    const hard = row.gate_detail?.hard_rules ?? {};
+    const evaluated = Number(hard?.evaluated);
+    const codes = Array.isArray(hard?.evaluated_codes)
+      ? hard.evaluated_codes.filter((c: unknown): c is string => typeof c === 'string' && !!c)
+      : [];
+    const raw = typeof row.result === 'string' ? row.result.toUpperCase() : null;
+    out.set(row.job_id, {
+      verdict_at: row.created_at ?? null,
+      result: raw === 'PASS' || raw === 'REJECT' ? raw : null,
+      rules_evaluated: Number.isFinite(evaluated) ? evaluated : null,
+      evaluated_codes: codes,
+    });
+  }
+  return out;
+}
+
+/**
+ * Cuántos jobs se corrieron sobre cada fila de cola = cuántos INTENTOS hubo para llegar
+ * a esa pieza. Es el número que explica por qué la bandeja vieja mostraba cientos de
+ * tarjetas: son reintentos, no piezas.
+ */
+export const ATTEMPTS_CAP = 5000;
+export async function fetchAttemptsByQueue(queueIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const ids = Array.from(new Set(queueIds.filter((id): id is string => typeof id === 'string' && !!id)));
+  if (!ids.length) return out;
+
+  const list = ids.map((id) => `"${id}"`).join(',');
+  const url = `${SB_URL()}/rest/v1/orchestrator_jobs?queue_id=in.(${encodeURIComponent(list)})`
+    + `&select=queue_id&limit=${ATTEMPTS_CAP}`;
+  const res = await fetch(url, { headers: sbHeaders('content') });
+  if (!res.ok) {
+    console.warn(`[calibration] orchestrator_jobs count failed: ${res.status} — intentos sin dato`);
+    return out;
+  }
+  const rows = (await res.json().catch(() => [])) as Array<{ queue_id: string | null }>;
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r.queue_id) continue;
+    out.set(r.queue_id, (out.get(r.queue_id) ?? 0) + 1);
+  }
+  return out;
 }
 
 /**
@@ -457,4 +679,46 @@ export async function upsertVerdict(row: {
   if (!res.ok) throw new Error(`corpus upsert failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`);
   const rows = (await res.json().catch(() => [])) as Array<Record<string, unknown>>;
   return Array.isArray(rows) && rows.length ? rows[0] : {};
+}
+
+/** Error tipado para "la pieza ya estaba descartada" (no se pisa un descarte previo). */
+export class AlreadyDiscarded extends Error {
+  constructor(public piece_id: string, public discarded_at: string) {
+    super('already_discarded'); this.name = 'AlreadyDiscarded';
+  }
+}
+
+/**
+ * DESCARTAR ≠ RECHAZAR. Un rechazo dice "esto está mal" y entra al corpus; un descarte
+ * dice "no voy a juzgar esto" y NO entra al corpus — sólo sella la pieza para que salga
+ * de la bandeja. Confundirlos mete ruido en el material de entrenamiento.
+ *
+ * Esta función NO escribe en intel.approval_calibration. Sella `discarded_at` +
+ * `discarded_reason` en content.content_pieces y nada más.
+ */
+export async function discardPiece(pieceId: string, reason: string | null): Promise<ContentPiece> {
+  const piece = await fetchPiece(pieceId);
+  if (!piece) throw new PieceNotFound(pieceId);
+  if (piece.discarded_at) throw new AlreadyDiscarded(pieceId, piece.discarded_at);
+
+  const url = `${SB_URL()}/rest/v1/content_pieces?id=eq.${encodeURIComponent(pieceId)}&discarded_at=is.null`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      apikey: SB_KEY(),
+      Authorization: `Bearer ${SB_KEY()}`,
+      'Content-Type': 'application/json',
+      'Content-Profile': 'content',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify({ discarded_at: new Date().toISOString(), discarded_reason: reason }),
+  });
+  if (!res.ok) throw new Error(`discard failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`);
+  const rows = (await res.json().catch(() => [])) as ContentPiece[];
+  // Carrera con otro descarte concurrente: el filtro discarded_at=is.null no matcheó.
+  if (!Array.isArray(rows) || !rows.length) {
+    const fresh = await fetchPiece(pieceId);
+    throw new AlreadyDiscarded(pieceId, fresh?.discarded_at ?? new Date().toISOString());
+  }
+  return rows[0];
 }
