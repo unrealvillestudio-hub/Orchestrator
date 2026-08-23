@@ -10,13 +10,17 @@
  * Body: {
  *   piece_id: string,
  *   verdict: 'approved' | 'rejected',
- *   criterion?: string,            // OBLIGATORIO si rejected (párrafo libre); opcional si approved
+ *   criterion?: string,            // OPCIONAL en ambos veredictos (párrafo libre)
  *   evaluated_by?: string          // default 'sam'
  * }
  * Returns 200: { ok: true, row }   (la fila del corpus, con contexto completo)
  *
  * Reglas:
- *  · Criterio en prosa, NO categorías. Rechazo exige párrafo → 422 si falta/está vacío.
+ *  · Criterio en prosa, NO categorías, y SIEMPRE opcional (CALIB-UI-01 §2/§4.4). El
+ *    criterio se razona en el chat con Claude, no en la interfaz: obligar a escribirlo
+ *    acá empuja a poner cualquier cosa para avanzar, y eso envenena el corpus con ruido
+ *    que parece señal. Un rechazo sin criterio es una fila honesta que Claude completa
+ *    después; un rechazo con criterio de relleno es una fila que miente.
  *  · UPSERT por piece_id (una pieza = una fila; re-evaluar sobrescribe).
  *  · Garantiza el artefacto (render idempotente) antes del UPSERT → artifact_url del
  *    corpus SIEMPRE apunta a un artefacto real, aunque nadie lo haya visto en la bandeja.
@@ -50,11 +54,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: "verdict must be 'approved' or 'rejected'" });
   }
 
+  // Criterio opcional en los dos veredictos: la DB lo deja nullable y el corpus prefiere
+  // una fila sin criterio a una con relleno. Lo escribe Claude desde el chat, después.
   const criterion = typeof body.criterion === 'string' ? body.criterion.trim() : '';
-  // Regla dura: rechazar exige criterio en prosa (la DB lo deja nullable para approved).
-  if (verdict === 'rejected' && !criterion) {
-    return res.status(422).json({ error: 'criterion_required', message: 'El rechazo exige un criterio en prosa (no puede quedar vacío).' });
-  }
 
   const evaluated_by = (typeof body.evaluated_by === 'string' && body.evaluated_by.trim())
     ? body.evaluated_by.trim()
@@ -78,7 +80,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       audience_frame: ctx.audience_frame,
       artifact_url, // el recién garantizado (idéntico a ctx.artifact_url)
       verdict,
-      criterion: criterion || null, // approved sin comentario → null
+      criterion: criterion || null, // sin criterio → NULL (nunca '' ni relleno)
       evaluated_by,
       // Primera opinión del watcher, copiada de la pieza (para comparar Sam vs watcher).
       watcher_result: ctx.watcher_result,

@@ -1,9 +1,10 @@
 /**
- * calibrationInbox.ts — Orchestrator · B4 Fase 1 (bandeja de calibración)
+ * calibrationInbox.ts — Orchestrator · B4 Fase 1 · CALIB-UI-01 (bandeja de calibración)
  *
  * Cliente tipado de los endpoints Node del Orchestrator (mismo origen, `/api/*`):
- *   GET  /api/calibration-queue    → piezas pendientes de evaluar (paginado, filtro brand)
+ *   GET  /api/calibration-queue    → PIEZAS pendientes de evaluar (paginado, orden y filtros)
  *   POST /api/calibration-verdict  → guarda un veredicto en el corpus (UPSERT por piece_id)
+ *   POST /api/calibration-discard  → sella la pieza como descartada (NO entra al corpus)
  *   POST /api/preview-render       → renderiza el artefacto de una pieza al CDN (lazy, idempotente)
  *
  * El token de sesión (JWT admin de iid-inbound) viaja en `Authorization: Bearer`.
@@ -14,6 +15,22 @@
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 export type Verdict = 'approved' | 'rejected';
+
+/** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
+export type QueueOrder = 'recent' | 'oldest' | 'brand' | 'verdict';
+/** Filtro por primera opinión del watcher. */
+export type VerdictFilter = 'all' | 'PASS' | 'REJECT';
+/** Filtro por generación del flujo (ver `FlowGeneration`). */
+export type GenerationFilter = 'all' | 'current';
+
+/**
+ * ¿La pieza es del flujo corregido? Se calcula contra `intel.pipeline_cutoffs`, leída en
+ * runtime — ninguna fecha de corte vive en el código.
+ *   current  → posterior al último corte que le aplica
+ *   previous → anterior: la juzga un flujo que ya se arregló
+ *   unknown  → no hay corte aplicable (tabla vacía o todavía sin migrar)
+ */
+export type FlowGeneration = 'current' | 'previous' | 'unknown';
 
 export interface CalibrationPiece {
   piece_id: string;
@@ -33,6 +50,20 @@ export interface CalibrationPiece {
   // los códigos de regla; cae a watcher_gate cuando failed_rules viene vacío (piezas viejas).
   watcher_failed_rules: string[];
   watcher_rules_evaluated: number | null;
+
+  // ── Procedencia ────────────────────────────────────────────────────────────
+  status: string | null;
+  created_at: string | null;           // cuándo se creó la pieza
+  queue_id: string | null;
+  job_id: string | null;               // job del carril que la produjo
+  finding_id: string | null;           // hallazgo que la originó
+  watcher_verdict_at: string | null;   // cuándo se emitió el veredicto
+  attempts: number | null;             // intentos sobre esa fila de cola
+  gate_rules_evaluated: number | null; // reglas evaluadas por el watcher
+  gate_evaluated_codes: string[];      // códigos evaluados
+  generation: FlowGeneration;
+  cutoff_label: string | null;         // corte de referencia usado
+  cutoff_at: string | null;
 }
 
 export interface QueueResult {
@@ -40,7 +71,12 @@ export interface QueueResult {
   by_brand: Record<string, number>;
   limit: number;
   offset: number;
+  order: QueueOrder;
+  verdict: VerdictFilter;
+  generation: GenerationFilter;
   pieces: CalibrationPiece[];
+  /** Por qué la generación puede venir 'unknown': tabla ausente vs vacía vs sembrada. */
+  cutoffs_source: 'unavailable' | 'empty' | 'seeded';
   truncated?: boolean;
 }
 
@@ -97,15 +133,21 @@ async function req<T>(
 
 // ── Acciones ─────────────────────────────────────────────────────────────────
 
-/** Lista pendientes (paginado). brand opcional para filtrar por marca. */
+/** Lista pendientes (paginado). Todos los parámetros son opcionales. */
 export function fetchQueue(
   token: string,
-  opts: { limit?: number; offset?: number; brand?: string } = {},
+  opts: {
+    limit?: number; offset?: number; brand?: string;
+    order?: QueueOrder; verdict?: VerdictFilter; generation?: GenerationFilter;
+  } = {},
 ): Promise<QueueResult> {
   const q = new URLSearchParams();
   if (opts.limit != null) q.set('limit', String(opts.limit));
   if (opts.offset != null) q.set('offset', String(opts.offset));
   if (opts.brand) q.set('brand', opts.brand);
+  if (opts.order) q.set('order', opts.order);
+  if (opts.verdict) q.set('verdict', opts.verdict);
+  if (opts.generation) q.set('generation', opts.generation);
   const qs = q.toString();
   return req<QueueResult>(`/api/calibration-queue${qs ? `?${qs}` : ''}`, token);
 }
@@ -120,8 +162,9 @@ export function renderArtifact(token: string, piece_id: string): Promise<{ ok: t
 }
 
 /**
- * Guarda un veredicto. criterion obligatorio si verdict='rejected' (el server lo
- * revalida con 422; acá también lo exigimos en la UI).
+ * Guarda un veredicto en el corpus. `criterion` es OPCIONAL en los dos veredictos: el
+ * criterio se dicta en el chat con Claude, no acá. Obligarlo en la interfaz empuja a
+ * escribir relleno para avanzar, y eso envenena el corpus.
  */
 export function saveVerdict(
   token: string,
@@ -134,5 +177,19 @@ export function saveVerdict(
       verdict: input.verdict,
       criterion: input.criterion ?? null,
     },
+  });
+}
+
+/**
+ * Descarta una pieza: sale de la bandeja y NO entra al corpus. Descartar no es rechazar
+ * — un rechazo dice "esto está mal", un descarte dice "no voy a juzgar esto".
+ */
+export function discardPiece(
+  token: string,
+  input: { piece_id: string; reason?: string | null },
+): Promise<{ ok: true; piece_id: string; discarded_at: string | null; discarded_reason: string | null }> {
+  return req('/api/calibration-discard', token, {
+    method: 'POST',
+    body: { piece_id: input.piece_id, reason: input.reason ?? null },
   });
 }
