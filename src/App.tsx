@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck } from 'lucide-react';
+import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send } from 'lucide-react';
 import { useFlowStore } from './store/useFlowStore';
 import { cn, GlowDot } from './ui/components';
 import HubModule from './modules/hub/HubModule';
@@ -13,11 +13,12 @@ import LoginScreen from './modules/iid/LoginScreen';
 import IidSeedsUnified from './modules/iid/IidSeedsUnified';
 import CalibrationConsole from './modules/iid/CalibrationConsole';
 import ApprovalCalibrationModule from './modules/iid/ApprovalCalibrationModule';
+import PublishQueueModule from './modules/iid/PublishQueueModule';
 import type { IidSession } from './services/iidInbound';
 
 const BUILD_TAG = "OR_1.1";
 
-type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" | "calibration";
+type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" | "calibration" | "publish";
 
 const NAV_ITEMS = [
   { id: "hub" as View,         label: "Orchestrator", icon: LayoutGrid },
@@ -25,6 +26,7 @@ const NAV_ITEMS = [
   { id: "monitor" as View,     label: "Monitor",      icon: History },
   { id: "intel" as View,       label: "IID Intel",    icon: Telescope },
   { id: "calibration" as View, label: "Calibración",  icon: ClipboardCheck },
+  { id: "publish" as View,     label: "Publicación",  icon: Send },
 ];
 
 // Deep-link ?view=calibration → abre la bandeja directo (botón del email despertador).
@@ -32,6 +34,7 @@ function initialView(): View {
   try {
     const v = new URLSearchParams(window.location.search).get('view');
     if (v === 'calibration') return 'calibration';
+    if (v === 'publish') return 'publish';
   } catch { /* SSR / entorno sin window */ }
   return 'hub';
 }
@@ -76,6 +79,7 @@ export default function App() {
     monitor:     "Monitor",
     intel:       "Ecosystem Intel",
     calibration: "Calibración",
+    publish:     "Publicación",
   };
 
   const goHub = () => setView("hub");
@@ -179,6 +183,7 @@ export default function App() {
           {view === "monitor"     && <JobMonitorModule />}
           {view === "intel"       && <EcosystemIntelModule session={session} />}
           {view === "calibration" && <ApprovalCalibrationModule session={session} />}
+          {view === "publish"     && <PublishQueueModule session={session} />}
         </motion.div>
       </AnimatePresence>
 

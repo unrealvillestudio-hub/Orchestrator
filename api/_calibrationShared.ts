@@ -467,22 +467,36 @@ export async function fetchPiece(pieceId: string): Promise<ContentPiece | null> 
 }
 
 /**
- * Piezas candidatas a calibración: TODAS las no descartadas, ordenadas por created_at
- * desc. El resto de los filtros (corpus, última versión por queue_id, marca, veredicto,
- * generación) se aplican en JS sobre este conjunto — PostgREST no expresa cómodamente el
- * anti-join contra el corpus ni el DISTINCT ON por queue_id.
+ * Piezas vivas (no descartadas), ordenadas por created_at desc. Base común de las dos
+ * bandejas. El resto de los filtros (corpus, última versión por queue_id, marca, veredicto,
+ * generación, canal) se aplican en JS sobre este conjunto — PostgREST no expresa cómodamente
+ * el anti-join contra el corpus ni el DISTINCT ON por queue_id.
  *
  * Cap defensivo; si se supera, el llamante lo registra y marca la respuesta como truncada.
  */
 export const PIECES_CAP = 2000;
-export async function fetchCalibrationPieces(brand?: string): Promise<ContentPiece[]> {
-  const brandFilter = brand ? `&brand_id=eq.${encodeURIComponent(brand)}` : '';
-  const url = `${SB_URL()}/rest/v1/content_pieces?discarded_at=is.null${brandFilter}`
+export async function fetchLivePieces(
+  opts: { brand?: string; excludeStatuses?: string[] } = {},
+): Promise<ContentPiece[]> {
+  const brandFilter = opts.brand ? `&brand_id=eq.${encodeURIComponent(opts.brand)}` : '';
+  // Exclusión por estado, opcional: la bandeja de calibración juzga cualquier pieza viva,
+  // la de publicación sólo las que todavía no salieron del circuito. El eje lo decide el
+  // llamante; acá sólo se traduce a PostgREST.
+  const statuses = (opts.excludeStatuses ?? []).filter((s) => typeof s === 'string' && s);
+  const statusFilter = statuses.length
+    ? `&status=not.in.(${encodeURIComponent(statuses.map((s) => `"${s}"`).join(','))})`
+    : '';
+  const url = `${SB_URL()}/rest/v1/content_pieces?discarded_at=is.null${brandFilter}${statusFilter}`
     + `&select=${PIECE_SELECT}&order=created_at.desc&limit=${PIECES_CAP}`;
   const res = await fetch(url, { headers: sbHeaders('content') });
   if (!res.ok) throw new Error(`content_pieces read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
   const rows = (await res.json().catch(() => [])) as ContentPiece[];
   return Array.isArray(rows) ? rows : [];
+}
+
+/** Material de la bandeja de calibración: toda pieza viva, sin filtro de estado. */
+export function fetchCalibrationPieces(brand?: string): Promise<ContentPiece[]> {
+  return fetchLivePieces({ brand });
 }
 
 /**
