@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send } from 'lucide-react';
+import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send, ShieldQuestion } from 'lucide-react';
 import { useFlowStore } from './store/useFlowStore';
 import { cn, GlowDot } from './ui/components';
 import HubModule from './modules/hub/HubModule';
@@ -14,11 +14,12 @@ import IidSeedsUnified from './modules/iid/IidSeedsUnified';
 import CalibrationConsole from './modules/iid/CalibrationConsole';
 import ApprovalCalibrationModule from './modules/iid/ApprovalCalibrationModule';
 import PublishQueueModule from './modules/iid/PublishQueueModule';
+import ChallengedInboxModule from './modules/iid/ChallengedInboxModule';
 import type { IidSession } from './services/iidInbound';
 
 const BUILD_TAG = "OR_1.1";
 
-type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" | "calibration" | "publish";
+type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" | "calibration" | "challenged" | "publish";
 
 const NAV_ITEMS = [
   { id: "hub" as View,         label: "Orchestrator", icon: LayoutGrid },
@@ -26,6 +27,8 @@ const NAV_ITEMS = [
   { id: "monitor" as View,     label: "Monitor",      icon: History },
   { id: "intel" as View,       label: "IID Intel",    icon: Telescope },
   { id: "calibration" as View, label: "Calibración",  icon: ClipboardCheck },
+  // CALIB-01-E — las retenidas van junto a la calibración, que es donde Sam ya mira.
+  { id: "challenged" as View,  label: "Retenidas",    icon: ShieldQuestion },
   { id: "publish" as View,     label: "Publicación",  icon: Send },
 ];
 
@@ -34,6 +37,8 @@ function initialView(): View {
   try {
     const v = new URLSearchParams(window.location.search).get('view');
     if (v === 'calibration') return 'calibration';
+    // Deep-link del email de RETENIDA y del digest → la bandeja de arbitraje.
+    if (v === 'challenged') return 'challenged';
     if (v === 'publish') return 'publish';
   } catch { /* SSR / entorno sin window */ }
   return 'hub';
@@ -79,6 +84,7 @@ export default function App() {
     monitor:     "Monitor",
     intel:       "Ecosystem Intel",
     calibration: "Calibración",
+    challenged:  "Retenidas",
     publish:     "Publicación",
   };
 
@@ -183,6 +189,7 @@ export default function App() {
           {view === "monitor"     && <JobMonitorModule />}
           {view === "intel"       && <EcosystemIntelModule session={session} />}
           {view === "calibration" && <ApprovalCalibrationModule session={session} />}
+          {view === "challenged"  && <ChallengedInboxModule session={session} />}
           {view === "publish"     && <PublishQueueModule session={session} />}
         </motion.div>
       </AnimatePresence>

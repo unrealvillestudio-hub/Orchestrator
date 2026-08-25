@@ -39,6 +39,9 @@ const DIGEST_FROM = Deno.env.get("DIGEST_FROM") ?? "Content Queue <content@unrea
 const ORCH_URL    = (Deno.env.get("ORCHESTRATOR_URL") ?? "https://orchestrator-unrlvl.vercel.app").replace(/\/+$/, "");
 
 const INBOX_URL = `${ORCH_URL}?view=calibration`;
+// CALIB-01-E — la bandeja de RETENIDAS tiene su propia vista y su propio botón: mandar a Sam
+// a calibración cuando lo que hay que hacer es arbitrar le cuesta un clic y una búsqueda.
+const CHALLENGED_URL = `${ORCH_URL}?view=challenged`;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -103,7 +106,69 @@ async function pendingByBrand(): Promise<{ total: number; by_brand: Record<strin
   return { total, by_brand };
 }
 
-function digestHtml(total: number, by_brand: Record<string, number>): string {
+/**
+ * CALIB-01-E corte 4 — LAS RETENIDAS SE CUENTAN JUNTO A LAS PENDIENTES.
+ *
+ * Sin esto los cortes 1–3 funcionan y nadie entra a la pestaña: una bandeja que hay que
+ * acordarse de mirar es la misma clase de fallo que el `gate_detail` del 24-ago, donde la
+ * evidencia estuvo escrita durante horas y nadie la vio.
+ *
+ * `null` (y no 0) cuando la tabla todavía no existe: CALIB-01 cortes A–D se despliegan por
+ * separado, así que "sin migrar" es un estado ESPERADO. El digest omite el bloque en vez de
+ * anunciar cero retenidas, que sería una afirmación falsa sobre un sistema que no midió.
+ */
+async function challengedByBrand(): Promise<{ total: number; by_brand: Record<string, number> } | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${SB_URL}/rest/v1/judge_calibration?verdict=is.null&select=brand_id&limit=100000`, {
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Accept-Profile": "intel" },
+    });
+  } catch {
+    return null;
+  }
+  if (res.status === 404 || res.status === 406) return null;   // tabla ausente todavía
+  if (!res.ok) {
+    // El digest NO se cae por esto: su trabajo principal es contar pendientes de aprobación.
+    console.warn(`[CALIB-01-E] judge_calibration read failed: ${res.status}`);
+    return null;
+  }
+  const rows = (await res.json().catch(() => [])) as Array<{ brand_id: string }>;
+  const by_brand: Record<string, number> = {};
+  let total = 0;
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r?.brand_id) continue;
+    by_brand[r.brand_id] = (by_brand[r.brand_id] ?? 0) + 1;
+    total++;
+  }
+  return { total, by_brand };
+}
+
+/** El bloque de retenidas del email. Cadena vacía = no hay nada que contar o no se midió. */
+function challengedBlock(ch: { total: number; by_brand: Record<string, number> } | null): string {
+  if (!ch || ch.total === 0) return "";
+  const rows = Object.entries(ch.by_brand)
+    .sort((a, b) => b[1] - a[1])
+    .map(([brand, n]) =>
+      `<tr>
+        <td style="padding:6px 0;border-bottom:1px solid #1e2030;color:#c8cfe0;font-size:0.88rem;">${esc(brand)}</td>
+        <td style="padding:6px 0;border-bottom:1px solid #1e2030;text-align:right;color:#F5C518;font-weight:700;font-size:0.9rem;">${n}</td>
+      </tr>`)
+    .join("");
+  return `<div style="margin:0 0 22px;padding:16px 18px;background:#12131b;border-left:3px solid #F5C518;border-radius:8px;">
+    <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.12em;color:#F5C518;margin-bottom:6px;">Retenidas</div>
+    <p style="margin:0 0 12px;color:#9aa0ab;font-size:0.86rem;line-height:1.6;">
+      <strong style="color:#F5C518;">${ch.total}</strong> pieza${ch.total === 1 ? "" : "s"} donde el juez marcó una regla y su patrón verificable no aparece en el texto. No se destruyeron: esperan tu arbitraje.
+    </p>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:14px;"><tbody>${rows}</tbody></table>
+    <a href="${CHALLENGED_URL}" target="_blank"
+       style="display:inline-block;background:#F5C518;color:#0a0c10;padding:10px 20px;border-radius:8px;
+              text-decoration:none;font-size:0.76rem;letter-spacing:0.04em;font-weight:800;text-transform:uppercase;">
+      Arbitrar retenidas →
+    </a>
+  </div>`;
+}
+
+function digestHtml(total: number, by_brand: Record<string, number>, challenged: { total: number; by_brand: Record<string, number> } | null): string {
   const rows = Object.entries(by_brand)
     .sort((a, b) => b[1] - a[1])
     .map(([brand, n]) =>
@@ -129,6 +194,7 @@ function digestHtml(total: number, by_brand: Record<string, number>): string {
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
+    ${challengedBlock(challenged)}
     <a href="${INBOX_URL}" target="_blank"
        style="display:inline-block;background:#FFAB00;color:#0a0c10;padding:13px 26px;border-radius:9px;
               text-decoration:none;font-size:0.82rem;letter-spacing:0.04em;font-weight:800;text-transform:uppercase;">
@@ -141,13 +207,21 @@ function digestHtml(total: number, by_brand: Record<string, number>): string {
 </div></body></html>`;
 }
 
-async function sendDigest(total: number, by_brand: Record<string, number>): Promise<unknown> {
+async function sendDigest(
+  total: number, by_brand: Record<string, number>,
+  challenged: { total: number; by_brand: Record<string, number> } | null,
+): Promise<unknown> {
   if (!RESEND) throw new Error("RESEND_UNRLVL_KEY no configurada");
-  const subject = `☕ [UNRLVL] Bandeja de calibración — ${total} pieza${total === 1 ? "" : "s"} pendiente${total === 1 ? "" : "s"}`;
+  // El asunto nombra las retenidas cuando las hay: es lo que decide si Sam abre el mail hoy
+  // o lo deja para después, y una retenida sin arbitrar bloquea una pieza viva.
+  const chSuffix = challenged && challenged.total > 0
+    ? ` · ${challenged.total} retenida${challenged.total === 1 ? "" : "s"}`
+    : "";
+  const subject = `☕ [UNRLVL] Bandeja de calibración — ${total} pieza${total === 1 ? "" : "s"} pendiente${total === 1 ? "" : "s"}${chSuffix}`;
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${RESEND}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: DIGEST_FROM, to: DIGEST_TO, subject, html: digestHtml(total, by_brand) }),
+    body: JSON.stringify({ from: DIGEST_FROM, to: DIGEST_TO, subject, html: digestHtml(total, by_brand, challenged) }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`Resend error ${res.status}: ${JSON.stringify(data).slice(0, 300)}`);
@@ -173,12 +247,23 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { total, by_brand } = await pendingByBrand();
-    if (total === 0) {
-      return new Response(JSON.stringify({ sent: false, reason: "no_pending", total: 0 }), { status: 200, headers: CORS });
+    // Las dos lecturas en paralelo: la de retenidas no puede retrasar ni tumbar la de
+    // pendientes, que es el trabajo original de este digest.
+    const [{ total, by_brand }, challenged] = await Promise.all([pendingByBrand(), challengedByBrand()]);
+    const chTotal = challenged?.total ?? 0;
+    // Con retenidas SÍ se envía aunque no haya pendientes de aprobación: una retenida sin
+    // arbitrar bloquea una pieza viva, y callarla reproduce el fallo que CALIB-01 corrige.
+    if (total === 0 && chTotal === 0) {
+      return new Response(JSON.stringify({ sent: false, reason: "no_pending", total: 0, challenged: chTotal }), { status: 200, headers: CORS });
     }
-    const result = await sendDigest(total, by_brand);
-    return new Response(JSON.stringify({ sent: true, total, by_brand, to: DIGEST_TO, resend: result }), { status: 200, headers: CORS });
+    const result = await sendDigest(total, by_brand, challenged);
+    return new Response(JSON.stringify({
+      sent: true, total, by_brand,
+      challenged: chTotal, challenged_by_brand: challenged?.by_brand ?? null,
+      // null = la tabla todavía no existe; distinto de 0 retenidas medidas.
+      challenged_measured: challenged !== null,
+      to: DIGEST_TO, resend: result,
+    }), { status: 200, headers: CORS });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("iid-approval-digest error:", msg);
