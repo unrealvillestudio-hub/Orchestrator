@@ -5,6 +5,7 @@ import { cn, Spinner } from '../../ui/components';
 import type { IidSession } from '../../services/iidInbound';
 import {
   fetchQueue, saveVerdict, discardPiece, renderArtifact, CalibrationError,
+  REJECT_REASONS, buildCriterion,
   type CalibrationPiece, type QueueResult, type QueueOrder, type VerdictFilter,
   type GenerationFilter,
 } from '../../services/calibrationInbox';
@@ -205,6 +206,9 @@ function CalibrationCard({ piece, token, onResolved }: {
   // Panel abierto para escribir una nota. Ninguna de las dos es obligatoria.
   const [panel, setPanel]     = useState<null | 'reject' | 'discard'>(null);
   const [note, setNote]       = useState('');
+  // SIGN-01 corte E — el motivo de un toque. OPCIONAL, como el criterio: obligarlo empuja a elegir
+  // cualquier clase para avanzar, y eso envenena la serie igual que un criterio de relleno.
+  const [reason, setReason]   = useState('');
   const [busy, setBusy]       = useState<null | Action>(null);
   const [error, setError]     = useState<string | null>(null);
   const [done, setDone]       = useState<null | Outcome>(null);
@@ -226,7 +230,9 @@ function CalibrationCard({ piece, token, onResolved }: {
     setBusy(verdict === 'approved' ? 'approve' : 'reject'); setError(null);
     try {
       // Criterio OPCIONAL en los dos casos: vacío viaja como null, nunca como relleno.
-      await saveVerdict(token, { piece_id: piece.piece_id, verdict, criterion: note.trim() || null });
+      // El motivo estructurado + la prosa. `buildCriterion` los une con un prefijo estable para que
+      // una consulta pueda agrupar por motivo sin dejar de aceptar la prosa que ya hay en el corpus.
+      await saveVerdict(token, { piece_id: piece.piece_id, verdict, criterion: buildCriterion(reason, note) });
       finish(verdict);
     } catch (err) {
       setError(err instanceof CalibrationError ? err.message : 'No se pudo guardar el veredicto.');
@@ -237,7 +243,7 @@ function CalibrationCard({ piece, token, onResolved }: {
   const submitDiscard = async () => {
     setBusy('discard'); setError(null);
     try {
-      await discardPiece(token, { piece_id: piece.piece_id, reason: note.trim() || null });
+      await discardPiece(token, { piece_id: piece.piece_id, reason: buildCriterion(reason, note) });
       finish('discarded');
     } catch (err) {
       setError(err instanceof CalibrationError ? err.message : 'No se pudo descartar la pieza.');
@@ -284,10 +290,11 @@ function CalibrationCard({ piece, token, onResolved }: {
           {piece.domain && <span>· {piece.domain}</span>}
           {piece.psycho_preset && <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">{piece.psycho_preset}</span>}
           <WatcherBadge
-            result={piece.watcher_result}
-            gate={piece.watcher_gate}
+            verdict={piece.watcher_verdict}
+            reason={piece.watcher_reason}
             failedRules={piece.watcher_failed_rules}
             rulesEvaluated={piece.watcher_rules_evaluated}
+            passType={piece.pass_type}
           />
           <GenerationBadge generation={piece.generation} label={piece.cutoff_label} at={piece.cutoff_at} />
         </div>
@@ -328,6 +335,26 @@ function CalibrationCard({ piece, token, onResolved }: {
         <AnimatePresence mode="wait">
           {panel ? (
             <motion.div key={panel} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
+              {/* SIGN-01 corte E — MOTIVO DE UN TOQUE, lista cerrada. Hoy Sam escribe a mano y esos
+                  motivos no son agregables: para saber que el 40% de los rechazos son "falta la
+                  firma" hay que leerlos uno por uno — que es exactamente lo que pasó. Son clases de
+                  defecto, nunca marcas. */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {REJECT_REASONS.map((r) => (
+                  <button
+                    key={r.value}
+                    onClick={() => { setReason(reason === r.value ? '' : r.value); setError(null); }}
+                    className={cn(
+                      'text-[11px] px-2 py-1 rounded-lg border transition-colors',
+                      reason === r.value
+                        ? 'border-accent/50 bg-accent/15 text-accent'
+                        : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700',
+                    )}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
               <textarea
                 value={note}
                 onChange={(e) => { setNote(e.target.value); setError(null); }}

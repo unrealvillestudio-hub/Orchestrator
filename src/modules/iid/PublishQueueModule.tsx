@@ -241,10 +241,11 @@ function PublishCard({ piece, token }: { piece: PublishablePiece; token: string 
           {piece.domain && <span>· {piece.domain}</span>}
           <ChannelBadge channel={piece.channel} />
           <WatcherBadge
-            result={piece.watcher_result}
-            gate={piece.watcher_gate}
+            verdict={piece.watcher_verdict}
+            reason={piece.watcher_reason}
             failedRules={piece.watcher_failed_rules}
             rulesEvaluated={piece.watcher_rules_evaluated}
+            passType={piece.pass_type}
           />
           <GenerationBadge generation={piece.generation} label={piece.cutoff_label} at={piece.cutoff_at} />
         </div>
@@ -290,7 +291,7 @@ function PublishCard({ piece, token }: { piece: PublishablePiece; token: string 
           <span>
             {blocked
               ? `${piece.channel.reason} — esta pieza no podría salir aunque la bandeja aprobara.`
-              : 'Canal operativo. La aprobación se habilita cuando exista el eje de colocación.'}
+              : 'Canal operativo. La aprobación se hace en la bandeja de calibración.'}
           </span>
         </div>
       </div>

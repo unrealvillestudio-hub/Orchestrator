@@ -159,12 +159,19 @@ export interface ContentPiece {
   created_at?: string | null;
   discarded_at?: string | null;
   discarded_reason?: string | null;
+  // SIGN-01 corte D — `clean` frente a `assisted` (CALIB-01). Sam necesita ver de un vistazo si la
+  // pieza cuenta para el objetivo del 90% o para el ratio aprovechable.
+  pass_type?: string | null;
+  approved_at?: string | null;
   assets?: PieceAssets | null;
 }
 
 /** Veredicto del watcher normalizado (primera opinión que Sam valida o corrige). */
 export interface WatcherVerdict {
-  result: 'PASS' | 'REJECT' | null;
+  // SIGN-01 corte D — RESCHEDULE existe desde DIV-01 (duplicación) y desde 5e-3 (ventana de
+  // hermanas), y este tipo lo colapsaba a `null`: una pieza aplazada se veía igual que una que el
+  // Watcher nunca evaluó. Son dos cosas distintas y la tarjeta tiene que nombrarlas.
+  result: 'PASS' | 'REJECT' | 'RESCHEDULE' | null;
   gate: string | null;
   // Códigos de regla incumplidos (P4). El badge los prefiere al nombre del gate. SIEMPRE
   // array (nunca undefined hacia el front); vacío en piezas previas a content-run-stage v56
@@ -176,7 +183,7 @@ export interface WatcherVerdict {
 export function watcherOf(piece: ContentPiece): WatcherVerdict {
   const w = piece.assets?.watcher;
   const raw = typeof w?.result === 'string' ? w.result.toUpperCase() : null;
-  const result = raw === 'PASS' || raw === 'REJECT' ? raw : null;
+  const result = raw === 'PASS' || raw === 'REJECT' || raw === 'RESCHEDULE' ? raw : null;
   // Defensivo: solo strings no vacíos entran; cualquier otra forma → []. Nunca undefined.
   const failed_rules = Array.isArray(w?.failed_rules)
     ? w!.failed_rules.filter((c): c is string => typeof c === 'string' && c.length > 0)
@@ -184,11 +191,38 @@ export function watcherOf(piece: ContentPiece): WatcherVerdict {
   const rules_evaluated = typeof w?.rules_evaluated === 'number' ? w.rules_evaluated : null;
   return {
     result,
-    gate: (result === 'REJECT' ? (w?.failed_gate ?? null) : null),
+    // El gate acompaña a cualquier veredicto que NO sea PASS: un RESCHEDULE también tiene gate, y
+    // saber cuál es la mitad de la explicación.
+    gate: (result && result !== 'PASS' ? (w?.failed_gate ?? null) : null),
     failed_rules,
     rules_evaluated,
   };
 }
+
+// ── SIGN-01 corte D · LA RAZÓN, NO SÓLO EL CÓDIGO ─────────────────────────────────
+// La tarjeta mostraba una lista de códigos que ERA el conjunto EVALUADO y se leía como si fuera de
+// violaciones: en `c92b2b9f` aparecían 19 códigos y el Watcher había dado OK. Con eso a la vista,
+// rechazar material perfecto es lo esperable, no lo excepcional — y Sam rechazó dos piezas íntegras.
+//
+// La distinción se hace acá, en el server, y viaja nombrada: `violated` frente a `evaluated`.
+
+/** Qué pasó, en una línea que un humano puede leer sin abrir el gate_detail. */
+export function verdictReason(v: WatcherVerdict): string | null {
+  if (!v.result) return null;
+  if (v.result === 'PASS') {
+    return v.rules_evaluated != null
+      ? `pasó los gates · se evaluaron ${v.rules_evaluated} regla(s) y ninguna se incumplió`
+      : 'pasó los gates';
+  }
+  const gate = v.gate ? ` en el gate ${v.gate}` : '';
+  if (v.result === 'RESCHEDULE') {
+    return `el sistema la APLAZÓ${gate}: no debe salir ahora, y no es un defecto de la pieza`;
+  }
+  return v.failed_rules.length
+    ? `incumplió ${v.failed_rules.length} regla(s)${gate}: ${v.failed_rules.join(', ')}`
+    : `rechazada${gate}`;
+}
+// ── SIGN-01 corte D:END ──
 
 /**
  * Reglas del watcher en la forma que EL CORPUS necesita: preserva la distinción
@@ -311,6 +345,11 @@ export interface PieceContext {
   // si vienen; si no (piezas viejas), cae a watcher_gate.
   watcher_failed_rules: string[];
   watcher_rules_evaluated: number | null;
+  // SIGN-01 corte D — los cuatro estados, nombrados. `not_evaluated` NO es un cuarto veredicto del
+  // Watcher: es la ausencia de veredicto, y confundirla con un PASS es lo que dejaba tarjetas mudas.
+  watcher_verdict: 'PASS' | 'REJECT' | 'RESCHEDULE' | 'not_evaluated';
+  watcher_reason: string | null;
+  pass_type: string | null;
 
   // ── Procedencia (CALIB-UI-01 §4.2) ──────────────────────────────────────────
   status: string | null;
@@ -351,10 +390,18 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     audience_frame: a.builder_meta?.audience_frame ?? null,
     title: a.copy?.title ?? null,
     artifact_url: publicArtifactUrl(piece.brand_id, piece.id),
-    watcher_result: w.result,
+    // `watcher_result` conserva su forma LEGACY (PASS | REJECT | null) porque es la que viaja al
+    // corpus `intel.approval_calibration`, cuya columna significa "la primera opinión que Sam valida
+    // o corrige". Un RESCHEDULE no es una opinión sobre la pieza —es "todavía no"— y además una
+    // aplazada no llega a la bandeja de calibración. El veredicto COMPLETO viaja en
+    // `watcher_verdict`, que es el que lee la tarjeta.
+    watcher_result: w.result === 'RESCHEDULE' ? null : w.result,
     watcher_gate: w.gate,
     watcher_failed_rules: w.failed_rules,
     watcher_rules_evaluated: w.rules_evaluated,
+    watcher_verdict: w.result ?? 'not_evaluated',
+    watcher_reason: verdictReason(w),
+    pass_type: piece.pass_type ?? null,
 
     status: piece.status ?? null,
     created_at: piece.created_at ?? null,
@@ -451,7 +498,7 @@ export function buildHtml(piece: ContentPiece): string {
 // ── Acceso a datos (PostgREST, service_role) ──────────────────────────────────────
 // Fuente = content.content_pieces (ver la nota del encabezado). Expuesta por PostgREST
 // vía Accept-Profile: content.
-const PIECE_SELECT = 'id,brand_id,queue_id,finding_id,orchestrator_job_id,voice,platform,format,domain,status,created_at,discarded_at,discarded_reason,assets';
+const PIECE_SELECT = 'id,brand_id,queue_id,finding_id,orchestrator_job_id,voice,platform,format,domain,status,created_at,discarded_at,discarded_reason,pass_type,approved_at,assets';
 
 function sbHeaders(profile: 'content' | 'intel', extra: Record<string, string> = {}): Record<string, string> {
   return { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': profile, ...extra };
@@ -476,14 +523,20 @@ export async function fetchPiece(pieceId: string): Promise<ContentPiece | null> 
  */
 export const PIECES_CAP = 2000;
 export async function fetchLivePieces(
-  opts: { brand?: string; excludeStatuses?: string[] } = {},
+  opts: { brand?: string; excludeStatuses?: string[]; onlyStatuses?: string[] } = {},
 ): Promise<ContentPiece[]> {
   const brandFilter = opts.brand ? `&brand_id=eq.${encodeURIComponent(opts.brand)}` : '';
   // Exclusión por estado, opcional: la bandeja de calibración juzga cualquier pieza viva,
   // la de publicación sólo las que todavía no salieron del circuito. El eje lo decide el
   // llamante; acá sólo se traduce a PostgREST.
   const statuses = (opts.excludeStatuses ?? []).filter((s) => typeof s === 'string' && s);
-  const statusFilter = statuses.length
+  // El filtro POSITIVO gana al negativo cuando el llamante lo declara: "sólo estos estados" es una
+  // afirmación más fuerte que "todos menos éstos", y mezclarlos produciría un conjunto que ninguno
+  // de los dos llamantes pidió.
+  const only = (opts.onlyStatuses ?? []).filter((s) => typeof s === 'string' && s);
+  const statusFilter = only.length
+    ? `&status=in.(${encodeURIComponent(only.map((s) => `"${s}"`).join(','))})`
+    : statuses.length
     ? `&status=not.in.(${encodeURIComponent(statuses.map((s) => `"${s}"`).join(','))})`
     : '';
   const url = `${SB_URL()}/rest/v1/content_pieces?discarded_at=is.null${brandFilter}${statusFilter}`
@@ -494,9 +547,21 @@ export async function fetchLivePieces(
   return Array.isArray(rows) ? rows : [];
 }
 
-/** Material de la bandeja de calibración: toda pieza viva, sin filtro de estado. */
+/**
+ * Material de la bandeja de calibración: SÓLO lo que espera aprobación.
+ *
+ * SIGN-01 corte D — antes era "toda pieza viva, sin filtro de estado", y por eso la bandeja mezclaba
+ * estados: mostraba piezas `deferred` (aplazadas por el sistema, DIV-01) y `challenged` (retenidas
+ * por desacuerdo, CALIB-01) como si esperaran el visto bueno de Sam. `c5d542b7` y `afded574` fueron
+ * RECHAZADAS estando ya apartadas por el sistema — una decisión sobre una pieza que nadie había
+ * puesto a decisión.
+ *
+ * Las aplazadas y las retenidas tienen sus propias vistas y sus propias acciones; la de calibración
+ * juzga lo que de verdad está esperando.
+ */
+export const CALIBRATION_STATUSES = ['awaiting_approval'];
 export function fetchCalibrationPieces(brand?: string): Promise<ContentPiece[]> {
-  return fetchLivePieces({ brand });
+  return fetchLivePieces({ brand, onlyStatuses: CALIBRATION_STATUSES });
 }
 
 /**
@@ -693,6 +758,54 @@ export async function upsertVerdict(row: {
   if (!res.ok) throw new Error(`corpus upsert failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`);
   const rows = (await res.json().catch(() => [])) as Array<Record<string, unknown>>;
   return Array.isArray(rows) && rows.length ? rows[0] : {};
+}
+
+// ── SIGN-01 corte A2 · LA DECISIÓN SE EJECUTA ─────────────────────────────────────
+// EL DEFECTO. Ni aprobar ni rechazar tocaban la pieza: sólo se escribía el corpus. Las 6 decisiones
+// de Sam del 2026-08-25 dejaron las 6 piezas exactamente como estaban — no había flujo, había
+// opiniones registradas. Es el mismo defecto que obligó a sellar una pieza a mano por la mañana.
+//
+// APROBAR = HABILITAR, no publicar. Sella `approved_at`, que es lo que el modo `placement` de
+// content-scheduler exige para ver la pieza; la franja la calcula él. Es exactamente el contrato que
+// `approve-piece` (el otro repo) ya implementaba para el carril del email — acá se aplica el MISMO
+// efecto, con el gate de rol de este repo, en vez de llamar a la EF: el token de aprobación del email
+// es de un solo uso y esta bandeja no lo tiene.
+//
+// RECHAZAR = DESCARTAR. `status='rejected'` + `discarded_at` + `discarded_reason` con el motivo
+// estructurado. Sin `discarded_at` la pieza seguiría apareciendo en la bandeja después de rechazarla.
+//
+// LAS DOS SIGUEN ESCRIBIENDO EL CORPUS: la calibración no se pierde, se suma. Y el efecto se aplica
+// DESPUÉS del upsert — si el corpus falla, la pieza no se mueve, por el mismo criterio que el
+// arbitraje de CALIB-01: mover sin registrar por qué es el defecto de este brief del otro lado.
+export function verdictEffect(
+  verdict: 'approved' | 'rejected', nowIso: string, by: string, reason: string | null,
+): Record<string, unknown> {
+  return verdict === 'approved'
+    ? { status: 'scheduled', approved_at: nowIso, approved_by: by }
+    : { status: 'rejected', discarded_at: nowIso, discarded_reason: reason };
+}
+
+/**
+ * Aplica el efecto a la pieza. Devuelve la fila actualizada, o `null` si la pieza ya no estaba
+ * disponible (otro operador la movió primero): el ancla `discarded_at=is.null` hace la operación
+ * segura ante dos manos a la vez, y el llamador lo reporta en vez de fingir que escribió.
+ */
+export async function applyVerdictToPiece(
+  pieceId: string, verdict: 'approved' | 'rejected', by: string, reason: string | null,
+): Promise<ContentPiece | null> {
+  const url = `${SB_URL()}/rest/v1/content_pieces?id=eq.${encodeURIComponent(pieceId)}&discarded_at=is.null`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`,
+      'Content-Type': 'application/json', 'Content-Profile': 'content',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify(verdictEffect(verdict, new Date().toISOString(), by, reason)),
+  });
+  if (!res.ok) throw new Error(`piece verdict failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`);
+  const rows = (await res.json().catch(() => [])) as ContentPiece[];
+  return Array.isArray(rows) && rows.length ? rows[0] : null;
 }
 
 /** Error tipado para "la pieza ya estaba descartada" (no se pisa un descarte previo). */

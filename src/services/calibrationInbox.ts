@@ -32,6 +32,37 @@ export type GenerationFilter = 'all' | 'current';
  */
 export type FlowGeneration = 'current' | 'previous' | 'unknown';
 
+/**
+ * SIGN-01 corte E — MOTIVOS DE RECHAZO, lista cerrada en la UI y texto libre en la columna.
+ *
+ * Hoy Sam escribe el criterio a mano y esos motivos NO son agregables: para saber que el 40% de los
+ * rechazos son "falta la firma" hay que leerlos uno por uno — y eso es exactamente lo que pasó, dos
+ * piezas íntegras rechazadas por un defecto del sistema que nadie podía contar.
+ *
+ * El valor viaja en `criterion` con un prefijo estable (`motivo:<clave>`), así que una consulta puede
+ * agrupar por él sin dejar de aceptar la prosa que ya hay en las 12 filas anteriores. La columna no
+ * cambia de tipo ni gana CHECK: mañana serán ocho clases y no queremos una migración por cada una.
+ *
+ * Son clases de defecto, NUNCA marcas: le sirven igual a una marca de cosmética en Florida.
+ */
+export const REJECT_REASONS = [
+  { value: 'falta_firma',     label: 'Falta la firma' },
+  { value: 'texto_truncado',  label: 'Texto truncado' },
+  { value: 'dato_incorrecto', label: 'Dato incorrecto' },
+  { value: 'registro',        label: 'Registro' },
+  { value: 'titulo',          label: 'Título' },
+  { value: 'otro',            label: 'Otro' },
+] as const;
+
+export const REASON_PREFIX = 'motivo:';
+/** `motivo:<clave>` + la prosa opcional. Sin clave, el criterio queda como siempre. */
+export function buildCriterion(reason: string | null | undefined, prose: string | null | undefined): string | null {
+  const r = (reason ?? '').trim();
+  const p = (prose ?? '').trim();
+  if (!r) return p || null;
+  return p ? `${REASON_PREFIX}${r} · ${p}` : `${REASON_PREFIX}${r}`;
+}
+
 export interface CalibrationPiece {
   piece_id: string;
   brand_id: string;
@@ -50,6 +81,10 @@ export interface CalibrationPiece {
   // los códigos de regla; cae a watcher_gate cuando failed_rules viene vacío (piezas viejas).
   watcher_failed_rules: string[];
   watcher_rules_evaluated: number | null;
+  // SIGN-01 corte D — los cuatro estados nombrados, la razón en prosa y el tipo de pase.
+  watcher_verdict: 'PASS' | 'REJECT' | 'RESCHEDULE' | 'not_evaluated';
+  watcher_reason: string | null;
+  pass_type: string | null;
 
   // ── Procedencia ────────────────────────────────────────────────────────────
   status: string | null;
@@ -169,7 +204,7 @@ export function renderArtifact(token: string, piece_id: string): Promise<{ ok: t
 export function saveVerdict(
   token: string,
   input: { piece_id: string; verdict: Verdict; criterion?: string | null },
-): Promise<{ ok: true; row: VerdictRow }> {
+): Promise<{ ok: true; row: VerdictRow; piece_applied: boolean; piece_status: string | null; note?: string }> {
   return req('/api/calibration-verdict', token, {
     method: 'POST',
     body: {
