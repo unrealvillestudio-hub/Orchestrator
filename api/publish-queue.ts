@@ -166,11 +166,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       pieces,
       // El estado de la acción viaja en el contrato, no en una constante de la UI: cuando el
       // eje de colocación exista, se habilita acá y la interfaz lo refleja sin tocar el front.
+      // SIGN-01 corte E — el motivo estaba OBSOLETO: decía que el eje de colocación no existía, y
+      // existe desde PLACE-01 (content-scheduler modo `placement`, cron 66, franjas calculadas contra
+      // cadencia real). Un aviso que describe un sistema que ya cambió es peor que ninguno: enseña a
+      // desconfiar de los avisos.
+      //
+      // La bandeja de publicación sigue sin aprobar, pero por otro motivo y por diseño: aprobar es
+      // del carril de CALIBRACIÓN, que es donde se juzga la pieza. Ésta muestra a dónde va y si el
+      // canal está operativo.
       approval: {
         available: false,
-        reason: 'No existe todavía el eje de colocación de una pieza producida en la franja de su canal: '
-          + 'content-scheduler sólo programa filas de cola sin producir (orchestrator_status=pending) y '
-          + 'scheduled_posts no tiene endpoint ni vínculo con la pieza. Hasta que exista, la bandeja no aprueba.',
+        reason: 'Esta bandeja no aprueba por diseño: la aprobación vive en la bandeja de calibración, '
+          + 'que es donde se juzga la pieza. Aprobar allá sella la habilitación y content-scheduler '
+          + '(modo placement) calcula la franja. Acá se ve a dónde va cada pieza y si su canal está operativo.',
       },
       cutoffs_source: cutoffsRaw === null ? 'unavailable' : (cutoffs.length ? 'seeded' : 'empty'),
       ...(truncated ? { truncated: true } : {}),

@@ -24,13 +24,22 @@
  *  · UPSERT por piece_id (una pieza = una fila; re-evaluar sobrescribe).
  *  · Garantiza el artefacto (render idempotente) antes del UPSERT → artifact_url del
  *    corpus SIEMPRE apunta a un artefacto real, aunque nadie lo haya visto en la bandeja.
- *  · NO publica: no toca content_pieces.status ni scheduled_posts. Fail-loud si no existe.
+ *  · SIGN-01 corte A2 — LA DECISIÓN SE EJECUTA. Hasta acá este endpoint escribía el corpus y NADA
+ *    más: las 6 decisiones de Sam del 2026-08-25 dejaron las 6 piezas exactamente como estaban. No
+ *    había flujo, había opiniones registradas.
+ *      approved → status='scheduled' + approved_at + approved_by (desde la SESIÓN)
+ *      rejected → status='rejected' + discarded_at + discarded_reason (el motivo estructurado)
+ *    El efecto va DESPUÉS del upsert: si el corpus falla, la pieza no se mueve — mover una pieza sin
+ *    registrar por qué es el mismo defecto, del otro lado.
+ *  · APROBAR SIGUE SIN PUBLICAR. Sella la habilitación, que es lo que el modo `placement` de
+ *    content-scheduler exige para ver la pieza; la franja la calcula él y de ahí sale a SocialLab.
+ *    No se toca scheduled_posts.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   applyCors, extractToken, requireAdmin,
-  ensureArtifact, toContext, watcherRulesForCorpus, upsertVerdict, PieceNotFound,
+  ensureArtifact, toContext, watcherRulesForCorpus, upsertVerdict, applyVerdictToPiece, PieceNotFound,
 } from './_calibrationShared.js';
 
 type Verdict = 'approved' | 'rejected';
@@ -90,7 +99,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       watcher_rules_evaluated: corpusRules.rules_evaluated,
     });
 
-    return res.status(200).json({ ok: true, row });
+    // SIGN-01 corte A2 — y ahora la pieza se mueve. `evaluated_by` viene de la sesión, así que el
+    // sello de aprobación queda trazable hasta quien lo firmó.
+    const piece_effect = await applyVerdictToPiece(pieceId, verdict, evaluated_by, criterion || null);
+    if (!piece_effect) {
+      // Otro operador la movió primero. El corpus ya quedó escrito —la opinión de Sam vale igual— y
+      // se dice que la pieza no se tocó, en vez de fingir que sí.
+      console.warn(`[calibration-verdict] ${pieceId}: corpus escrito, pieza NO movida (ya descartada por otra mano)`);
+      return res.status(200).json({ ok: true, row, piece_applied: false, piece_status: null });
+    }
+
+    return res.status(200).json({
+      ok: true, row,
+      piece_applied: true,
+      piece_status: piece_effect.status ?? null,
+      // Se dice explícito porque es la confusión que este corte cierra: habilitar no es publicar.
+      published: false,
+      note: verdict === 'approved'
+        ? 'habilitada — la franja la calcula content-scheduler mode=placement'
+        : 'rechazada y descartada — sale de la bandeja',
+    });
   } catch (err) {
     if (err instanceof PieceNotFound) return res.status(404).json({ error: 'piece_not_found', piece_id: pieceId });
     const message = err instanceof Error ? err.message : String(err);

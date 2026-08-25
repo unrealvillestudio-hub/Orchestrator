@@ -52,6 +52,11 @@ export interface PublishablePiece {
   title: string | null;
   artifact_url: string;
   watcher_result: 'PASS' | 'REJECT' | null;
+  // SIGN-01 corte D — las dos bandejas comparten `toContext`, así que comparten el veredicto
+  // completo. Un badge distinto por bandeja sería otra forma de que digan cosas distintas.
+  watcher_verdict: 'PASS' | 'REJECT' | 'RESCHEDULE' | 'not_evaluated';
+  watcher_reason: string | null;
+  pass_type: string | null;
   watcher_gate: string | null;
   watcher_failed_rules: string[];
   watcher_rules_evaluated: number | null;

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  ChevronLeft, ChevronRight, ShieldCheck, ShieldAlert, Copy, Check, Clock, GitBranch, History,
+  ChevronLeft, ChevronRight, ShieldCheck, ShieldAlert, ShieldQuestion, Copy, Check, Clock, GitBranch, History,
 } from 'lucide-react';
 import { cn } from '../../ui/components';
 import type { FlowGeneration } from '../../services/calibrationInbox';
@@ -199,40 +199,72 @@ export function CutoffsNotice({ source }: { source: 'unavailable' | 'empty' | 's
 // ── Etiqueta de la primera opinión del watcher ───────────────────────────────────
 // Informativa: NO condiciona ninguna acción. Sam puede aprobar lo que el watcher rechazó
 // (el dato valioso: "watcher se equivocó") o rechazar lo que el watcher aprobó.
-export function WatcherBadge({ result, gate, failedRules, rulesEvaluated }: {
-  result: 'PASS' | 'REJECT' | null;
-  gate: string | null;
+// ── SIGN-01 corte D · EL VEREDICTO, SIN AMBIGÜEDAD ────────────────────────────────
+// EL DEFECTO, reportado sobre las tarjetas del 2026-08-25:
+//   · «Watcher: RECHAZÓ» con el código pero SIN la explicación — que la pestaña de Retenidas sí da;
+//   · «Watcher: OK», sin que quedara claro si significa "evaluó y pasó" o "aprobó";
+//   · tarjetas SIN NINGUNA indicación, donde no se sabía si el Watcher llegó a evaluarla.
+//
+// Y el peor de los tres, porque hace rechazar material perfecto: la lista de códigos ERA el conjunto
+// EVALUADO y se leía como si fuera de violaciones. En `c92b2b9f` aparecían 19 códigos y el Watcher
+// había dado OK. Con eso a la vista, rechazar una pieza correcta es lo esperable.
+//
+// Los cuatro estados se nombran, cada uno con su razón, y "evaluadas" nunca se muestra con la misma
+// forma que "incumplidas": las incumplidas se enumeran, las evaluadas se cuentan.
+export function WatcherBadge({ verdict, reason, failedRules, rulesEvaluated, passType }: {
+  verdict: 'PASS' | 'REJECT' | 'RESCHEDULE' | 'not_evaluated';
+  reason?: string | null;
   failedRules?: string[] | null;
   rulesEvaluated?: number | null;
+  passType?: string | null;
 }) {
-  if (result === 'REJECT') {
-    // Detalle primario: los CÓDIGOS de regla incumplidos (content-run-stage v56+). Si
-    // vienen vacíos/ausentes (piezas anteriores al deploy), caemos al nombre del gate —
-    // nunca a `undefined` ni a pantalla en blanco.
-    const codes = (Array.isArray(failedRules) ? failedRules : []).filter(Boolean);
-    const detail = codes.length ? codes.join(', ') : (gate ?? null);
-    return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/30 text-rose-300"
-            title="El watcher rechazó esta pieza. Si creés que se equivocó, aprobala igual — ese es el dato valioso.">
-        <ShieldAlert size={10} /> Watcher: RECHAZÓ{detail ? ` · ${detail}` : ''}
+  const codes = (Array.isArray(failedRules) ? failedRules : []).filter(Boolean);
+  const estilo: Record<string, { cls: string; icon: React.ReactNode; label: string; title: string }> = {
+    REJECT: {
+      cls: 'bg-rose-500/10 border-rose-500/30 text-rose-300',
+      icon: <ShieldAlert size={10} />, label: 'Watcher: RECHAZÓ',
+      title: 'El watcher rechazó esta pieza. Si creés que se equivocó, aprobala igual — ese es el dato valioso.',
+    },
+    PASS: {
+      cls: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400/80',
+      icon: <ShieldCheck size={10} />, label: 'Watcher: evaluó y PASÓ',
+      title: 'El watcher juzgó esta pieza y no encontró incumplimientos. No es una aprobación: la aprobación es tuya.',
+    },
+    RESCHEDULE: {
+      cls: 'bg-amber-500/10 border-amber-500/30 text-amber-300',
+      icon: <ShieldQuestion size={10} />, label: 'Watcher: APLAZÓ',
+      title: 'El sistema la apartó para más adelante. No es un defecto de la pieza.',
+    },
+    not_evaluated: {
+      cls: 'bg-zinc-800/60 border-zinc-700 text-zinc-400',
+      icon: <ShieldQuestion size={10} />, label: 'Watcher: SIN evaluar',
+      title: 'No hay veredicto registrado para esta pieza. Distinto de "pasó": nadie la juzgó.',
+    },
+  };
+  const e = estilo[verdict] ?? estilo.not_evaluated;
+  return (
+    <span className="inline-flex flex-col gap-0.5">
+      <span className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded border w-fit', e.cls)} title={e.title}>
+        {e.icon} {e.label}
+        {/* INCUMPLIDAS: se enumeran. Es la única lista de códigos que la tarjeta muestra. */}
+        {verdict === 'REJECT' && codes.length > 0 && <span className="font-mono">· {codes.join(', ')}</span>}
+        {/* EVALUADAS: se CUENTAN, nunca se enumeran — enumerarlas es lo que se leía como violaciones. */}
         {typeof rulesEvaluated === 'number' && (
-          <span className="text-rose-300/45"
-                title="Contra cuántas reglas enumeradas se juzgó esta pieza.">
-            · {rulesEvaluated} regla{rulesEvaluated === 1 ? '' : 's'}
+          <span className="opacity-50" title="Contra cuántas reglas enumeradas se juzgó esta pieza. NO son incumplimientos.">
+            · {rulesEvaluated} evaluada{rulesEvaluated === 1 ? '' : 's'}
+          </span>
+        )}
+        {/* SIGN-01 corte D · el tipo de pase: si cuenta para el 90% o para el ratio aprovechable. */}
+        {passType === 'assisted' && (
+          <span className="opacity-70" title="Hubo intervención humana: cuenta para el ratio aprovechable, no para el objetivo del 90% de PASS limpio.">
+            · asistida
           </span>
         )}
       </span>
-    );
-  }
-  if (result === 'PASS') {
-    return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400/80"
-            title="El watcher aprobó esta pieza.">
-        <ShieldCheck size={10} /> Watcher: OK
-      </span>
-    );
-  }
-  return null;
+      {/* LA RAZÓN, no sólo el código. La redacta el server, que es quien tiene el gate_detail. */}
+      {reason && <span className="text-[10px] text-zinc-500 leading-snug">{reason}</span>}
+    </span>
+  );
 }
 
 // ── Procedencia: de dónde salió esta pieza y contra qué se la juzgó ──────────────
