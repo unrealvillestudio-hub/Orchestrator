@@ -13,7 +13,9 @@
 ## Para mergear a main
 - Push a la branch, no a main
 - Verificar Vercel Preview URL
-- Solo entonces hacer merge o pedir merge
+- **CC nunca mergea, en ningún repo.** CC publica la rama y abre el PR; **Sam** revisa,
+  mergea y borra la rama por **GitHub Web UI** (`CC_PROTOCOL.md` §1). La redacción anterior
+  —«solo entonces hacer merge o pedir merge»— dejaba la puerta abierta a que CC mergeara.
 
 
 ## REGLA MULTIMARCA — INVIOLABLE
@@ -30,3 +32,11 @@ existente: PR de código primero, DDL después. No aplica a artefactos exclusivo
 (nscf_*, fphs_*) ni prohíbe enumerar con fail-loud. Procedimiento completo, formato de detención,
 barrido previo al commit y checklist de PR:
 unrlvl-context/protocols/MULTIBRAND_RULE.md §7.2 — leerlo antes de tocar capa compartida.
+
+## ENTREGA Y VERIFICACIÓN — puntero
+La forma de entregar y de verificar —bloques con destinatario (`PARA SAM` / `PARA CC`), idioma ES/EN
+neutro **sin voseo**, etiqueta de evidencia `medido`/`reportado`/`deducido`, y las **cuatro QA**
+`QA-ENCARGO` → `QA-OBJETIVO` → `QA-INFO` → `QA-PROP`, donde `QA-INFO` es un **bloqueo**— vive en
+`unrlvl-context/protocols/DELIVERY_AND_VERIFICATION_RULE.md`. **Se carga en la apertura de sesión**,
+no cuando surja la duda. El resumen operativo está en el `CLAUDE.md` de la raíz de este repo; este
+archivo **sólo apunta**, para no crear una segunda fuente.
