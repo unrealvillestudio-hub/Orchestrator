@@ -222,7 +222,11 @@ async function req<T>(
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const msg = (data && (data.error || data.message)) || `Error ${res.status}`;
+    // EL MENSAJE DEL SERVER NO SE COLAPSA. `error` es un código para la máquina (`verdict_failed`,
+    // `corpus_column_missing`) y no le dice NADA al operador; `detail` y `message` son la frase que
+    // sí explica qué pasó y qué hacer. Se prefiere la explicación y el código queda de respaldo.
+    // El cuerpo crudo sigue entero en `body` para diagnosticar.
+    const msg = (data && (data.detail || data.message || data.error)) || `Error ${res.status}`;
     throw new CalibrationError(String(msg), res.status, data);
   }
   return data as T;

@@ -764,6 +764,34 @@ export async function ensureArtifact(pieceId: string): Promise<{ artifact_url: s
 export type CalibrationVerdict = 'approved' | 'rejected' | 'fixable';
 
 /**
+ * Marcador de veredicto en `discarded_reason` de la pieza. `fixable` sella la pieza como
+ * `rejected` —no puede ser de otra forma, ver `verdictEffect`—, así que sin este marcador una
+ * pieza marcada para corregir sería INDISTINGUIBLE de un rechazo mirando `content_pieces`.
+ *
+ * Y eso no es un problema de comodidad: el corpus se ARCHIVA (44 filas movidas el 2026-08-31), y
+ * una fila `fixable` archivada dejaría la pieza indistinguible de un rechazo para siempre. La
+ * etiqueta del corpus es la fuente, pero el corpus vivo no es eterno; `discarded_reason` sí queda.
+ *
+ * Prefijo estable y greppable, misma forma que `motivo:` del criterio: `fixable: <propuesta>`.
+ * Decisión de Sam del 2026-08-31, que corrige la lectura literal del brief.
+ */
+export const FIXABLE_REASON_PREFIX = 'fixable:';
+
+/**
+ * La columna que el corpus todavía no tiene. Es un estado ESPERADO en la ventana entre el PR de
+ * código y el de DDL, no un fallo: el mismo criterio con el que `challenged-queue` dice «la
+ * bandeja está vacía porque no hay de dónde leer, no porque no haya retenidas». Un error genérico
+ * ahí es indistinguible de un fallo real, y el operador no puede saber que el arreglo es aplicar
+ * la migración.
+ */
+export class CorpusColumnMissing extends Error {
+  constructor(public column: string, public server_detail: string) {
+    super(`corpus column missing: ${column}`);
+    this.name = 'CorpusColumnMissing';
+  }
+}
+
+/**
  * UPSERT del veredicto en intel.approval_calibration (on_conflict piece_id).
  * Copia TODO el contexto de la pieza. Devuelve la fila guardada.
  */
@@ -810,11 +838,18 @@ export async function upsertVerdict(row: {
   //
   // La rama se apaga sola cuando la migración entra: el primer intento pasa siempre y el
   // reintento deja de ejecutarse. No hace falta volver a tocar este archivo.
-  if (!first.ok && row.fix_proposal === null) {
+  if (!first.ok) {
     const detail = await first.clone().text().catch(() => '');
     if (detail.includes('fix_proposal')) {
-      const { fix_proposal: _sinColumnaTodavia, ...legacy } = row;
-      res = await post(legacy);
+      if (row.fix_proposal === null) {
+        const { fix_proposal: _sinColumnaTodavia, ...legacy } = row;
+        res = await post(legacy);
+      } else {
+        // Hay propuesta que perder: se corta y se dice QUÉ falta. El texto crudo del server viaja
+        // con el error para que, si esta detección alguna vez se equivoca, el operador siga
+        // leyendo lo que de verdad respondió la base en vez de una explicación inventada.
+        throw new CorpusColumnMissing('fix_proposal', detail.slice(0, 300));
+      }
     }
   }
 
@@ -854,10 +889,20 @@ export async function upsertVerdict(row: {
 // 2026-08-31: «mismo efecto que rejected... su único objetivo es marcarla bien».
 export function verdictEffect(
   verdict: CalibrationVerdict, nowIso: string, by: string, reason: string | null,
+  fixProposal: string | null = null,
 ): Record<string, unknown> {
-  return verdict === 'approved'
-    ? { status: 'scheduled', approved_at: nowIso, approved_by: by }
-    : { status: 'rejected', discarded_at: nowIso, discarded_reason: reason };
+  if (verdict === 'approved') return { status: 'scheduled', approved_at: nowIso, approved_by: by };
+
+  // MISMAS COLUMNAS EN LOS DOS VEREDICTOS QUE SELLAN. Lo único que cambia es qué dice el motivo:
+  // un `fixable` lleva su marcador y la propuesta, para que la pieza siga diciendo qué hacer con
+  // ella cuando su fila del corpus ya esté archivada. `rejected` no cambia: sigue llevando el
+  // criterio, exactamente como hasta hoy.
+  const propuesta = (fixProposal ?? '').trim();
+  const discarded_reason = verdict === 'fixable'
+    ? [FIXABLE_REASON_PREFIX, propuesta || (reason ?? '')].join(' ').trim()
+    : reason;
+
+  return { status: 'rejected', discarded_at: nowIso, discarded_reason };
 }
 
 /**
@@ -867,6 +912,7 @@ export function verdictEffect(
  */
 export async function applyVerdictToPiece(
   pieceId: string, verdict: CalibrationVerdict, by: string, reason: string | null,
+  fixProposal: string | null = null,
 ): Promise<ContentPiece | null> {
   const url = `${SB_URL()}/rest/v1/content_pieces?id=eq.${encodeURIComponent(pieceId)}&discarded_at=is.null`;
   const res = await fetch(url, {
@@ -876,7 +922,7 @@ export async function applyVerdictToPiece(
       'Content-Type': 'application/json', 'Content-Profile': 'content',
       Prefer: 'return=representation',
     },
-    body: JSON.stringify(verdictEffect(verdict, new Date().toISOString(), by, reason)),
+    body: JSON.stringify(verdictEffect(verdict, new Date().toISOString(), by, reason, fixProposal)),
   });
   if (!res.ok) throw new Error(`piece verdict failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`);
   const rows = (await res.json().catch(() => [])) as ContentPiece[];
