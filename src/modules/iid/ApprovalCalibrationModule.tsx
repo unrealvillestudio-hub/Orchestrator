@@ -14,6 +14,9 @@ import {
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader, shortId,
 } from './pieceUi';
+// Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
+import { SpeechReader } from '../../ui/SpeechReader';
+import { readableFromArtifactHtml } from './readablePiece';
 
 const PAGE = 20;
 
@@ -221,6 +224,10 @@ function CalibrationCard({ piece, token, onResolved }: {
     return () => { alive = false; };
   }, [piece.piece_id, token]);
 
+  // El texto de la pieza para el lector en voz alta. Sale del MISMO `html` que ya se recibe
+  // de `preview-render`, así que no hay una segunda lectura ni una segunda fuente de texto.
+  const readable = useMemo(() => (artHtml ? readableFromArtifactHtml(artHtml) : null), [artHtml]);
+
   const finish = (outcome: Outcome) => {
     setDone(outcome);
     setTimeout(() => onResolved(piece.piece_id), 1500);
@@ -328,6 +335,11 @@ function CalibrationCard({ piece, token, onResolved }: {
             {artUrl}
           </a>
         )}
+
+        {/* Lectura en voz alta. Va debajo de la vista previa porque se lee lo mismo que se
+            ve, y su propio bloque de texto es donde ocurre la selección: dentro del
+            `<iframe sandbox="">` de arriba, `getSelection()` no alcanza. */}
+        {readable && <SpeechReader piece={readable} />}
 
         {error && <p className="text-xs text-rose-400 font-mono leading-snug">{error}</p>}
 

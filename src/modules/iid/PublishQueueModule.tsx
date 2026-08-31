@@ -12,6 +12,9 @@ import {
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader,
 } from './pieceUi';
+// Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
+import { SpeechReader } from '../../ui/SpeechReader';
+import { readableFromArtifactHtml } from './readablePiece';
 
 const PAGE = 20;
 
@@ -224,6 +227,10 @@ function PublishCard({ piece, token }: { piece: PublishablePiece; token: string 
     return () => { alive = false; };
   }, [piece.piece_id, token]);
 
+  // El texto de la pieza para el lector en voz alta, del MISMO `html` que ya se recibe de
+  // `preview-render`. Mismo adaptador que en calibración: las dos bandejas leen igual.
+  const readable = useMemo(() => (artHtml ? readableFromArtifactHtml(artHtml) : null), [artHtml]);
+
   const blocked = piece.channel.status !== 'operational';
 
   return (
@@ -277,6 +284,11 @@ function PublishCard({ piece, token }: { piece: PublishablePiece; token: string 
             {artUrl}
           </a>
         )}
+
+        {/* Lectura en voz alta. Va debajo de la vista previa porque se lee lo mismo que se
+            ve, y su propio bloque de texto es donde ocurre la selección: dentro del
+            `<iframe sandbox="">` de arriba, `getSelection()` no alcanza. */}
+        {readable && <SpeechReader piece={readable} />}
 
         {/* Estado de salida. Cuando el canal bloquea, el motivo se lee sin abrir nada; cuando
             no bloquea, tampoco hay acción todavía y se dice por qué. */}
