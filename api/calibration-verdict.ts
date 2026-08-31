@@ -49,7 +49,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   applyCors, extractToken, requireAdmin,
   ensureArtifact, toContext, watcherRulesForCorpus, upsertVerdict, applyVerdictToPiece, PieceNotFound,
-  type CalibrationVerdict,
+  CorpusColumnMissing, type CalibrationVerdict,
 } from './_calibrationShared.js';
 
 const VERDICTS: readonly CalibrationVerdict[] = ['approved', 'rejected', 'fixable'];
@@ -129,7 +129,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // SIGN-01 corte A2 — y ahora la pieza se mueve. `evaluated_by` viene de la sesión, así que el
     // sello de aprobación queda trazable hasta quien lo firmó.
-    const piece_effect = await applyVerdictToPiece(pieceId, verdict, evaluated_by, criterion || null);
+    // La propuesta baja TAMBIÉN a la pieza, en `discarded_reason` con su marcador. El corpus se
+    // archiva; `content_pieces` no. Sin esto, una fila `fixable` archivada dejaría la pieza
+    // indistinguible de un rechazo para siempre.
+    const piece_effect = await applyVerdictToPiece(pieceId, verdict, evaluated_by, criterion || null, fix_proposal);
     if (!piece_effect) {
       // Otro operador la movió primero. El corpus ya quedó escrito —la opinión de Sam vale igual— y
       // se dice que la pieza no se tocó, en vez de fingir que sí.
@@ -151,8 +154,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (err) {
     if (err instanceof PieceNotFound) return res.status(404).json({ error: 'piece_not_found', piece_id: pieceId });
+
+    // LA VENTANA SE DICE, NO SE DISFRAZA DE FALLO. Mientras la migración del veredicto no esté
+    // aplicada, la columna no existe y un 500 genérico es indistinguible de un fallo real: el
+    // operador no puede saber que no hay nada roto y que el arreglo es aplicar la migración.
+    // Mismo criterio que `challenged-queue` con su tabla ausente («está vacía porque no hay de
+    // dónde leer, no porque no haya retenidas»). 503 y no 500: no es un error del servidor, es
+    // una capacidad que todavía no está desplegada.
+    if (err instanceof CorpusColumnMissing) {
+      console.warn(`[calibration-verdict] ${pieceId}: ${err.message} — migración del veredicto sin aplicar`);
+      return res.status(503).json({
+        error: 'corpus_column_missing',
+        column: err.column,
+        detail: `El corpus todavía no tiene la columna '${err.column}': la migración del veredicto `
+          + 'fixable no está aplicada. No se guardó nada y la pieza NO se movió — no hay nada roto. '
+          + 'Aprobar y rechazar siguen funcionando con normalidad.',
+        server_detail: err.server_detail,
+      });
+    }
+
     const message = err instanceof Error ? err.message : String(err);
     console.error('[calibration-verdict]', message);
+    // `message` viaja con el texto del server: la interfaz lo muestra en vez de colapsarlo en
+    // `verdict_failed`, que no dice nada de lo que pasó.
     return res.status(500).json({ error: 'verdict_failed', message });
   }
 }

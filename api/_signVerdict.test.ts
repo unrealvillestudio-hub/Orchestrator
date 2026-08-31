@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  watcherOf, verdictReason, verdictEffect, toContext, CALIBRATION_STATUSES,
+  watcherOf, verdictReason, verdictEffect, toContext, CALIBRATION_STATUSES, FIXABLE_REASON_PREFIX,
   type ContentPiece,
 } from './_calibrationShared.js';
 import { buildCriterion, REJECT_REASONS, REASON_PREFIX } from '../src/services/calibrationInbox';
@@ -178,17 +178,56 @@ describe('fixable · sella igual que un rechazo, y la diferencia vive en el corp
   it('sella la pieza: sin discarded_at reaparecería en la bandeja mañana', () => {
     // Es la restricción que decide el diseño entero. La bandeja lista CALIBRATION_STATUSES
     // filtrando por discarded_at IS NULL: un veredicto que no sella no es un veredicto.
-    const e = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'motivo:titulo');
+    const e = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'motivo:titulo', 'se rescata el gancho');
     expect(e.status).toBe('rejected');
     expect(e.discarded_at).toBe('2026-08-31T22:00:00Z');
-    expect(e.discarded_reason).toBe('motivo:titulo');
     expect(CALIBRATION_STATUSES).toContain('awaiting_approval');
   });
 
-  it('el efecto sobre la pieza es EXACTAMENTE el de un rechazo', () => {
-    const fix = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'x');
+  it('MISMAS COLUMNAS que un rechazo: lo único que cambia es qué dice el motivo', () => {
+    // La versión anterior de esta prueba exigía `toEqual` con el rechazo, que era la lectura
+    // literal del brief. Sam la corrigió el 2026-08-31: el corpus SE ARCHIVA, y una fila
+    // `fixable` archivada dejaría la pieza indistinguible de un rechazo en `content_pieces`
+    // para siempre. Lo que se sigue exigiendo —y es lo que protegía la prueba— es que el
+    // SELLADO sea idéntico: mismas columnas, mismo status, misma fecha.
+    const fix = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'x', 'la propuesta');
     const rej = verdictEffect('rejected', '2026-08-31T22:00:00Z', 'sam', 'x');
-    expect(fix).toEqual(rej);
+    expect(Object.keys(fix).sort()).toEqual(Object.keys(rej).sort());
+    expect(fix.status).toBe(rej.status);
+    expect(fix.discarded_at).toBe(rej.discarded_at);
+    expect(fix.discarded_reason).not.toBe(rej.discarded_reason);
+  });
+
+  it('el motivo de la pieza lleva el marcador y la propuesta, no el criterio', () => {
+    const e = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'motivo:titulo', 'se rescata el gancho');
+    expect(e.discarded_reason).toBe(`${FIXABLE_REASON_PREFIX} se rescata el gancho`);
+    // Greppable: una consulta sobre content_pieces puede separar los dos sin mirar el corpus.
+    expect(String(e.discarded_reason).startsWith(FIXABLE_REASON_PREFIX)).toBe(true);
+  });
+
+  it('un rechazo NO gana marcador: sigue llevando su criterio tal cual', () => {
+    const e = verdictEffect('rejected', '2026-08-31T22:00:00Z', 'sam', 'motivo:falta_firma');
+    expect(e.discarded_reason).toBe('motivo:falta_firma');
+    expect(String(e.discarded_reason)).not.toContain(FIXABLE_REASON_PREFIX);
+  });
+
+  it('la propuesta baja a la pieza, no sólo al corpus', () => {
+    expect(VERDICT).toMatch(/applyVerdictToPiece\(pieceId, verdict, evaluated_by, criterion \|\| null, fix_proposal\)/);
+  });
+
+  it('la ventana se EXPLICA en vez de disfrazarse de fallo', () => {
+    // Un 500 genérico durante la ventana es indistinguible de un fallo real y el operador no
+    // puede saber que no hay nada roto. Mismo criterio que `challenged-queue` con su tabla
+    // ausente. El texto crudo del server viaja igual, por si la detección se equivoca.
+    expect(VERDICT).toMatch(/CorpusColumnMissing/);
+    expect(VERDICT).toMatch(/corpus_column_missing/);
+    expect(VERDICT).toMatch(/server_detail/);
+    expect(SHARED).toMatch(/class CorpusColumnMissing/);
+  });
+
+  it('la interfaz muestra la explicación, no el código de la máquina', () => {
+    const SERVICE = readFileSync(new URL('../src/services/calibrationInbox.ts', import.meta.url), 'utf8');
+    expect(SERVICE).toMatch(/data\.detail \|\| data\.message \|\| data\.error/);
   });
 
   it('aprobar sigue siendo la única rama que habilita', () => {
