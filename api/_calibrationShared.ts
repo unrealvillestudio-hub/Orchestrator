@@ -751,14 +751,33 @@ export async function ensureArtifact(pieceId: string): Promise<{ artifact_url: s
 }
 
 /**
+ * Los tres veredictos de la calibración. Son estados de DECISIÓN, no marcas ni casos:
+ *
+ *   approved → la pieza sirve como está
+ *   rejected → la pieza no sirve
+ *   fixable  → la pieza no sirve TAL COMO ESTÁ pero hay algo que aprovechar, y Sam escribe
+ *              qué propone para aprovecharlo
+ *
+ * `fixable` tiene el MISMO efecto que `rejected` sobre la pieza y se diferencia SÓLO en el
+ * corpus. Ver el bloque de `verdictEffect`, que explica por qué no puede ser de otra forma.
+ */
+export type CalibrationVerdict = 'approved' | 'rejected' | 'fixable';
+
+/**
  * UPSERT del veredicto en intel.approval_calibration (on_conflict piece_id).
  * Copia TODO el contexto de la pieza. Devuelve la fila guardada.
  */
 export async function upsertVerdict(row: {
   piece_id: string; brand_id: string; voice: string | null; domain: string | null;
   platform: string | null; format: string | null; psycho_preset: string | null;
-  audience_frame: string | null; artifact_url: string; verdict: 'approved' | 'rejected';
+  audience_frame: string | null; artifact_url: string; verdict: CalibrationVerdict;
   criterion: string | null; evaluated_by: string;
+  /**
+   * Qué propone Sam para aprovechar la pieza. Obligatorio con `fixable` —lo exige el
+   * endpoint, no la DB— y `null` con los otros dos: una propuesta vacía convertiría el
+   * veredicto en un rechazo con otro nombre.
+   */
+  fix_proposal: string | null;
   // Primera opinión del watcher, copiada de la pieza para poder comparar después.
   watcher_result: 'PASS' | 'REJECT' | null; watcher_gate: string | null;
   // Nivel de REGLA (de assets.watcher.failed_rules / rules_evaluated). NULL ≠ [] a propósito:
@@ -766,7 +785,7 @@ export async function upsertVerdict(row: {
   watcher_rules: string[] | null; watcher_rules_evaluated: number | null;
 }): Promise<Record<string, unknown>> {
   const url = `${SB_URL()}/rest/v1/approval_calibration?on_conflict=piece_id`;
-  const res = await fetch(url, {
+  const post = (payload: Record<string, unknown>) => fetch(url, {
     method: 'POST',
     headers: {
       apikey: SB_KEY(),
@@ -775,8 +794,30 @@ export async function upsertVerdict(row: {
       'Content-Profile': 'intel',
       Prefer: 'resolution=merge-duplicates,return=representation',
     },
-    body: JSON.stringify(row),
+    body: JSON.stringify(payload),
   });
+
+  const first = await post(row);
+  let res = first;
+
+  // VENTANA ENTRE EL PR DE CÓDIGO Y EL DE DDL. La migración va DESPUÉS del código
+  // (`MULTIBRAND_RULE` §5), así que hay un intervalo en el que `fix_proposal` todavía no existe
+  // como columna. PostgREST no ignora una columna desconocida: rechaza el cuerpo ENTERO, y eso
+  // tumbaría también `approved` y `rejected`, que hoy funcionan. Se reintenta sin la columna,
+  // pero SÓLO cuando no hay propuesta que perder: un `fixable` falla fuerte y se ve en la
+  // interfaz, porque guardarlo sin su propuesta sería exactamente el rechazo con otro nombre
+  // que este veredicto existe para no ser.
+  //
+  // La rama se apaga sola cuando la migración entra: el primer intento pasa siempre y el
+  // reintento deja de ejecutarse. No hace falta volver a tocar este archivo.
+  if (!first.ok && row.fix_proposal === null) {
+    const detail = await first.clone().text().catch(() => '');
+    if (detail.includes('fix_proposal')) {
+      const { fix_proposal: _sinColumnaTodavia, ...legacy } = row;
+      res = await post(legacy);
+    }
+  }
+
   if (!res.ok) throw new Error(`corpus upsert failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`);
   const rows = (await res.json().catch(() => [])) as Array<Record<string, unknown>>;
   return Array.isArray(rows) && rows.length ? rows[0] : {};
@@ -799,8 +840,20 @@ export async function upsertVerdict(row: {
 // LAS DOS SIGUEN ESCRIBIENDO EL CORPUS: la calibración no se pierde, se suma. Y el efecto se aplica
 // DESPUÉS del upsert — si el corpus falla, la pieza no se mueve, por el mismo criterio que el
 // arbitraje de CALIB-01: mover sin registrar por qué es el defecto de este brief del otro lado.
+//
+// TRES VEREDICTOS, DOS RAMAS — Y ES DELIBERADO, NO UN OLVIDO.
+// `fixable` cae por la misma rama que `rejected` y sella la pieza igual. La razón es dura y está
+// medida en este mismo archivo: la bandeja lista `CALIBRATION_STATUSES = ['awaiting_approval']`
+// filtrando por `discarded_at=is.null`. Un veredicto que NO sella deja la pieza viva y en ese
+// estado, así que reaparece en la bandeja al día siguiente — y entonces no es un veredicto: es una
+// nota que no se aplica. Es el defecto de SIGN-01 corte A2 otra vez, que ya costó seis decisiones
+// sin efecto.
+//
+// La diferencia entre `rejected` y `fixable` vive ENTERA en el corpus: misma sellada sobre la
+// pieza, etiqueta distinta y una propuesta de corrección en la fila. Decisión de Sam del
+// 2026-08-31: «mismo efecto que rejected... su único objetivo es marcarla bien».
 export function verdictEffect(
-  verdict: 'approved' | 'rejected', nowIso: string, by: string, reason: string | null,
+  verdict: CalibrationVerdict, nowIso: string, by: string, reason: string | null,
 ): Record<string, unknown> {
   return verdict === 'approved'
     ? { status: 'scheduled', approved_at: nowIso, approved_by: by }
@@ -813,7 +866,7 @@ export function verdictEffect(
  * segura ante dos manos a la vez, y el llamador lo reporta en vez de fingir que escribió.
  */
 export async function applyVerdictToPiece(
-  pieceId: string, verdict: 'approved' | 'rejected', by: string, reason: string | null,
+  pieceId: string, verdict: CalibrationVerdict, by: string, reason: string | null,
 ): Promise<ContentPiece | null> {
   const url = `${SB_URL()}/rest/v1/content_pieces?id=eq.${encodeURIComponent(pieceId)}&discarded_at=is.null`;
   const res = await fetch(url, {

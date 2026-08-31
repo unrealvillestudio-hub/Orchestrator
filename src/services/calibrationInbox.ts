@@ -14,7 +14,17 @@
  */
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
-export type Verdict = 'approved' | 'rejected';
+/**
+ * Los tres veredictos de la calibración. Son estados de DECISIÓN:
+ *   approved → sirve como está
+ *   rejected → no sirve
+ *   fixable  → no sirve tal como está, pero hay algo que aprovechar y Sam escribe qué propone
+ *
+ * `fixable` sella la pieza IGUAL que `rejected` —sale de la bandeja— y se diferencia sólo en el
+ * corpus. Un veredicto que no sella deja la pieza viva y reaparece mañana: sería una nota, no un
+ * veredicto. El contrato completo está en `api/calibration-verdict.ts`.
+ */
+export type Verdict = 'approved' | 'rejected' | 'fixable';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
 export type QueueOrder = 'recent' | 'oldest' | 'brand' | 'verdict';
@@ -171,6 +181,8 @@ export interface VerdictRow {
   brand_id: string;
   verdict: Verdict;
   criterion: string | null;
+  /** Qué propone Sam para aprovechar la pieza. Sólo con `fixable`; NULL en los otros dos. */
+  fix_proposal: string | null;
   evaluated_by: string | null;
   created_at: string;
   [k: string]: unknown;
@@ -247,13 +259,18 @@ export function renderArtifact(token: string, piece_id: string): Promise<{ ok: t
 }
 
 /**
- * Guarda un veredicto en el corpus. `criterion` es OPCIONAL en los dos veredictos: el
+ * Guarda un veredicto en el corpus. `criterion` es OPCIONAL en los tres veredictos: el
  * criterio se dicta en el chat con Claude, no acá. Obligarlo en la interfaz empuja a
  * escribir relleno para avanzar, y eso envenena el corpus.
+ *
+ * `fix_proposal` es la excepción y va al revés: OBLIGATORIA con `fixable` —el endpoint
+ * devuelve 400 sin ella— y `null` con los otros dos. No es una incoherencia con lo anterior:
+ * el criterio explica un juicio ya tomado y puede llegar después, mientras que la propuesta
+ * ES el veredicto — un `fixable` sin propuesta no dice nada que un rechazo no diga ya.
  */
 export function saveVerdict(
   token: string,
-  input: { piece_id: string; verdict: Verdict; criterion?: string | null },
+  input: { piece_id: string; verdict: Verdict; criterion?: string | null; fix_proposal?: string | null },
 ): Promise<{ ok: true; row: VerdictRow; piece_applied: boolean; piece_status: string | null; note?: string }> {
   return req('/api/calibration-verdict', token, {
     method: 'POST',
@@ -261,6 +278,7 @@ export function saveVerdict(
       piece_id: input.piece_id,
       verdict: input.verdict,
       criterion: input.criterion ?? null,
+      fix_proposal: input.fix_proposal ?? null,
     },
   });
 }

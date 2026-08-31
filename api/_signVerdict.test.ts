@@ -30,6 +30,7 @@ const sinComentarios = (src: string) => src
 const UI = readFileSync(new URL('../src/modules/iid/pieceUi.tsx', import.meta.url), 'utf8');
 const MOD = readFileSync(new URL('../src/modules/iid/ApprovalCalibrationModule.tsx', import.meta.url), 'utf8');
 const VERDICT = readFileSync(new URL('./calibration-verdict.ts', import.meta.url), 'utf8');
+const SHARED = readFileSync(new URL('./_calibrationShared.ts', import.meta.url), 'utf8');
 
 function piece(over: Partial<ContentPiece> = {}): ContentPiece {
   return { id: 'p-1', brand_id: 'BrandAlpha', ...over };
@@ -164,7 +165,60 @@ describe('E · motivo de rechazo estructurado', () => {
 
   it('la UI ofrece la lista cerrada y la manda por buildCriterion', () => {
     expect(MOD).toMatch(/REJECT_REASONS\.map/);
-    expect(MOD).toMatch(/criterion: buildCriterion\(reason, note\)/);
+    // El literal se partió en dos ramas al entrar el tercer veredicto: en `fixable` el textarea es
+    // la PROPUESTA, no el criterio, y por eso ahí `buildCriterion` sólo lleva el chip. La propiedad
+    // que este test fija no cambió — la clase de defecto sigue viajando por `buildCriterion`.
+    expect(MOD).toMatch(/buildCriterion\(reason, note\)/);
+    expect(MOD).toMatch(/buildCriterion\(reason, null\)/);
+  });
+});
+
+// ── el tercer veredicto: fixable ─────────────────────────────────────────────────
+describe('fixable · sella igual que un rechazo, y la diferencia vive en el corpus', () => {
+  it('sella la pieza: sin discarded_at reaparecería en la bandeja mañana', () => {
+    // Es la restricción que decide el diseño entero. La bandeja lista CALIBRATION_STATUSES
+    // filtrando por discarded_at IS NULL: un veredicto que no sella no es un veredicto.
+    const e = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'motivo:titulo');
+    expect(e.status).toBe('rejected');
+    expect(e.discarded_at).toBe('2026-08-31T22:00:00Z');
+    expect(e.discarded_reason).toBe('motivo:titulo');
+    expect(CALIBRATION_STATUSES).toContain('awaiting_approval');
+  });
+
+  it('el efecto sobre la pieza es EXACTAMENTE el de un rechazo', () => {
+    const fix = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'x');
+    const rej = verdictEffect('rejected', '2026-08-31T22:00:00Z', 'sam', 'x');
+    expect(fix).toEqual(rej);
+  });
+
+  it('aprobar sigue siendo la única rama que habilita', () => {
+    expect(verdictEffect('approved', '2026-08-31T22:00:00Z', 'sam', null).status).toBe('scheduled');
+  });
+
+  it('la propuesta es OBLIGATORIA: sin ella el endpoint corta con 400 antes de tocar nada', () => {
+    expect(VERDICT).toMatch(/fix_proposal required/);
+    expect(VERDICT.indexOf('fix_proposal required')).toBeLessThan(VERDICT.indexOf('upsertVerdict('));
+  });
+
+  it('la propuesta viaja SÓLO con fixable: con los otros dos va null', () => {
+    expect(VERDICT).toMatch(/const fix_proposal = verdict === 'fixable' \? proposal : null/);
+  });
+
+  it('la ventana entre el PR de código y el de DDL no tumba approved ni rejected', () => {
+    // La migración va DESPUÉS del código (`MULTIBRAND_RULE` §5), así que hay un intervalo en el
+    // que la columna no existe. PostgREST rechaza el cuerpo ENTERO ante una columna desconocida:
+    // sin el reintento caerían también los dos veredictos que hoy funcionan. Y el reintento sólo
+    // corre cuando NO hay propuesta que perder — un fixable falla fuerte, que es lo correcto.
+    expect(SHARED).toMatch(/row\.fix_proposal === null/);
+    expect(SHARED).toMatch(/detail\.includes\('fix_proposal'\)/);
+  });
+
+  it('la UI no degrada un fixable a rejected en silencio: muestra el error del server', () => {
+    // Un fallback silencioso guardaría un rechazo donde Sam pidió un fixable, y el corpus
+    // quedaría mintiendo sin que nadie se entere.
+    const limpio = sinComentarios(MOD);
+    expect(limpio).not.toMatch(/catch[\s\S]{0,200}submitVerdict\('rejected'\)/);
+    expect(limpio).toMatch(/setError\(err instanceof CalibrationError \? err\.message/);
   });
 });
 
