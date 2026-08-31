@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { RefreshCw, Inbox, CheckCircle2, XCircle, AlertTriangle, Archive } from 'lucide-react';
+import { RefreshCw, Inbox, CheckCircle2, XCircle, AlertTriangle, Archive, Wrench } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import type { IidSession } from '../../services/iidInbound';
 import {
   fetchQueue, saveVerdict, discardPiece, renderArtifact, CalibrationError,
   REJECT_REASONS, buildCriterion,
   type CalibrationPiece, type QueueResult, type QueueOrder, type VerdictFilter,
-  type GenerationFilter,
+  type GenerationFilter, type Verdict,
 } from '../../services/calibrationInbox';
 // Presentación compartida con la bandeja de publicación: la procedencia se cuenta igual
 // en las dos vistas o no sirve para compararlas.
@@ -31,10 +31,16 @@ const PAGE = 20;
  * eso ningún campo de texto es obligatorio — obligar a escribir empuja a poner cualquier
  * cosa para avanzar, y eso envenena el corpus con ruido que parece señal.
  *
- * Tres salidas, no dos:
- *   Aprobar   → corpus `approved`
- *   Rechazar  → corpus `rejected`  (criterio OPCIONAL)
+ * Cuatro salidas, tres de ellas veredicto:
+ *   Aprobar   → corpus `approved`   · habilita la pieza
+ *   Rechazar  → corpus `rejected`   · sella y saca de la bandeja (criterio OPCIONAL)
+ *   Fixable   → corpus `fixable`    · MISMO sellado que rechazar, con la PROPUESTA de qué
+ *               hacer con la pieza. Obligatoria: sin ella sería un rechazo con otro nombre.
  *   Descartar → NO entra al corpus; sella discarded_at y sale de la bandeja
+ *
+ * Fixable sella igual que Rechazar y no es un olvido: la bandeja lista `awaiting_approval`
+ * con `discarded_at IS NULL`, así que un veredicto que no sella deja la pieza viva y
+ * reaparece mañana. La diferencia entre los dos vive ENTERA en el corpus.
  *
  * NO publica nada.
  */
@@ -105,7 +111,7 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
         <div>
           <h3 className="font-display text-lg font-bold text-white">Bandeja de calibración</h3>
           <p className="text-sm text-zinc-500 mt-0.5">
-            Una tarjeta por pieza. Aprobás, rechazás o descartás — un clic.
+            Una tarjeta por pieza. Aprobar, rechazar, marcar como fixable o descartar — un clic.
             El criterio se dicta en el chat, no acá; <span className="text-zinc-400">nada se publica</span>.
           </p>
         </div>
@@ -193,8 +199,10 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
 }
 
 // ── Card de calibración ──────────────────────────────────────────────────────────
-type Action = 'approve' | 'reject' | 'discard';
-type Outcome = 'approved' | 'rejected' | 'discarded';
+type Action = 'approve' | 'reject' | 'fix' | 'discard';
+type Outcome = 'approved' | 'rejected' | 'fixable' | 'discarded';
+/** Qué panel de texto está abierto. `fix` es el tercer veredicto; `discard` no es veredicto. */
+type Panel = 'reject' | 'fix' | 'discard';
 
 function CalibrationCard({ piece, token, onResolved }: {
   piece: CalibrationPiece; token: string; onResolved: (id: string) => void;
@@ -207,7 +215,7 @@ function CalibrationCard({ piece, token, onResolved }: {
   const [artErr, setArtErr]   = useState<string | null>(null);
 
   // Panel abierto para escribir una nota. Ninguna de las dos es obligatoria.
-  const [panel, setPanel]     = useState<null | 'reject' | 'discard'>(null);
+  const [panel, setPanel]     = useState<null | Panel>(null);
   const [note, setNote]       = useState('');
   // SIGN-01 corte E — el motivo de un toque. OPCIONAL, como el criterio: obligarlo empuja a elegir
   // cualquier clase para avanzar, y eso envenena la serie igual que un criterio de relleno.
@@ -233,15 +241,30 @@ function CalibrationCard({ piece, token, onResolved }: {
     setTimeout(() => onResolved(piece.piece_id), 1500);
   };
 
-  const submitVerdict = async (verdict: 'approved' | 'rejected') => {
-    setBusy(verdict === 'approved' ? 'approve' : 'reject'); setError(null);
+  const submitVerdict = async (verdict: Verdict) => {
+    setBusy(verdict === 'approved' ? 'approve' : verdict === 'fixable' ? 'fix' : 'reject');
+    setError(null);
     try {
-      // Criterio OPCIONAL en los dos casos: vacío viaja como null, nunca como relleno.
+      // Criterio OPCIONAL en los tres casos: vacío viaja como null, nunca como relleno.
       // El motivo estructurado + la prosa. `buildCriterion` los une con un prefijo estable para que
       // una consulta pueda agrupar por motivo sin dejar de aceptar la prosa que ya hay en el corpus.
-      await saveVerdict(token, { piece_id: piece.piece_id, verdict, criterion: buildCriterion(reason, note) });
+      //
+      // En el panel de `fixable` el textarea ES LA PROPUESTA, no el criterio. La clase de defecto la
+      // sigue aportando el chip, que viaja en `criterion` con su prefijo: son dos campos distintos
+      // porque responden dos preguntas distintas — qué falla, y qué hacer con lo que hay.
+      const esFixable = verdict === 'fixable';
+      await saveVerdict(token, {
+        piece_id: piece.piece_id,
+        verdict,
+        criterion: esFixable ? buildCriterion(reason, null) : buildCriterion(reason, note),
+        fix_proposal: esFixable ? note.trim() : null,
+      });
       finish(verdict);
     } catch (err) {
+      // El error del server se muestra TAL CUAL. Nunca se degrada un `fixable` a `rejected` en
+      // silencio: guardaría un rechazo donde Sam pidió otra cosa y el corpus quedaría mintiendo
+      // sin que nadie se entere. Mientras la migración del corpus no esté aplicada, un `fixable`
+      // falla acá y se ve — eso es lo correcto, no un fallo de la interfaz.
       setError(err instanceof CalibrationError ? err.message : 'No se pudo guardar el veredicto.');
       setBusy(null);
     }
@@ -264,7 +287,9 @@ function CalibrationCard({ piece, token, onResolved }: {
       ? { box: 'bg-emerald-500/[0.07] border-emerald-500/30', text: 'text-emerald-300', icon: <CheckCircle2 size={18} />, label: 'Aprobada — guardada en el corpus' }
       : done === 'rejected'
         ? { box: 'bg-rose-500/[0.07] border-rose-500/30', text: 'text-rose-300', icon: <XCircle size={18} />, label: 'Rechazada — guardada en el corpus' }
-        : { box: 'bg-zinc-800/40 border-zinc-700/60', text: 'text-zinc-300', icon: <Archive size={18} />, label: 'Descartada — fuera de la bandeja, NO entra al corpus' };
+        : done === 'fixable'
+          ? { box: 'bg-sky-500/[0.07] border-sky-500/30', text: 'text-sky-300', icon: <Wrench size={18} />, label: 'Fixable — la propuesta quedó en el corpus' }
+          : { box: 'bg-zinc-800/40 border-zinc-700/60', text: 'text-zinc-300', icon: <Archive size={18} />, label: 'Descartada — fuera de la bandeja, NO entra al corpus' };
     return (
       <motion.div
         initial={{ opacity: 1 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -280,6 +305,45 @@ function CalibrationCard({ piece, token, onResolved }: {
   }
 
   const rejected = piece.watcher_result === 'REJECT';
+
+  /**
+   * El copy de cada panel, en un solo sitio. El mismo textarea significa una cosa distinta en
+   * cada uno —criterio, motivo, propuesta— y esa diferencia tiene que LEERSE en pantalla, no
+   * deducirse del contexto. `fix` es el único con etiqueta visible y el único obligatorio.
+   */
+  const PANEL_COPY = {
+    reject: {
+      label: null,
+      placeholder: 'Criterio del rechazo (opcional — normalmente lo escribe Claude desde el chat)…',
+      confirm: 'Confirmar rechazo',
+      foot: 'El rechazo entra al corpus con o sin criterio. Mejor vacío que de relleno.',
+      focus: 'focus:border-rose-500/60',
+      button: 'bg-rose-500/90 hover:bg-rose-500',
+      icon: <XCircle size={14} />,
+    },
+    fix: {
+      label: 'Qué propongo para aprovecharla',
+      placeholder: 'Qué se rescata de esta pieza y cómo — con esto se corrige después en el chat…',
+      confirm: 'Confirmar fixable',
+      foot: 'Fixable SELLA la pieza igual que un rechazo: sale de la bandeja. Lo que cambia es la '
+        + 'etiqueta del corpus y la propuesta, que queda guardada. La propuesta es obligatoria.',
+      focus: 'focus:border-sky-500/60',
+      button: 'bg-sky-500/90 hover:bg-sky-500',
+      icon: <Wrench size={14} />,
+    },
+    discard: {
+      label: null,
+      placeholder: 'Motivo del descarte (opcional)…',
+      confirm: 'Confirmar descarte',
+      foot: 'Descartar no es rechazar: sale de la bandeja y NO entra al corpus.',
+      focus: 'focus:border-zinc-500/60',
+      button: 'bg-zinc-700 hover:bg-zinc-600',
+      icon: <Archive size={14} />,
+    },
+  } as const;
+  const copy = panel ? PANEL_COPY[panel] : null;
+  /** La propuesta es el único texto obligatorio de la tarjeta. Sin ella el botón no se puede pulsar. */
+  const faltaPropuesta = panel === 'fix' && !note.trim();
 
   return (
     <motion.div
@@ -367,31 +431,35 @@ function CalibrationCard({ piece, token, onResolved }: {
                   </button>
                 ))}
               </div>
+              {copy?.label && (
+                <label className="block text-[11px] font-medium text-sky-300/90">{copy.label}</label>
+              )}
               <textarea
                 value={note}
                 onChange={(e) => { setNote(e.target.value); setError(null); }}
                 rows={3}
                 autoFocus
-                placeholder={panel === 'reject'
-                  ? 'Criterio del rechazo (opcional — normalmente lo escribe Claude desde el chat)…'
-                  : 'Motivo del descarte (opcional)…'}
+                placeholder={copy?.placeholder}
                 className={cn(
                   'w-full bg-[#050508] border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-700 outline-none transition-colors resize-none',
-                  panel === 'reject' ? 'focus:border-rose-500/60' : 'focus:border-zinc-500/60'
+                  copy?.focus,
                 )}
               />
               <div className="flex gap-2">
                 <button
-                  onClick={() => (panel === 'reject' ? submitVerdict('rejected') : submitDiscard())}
-                  disabled={!!busy}
+                  onClick={() => {
+                    if (panel === 'reject') return submitVerdict('rejected');
+                    if (panel === 'fix') return submitVerdict('fixable');
+                    return submitDiscard();
+                  }}
+                  disabled={!!busy || faltaPropuesta}
+                  title={faltaPropuesta ? 'Escribir la propuesta antes de confirmar' : undefined}
                   className={cn(
                     'flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
-                    panel === 'reject' ? 'bg-rose-500/90 hover:bg-rose-500' : 'bg-zinc-700 hover:bg-zinc-600'
+                    copy?.button,
                   )}
                 >
-                  {busy ? <Spinner size={14} /> : panel === 'reject'
-                    ? <><XCircle size={14} /> Confirmar rechazo</>
-                    : <><Archive size={14} /> Confirmar descarte</>}
+                  {busy ? <Spinner size={14} /> : <>{copy?.icon} {copy?.confirm}</>}
                 </button>
                 <button
                   onClick={() => { setPanel(null); setError(null); }}
@@ -401,14 +469,15 @@ function CalibrationCard({ piece, token, onResolved }: {
                   Cancelar
                 </button>
               </div>
-              <p className="text-[10px] font-mono text-zinc-600 leading-snug">
-                {panel === 'reject'
-                  ? 'El rechazo entra al corpus con o sin criterio. Mejor vacío que de relleno.'
-                  : 'Descartar no es rechazar: sale de la bandeja y NO entra al corpus.'}
+              <p className={cn(
+                'text-[10px] font-mono leading-snug',
+                panel === 'fix' ? 'text-sky-300/70' : 'text-zinc-600',
+              )}>
+                {copy?.foot}
               </p>
             </motion.div>
           ) : (
-            <motion.div key="actions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex gap-2">
+            <motion.div key="actions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex gap-2 flex-wrap">
               <button
                 onClick={() => submitVerdict('approved')}
                 disabled={!!busy}
@@ -422,6 +491,14 @@ function CalibrationCard({ piece, token, onResolved }: {
                 className="px-4 py-2.5 rounded-lg text-sm font-medium border border-rose-500/30 text-rose-300/90 hover:bg-rose-500/10 transition-colors disabled:opacity-50"
               >
                 <XCircle size={14} className="inline mr-1" /> Rechazar
+              </button>
+              <button
+                onClick={() => { setPanel('fix'); setError(null); }}
+                disabled={!!busy}
+                title="Hay algo que aprovechar. Sella la pieza igual que un rechazo y guarda la propuesta en el corpus."
+                className="px-4 py-2.5 rounded-lg text-sm font-medium border border-sky-500/30 text-sky-300/90 hover:bg-sky-500/10 transition-colors disabled:opacity-50"
+              >
+                <Wrench size={14} className="inline mr-1" /> Fixable
               </button>
               <button
                 onClick={() => { setPanel('discard'); setError(null); }}
