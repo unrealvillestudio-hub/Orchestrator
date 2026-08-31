@@ -30,6 +30,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { PieceMetrics } from './_pieceMetrics.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export const BUCKET = 'unrlvl-media';
@@ -130,6 +131,10 @@ export function publicArtifactUrl(brandId: string, pieceId: string): string {
 export interface PieceAssets {
   copy?: { aife_filtered?: string; raw?: string; title?: string };
   image?: { url?: string };
+  // Texto adaptado POR CANAL (content-run-stage). Es el que ese canal recibe de verdad,
+  // y por eso es el que la cabecera mide contra el tope del canal (ver _pieceMetrics.ts).
+  // El artefacto sigue mostrando el maestro: son dos cosas distintas y se declaran.
+  social?: { adapted?: Array<{ copy?: string; platform?: string }> };
   builder_meta?: { psycho_preset?: string; audience_frame?: string };
   watcher?: {
     result?: string;
@@ -365,6 +370,11 @@ export interface PieceContext {
   generation: FlowGeneration;
   cutoff_label: string | null;
   cutoff_at: string | null;
+  // ── FIX-CARD-06 · lo que la cabecera dice sin abrir nada ─────────────────────
+  // Conteos contra los topes del canal (`public.platform_configs`) y comparación de la
+  // firma contra el genoma. `null` = el llamador no resolvió los catálogos (el corpus,
+  // por ejemplo, no los necesita): ausencia declarada, nunca un cero que parezca medido.
+  metrics: PieceMetrics | null;
 }
 
 /** Datos que no viven en la fila de la pieza y se resuelven aparte (traza, intentos, corte). */
@@ -372,6 +382,8 @@ export interface ContextExtras {
   trace?: WatcherTrace;
   attempts?: number | null;
   generation?: GenerationInfo;
+  /** Métricas de cabecera ya resueltas por el endpoint (ver `_pieceMetrics.metricsOf`). */
+  metrics?: PieceMetrics;
 }
 
 export function toContext(piece: ContentPiece, extras: ContextExtras = {}): PieceContext {
@@ -415,6 +427,7 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     generation: gen.generation,
     cutoff_label: gen.cutoff_label,
     cutoff_at: gen.cutoff_at,
+    metrics: extras.metrics ?? null,
   };
 }
 
@@ -427,11 +440,20 @@ export function esc(s: unknown): string {
     .replace(/"/g, '&quot;');
 }
 
+/**
+ * El texto MAESTRO de la pieza: el filtrado por AIFE, o el crudo si aquél no existe.
+ * Exportado y usado por el artefacto Y por la cabecera para que las dos superficies no
+ * puedan divergir sobre qué texto es «la pieza».
+ */
+export function bodyTextOf(piece: ContentPiece): string {
+  return piece.assets?.copy?.aife_filtered ?? piece.assets?.copy?.raw ?? '';
+}
+
 /** Construye el artefacto tal como saldría. Regla de veracidad: literal, sin re-escribir. */
 export function buildHtml(piece: ContentPiece): string {
   const assets = piece.assets ?? {};
   const title = assets.copy?.title ?? '';
-  const bodyText = assets.copy?.aife_filtered ?? assets.copy?.raw ?? '';
+  const bodyText = bodyTextOf(piece);
   const imageUrl = assets.image?.url ?? '';
   const brand = piece.brand_id ?? '';
   const platform = piece.platform ?? '';

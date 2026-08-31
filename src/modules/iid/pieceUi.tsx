@@ -3,7 +3,9 @@ import {
   ChevronLeft, ChevronRight, ShieldCheck, ShieldAlert, ShieldQuestion, Copy, Check, Clock, GitBranch, History,
 } from 'lucide-react';
 import { cn } from '../../ui/components';
-import type { FlowGeneration } from '../../services/calibrationInbox';
+import type {
+  FlowGeneration, PieceMetrics, CountAgainstLimit, SignatureCheck,
+} from '../../services/calibrationInbox';
 
 /* ════════════════════════════════════════════════════════════════════════════
  * pieceUi — piezas de interfaz compartidas por las bandejas de PIEZAS
@@ -149,10 +151,162 @@ export function CopyableId({ id, title }: { id: string; title: string }) {
   );
 }
 
+// ── Cabecera de pieza ────────────────────────────────────────────────────────────
+// FIX-CARD-06 · QUÉ ES ESTA PIEZA Y SI CABE EN SU CANAL, SIN ABRIR NADA.
+//
+// EL DEFECTO: la cabecera decía marca, canal, formato y voz, y ahí se acababa. Para saber
+// si la pieza pasaba del tope del canal, o si llevaba la firma que su voz declara, había
+// que abrir el artefacto y contar a ojo — sobre una bandeja de veinte tarjetas por página.
+//
+// LA REGLA DEL COLOR, y por qué «sin dato» no es verde:
+//   verde  → hay tope sembrado Y la pieza lo cumple
+//   ámbar  → pasa el objetivo pero no el tope duro
+//   rojo   → pasa el tope duro: el canal la corta
+//   ámbar CON MOTIVO → el tope no está sembrado. No se aproxima ni se supone.
+// Pintar verde lo que nadie midió es una ausencia con forma de aprobación, que es el mismo
+// defecto que ya hizo rechazar material bueno en esta bandeja (ver `WatcherBadge`).
+//
+// NINGÚN NÚMERO DE TOPE VIVE ACÁ. Salen de `public.platform_configs` por canal y la firma
+// esperada de `brand_voice_genome`, resueltos en el server (`api/_pieceMetrics.ts`). Este
+// archivo sólo pinta lo que le llega.
+
+/** Lo mínimo que una pieza necesita exponer para que su cabecera se pueda dibujar. */
+export interface PieceHeaderData {
+  brand_id: string;
+  platform: string | null;
+  format: string | null;
+  voice: string | null;
+  domain: string | null;
+  metrics: PieceMetrics | null;
+}
+
+const CHIP = 'inline-flex items-center gap-1 px-1.5 py-0.5 rounded border';
+const CHIP_BY_STATUS: Record<string, string> = {
+  ok:          'bg-emerald-500/10 border-emerald-500/25 text-emerald-300/85',
+  over_target: 'bg-amber-500/10 border-amber-500/40 text-amber-300',
+  over_limit:  'bg-rose-500/10 border-rose-500/35 text-rose-300',
+  // Ausencia de dato: ámbar, y con el borde punteado para que no se confunda con «pasa el
+  // objetivo». Son dos ámbares distintos y la tarjeta tiene que poder distinguirlos.
+  no_data:     'bg-amber-500/[0.06] border-amber-500/40 border-dashed text-amber-300/85',
+};
+
+/**
+ * Un conteo contra su tope: `300/2200 car`. Cuando el tope no está sembrado se escribe
+ * `sin dato` en el lugar del número — nunca un cero, nunca un guion que se lea como cero.
+ */
+function LimitChip({ c, noun, hint }: { c: CountAgainstLimit; noun: string; hint: string }) {
+  const cap = c.limit === null ? 'sin dato' : String(c.limit);
+  return (
+    <span className={cn(CHIP, CHIP_BY_STATUS[c.status] ?? CHIP_BY_STATUS.no_data)} title={c.reason ?? hint}>
+      {c.count}/{cap} {noun}
+      {c.status === 'over_target' && c.target !== null && (
+        <span className="opacity-60">· sobre el objetivo ({c.target})</span>
+      )}
+    </span>
+  );
+}
+
+const SIGNATURE_CHIP: Record<SignatureCheck['status'], { cls: string; label: string }> = {
+  match:        { cls: CHIP_BY_STATUS.ok,      label: 'firma ✓' },
+  mismatch:     { cls: CHIP_BY_STATUS.over_limit, label: 'firma ✗' },
+  // Decisión declarada del genoma, no un defecto: esta voz no firma. Ni verde ni rojo.
+  not_declared: { cls: 'bg-zinc-800/60 border-zinc-700 text-zinc-400', label: 'firma — no firma' },
+  no_voice:     { cls: CHIP_BY_STATUS.no_data, label: 'firma — sin dato' },
+  no_data:      { cls: CHIP_BY_STATUS.no_data, label: 'firma — sin dato' },
+};
+
+/**
+ * La firma, COMPARADA. La esperada sale del genoma por `brand_id`/`voice_id`; la estampada
+ * es con lo que la pieza cierra de verdad. Se muestran LAS DOS y en la línea, no en un
+ * tooltip: una comparación que hay que descubrir pasando el cursor no es una comparación.
+ */
+function SignatureLine({ s }: { s: SignatureCheck }) {
+  const quote = (v: string | null) => (v ? `«${v}»` : 'sin cierre');
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[10px] font-mono leading-snug">
+      <span className="text-zinc-700">firma</span>
+      {s.expected !== null && (
+        <span className="text-zinc-500">esperada <span className="text-zinc-300">{quote(s.expected)}</span></span>
+      )}
+      <span className={cn(
+        s.status === 'match' ? 'text-emerald-400/80'
+          : s.status === 'mismatch' ? 'text-rose-300'
+          : 'text-zinc-500',
+      )}>
+        estampada <span className={s.status === 'match' ? 'text-emerald-300/90' : 'text-zinc-300'}>{quote(s.stamped)}</span>
+      </span>
+      {s.reason && <span className="text-amber-400/70">— {s.reason}</span>}
+    </div>
+  );
+}
+
+export function PieceHeader({ piece }: { piece: PieceHeaderData }) {
+  const m = piece.metrics;
+  // Los motivos de «sin dato» se leen SIN pasar el cursor: un ámbar sin motivo alarma en vez
+  // de informar, y el motivo nombra la columna exacta que falta por sembrar.
+  const gaps = m
+    ? [m.chars.reason, m.hashtags.reason].filter((r): r is string => Boolean(r))
+    : [];
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-x-2 gap-y-1 flex-wrap text-[10px] font-mono text-zinc-600">
+        <span className="text-accent/80 font-semibold">{piece.brand_id}</span>
+        <span title="content_pieces.platform — el canal al que va esta pieza.">
+          · {piece.platform ?? 'sin canal'}
+        </span>
+        {piece.format && <span>· {piece.format}</span>}
+        {piece.voice && <span>· voice:{piece.voice}</span>}
+        {piece.domain && <span>· {piece.domain}</span>}
+        {m ? (
+          <>
+            <LimitChip
+              c={m.chars}
+              noun="car"
+              hint={m.text_source === 'channel_adapted'
+                ? 'Caracteres del texto ADAPTADO a este canal, contra los topes de public.platform_configs.'
+                : 'Caracteres del texto maestro (no hay adaptación para este canal), contra los topes de public.platform_configs.'}
+            />
+            <LimitChip
+              c={m.hashtags}
+              noun="hashtags"
+              hint="Hashtags del texto que sale por este canal, contra platform_configs.hashtag_limit."
+            />
+            <span
+              className={cn(CHIP, SIGNATURE_CHIP[m.signature.status].cls)}
+              title={m.signature.reason ?? 'La pieza cierra con la firma que el genoma declara para su voz.'}
+            >
+              {SIGNATURE_CHIP[m.signature.status].label}
+            </span>
+          </>
+        ) : (
+          <span className={cn(CHIP, CHIP_BY_STATUS.no_data)}
+                title="El server no resolvió los catálogos de topes y firmas para esta pieza.">
+            conteos — sin dato
+          </span>
+        )}
+      </div>
+
+      {m && <SignatureLine s={m.signature} />}
+
+      {gaps.length > 0 && (
+        <div className="text-[10px] font-mono text-amber-400/70 leading-snug space-y-0.5">
+          {gaps.map((g) => <div key={g}>— {g}</div>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Generación del flujo ─────────────────────────────────────────────────────────
 export function GenerationBadge({ generation, label, at }: {
   generation: FlowGeneration; label: string | null; at: string | null;
 }) {
+  // FIX-CARD-06 · EL CORTE SE NOMBRA EN LA ETIQUETA, NO EN EL TOOLTIP.
+  // «Flujo anterior», a secas, no dice anterior A QUÉ: obligaba a pasar el cursor por cada
+  // tarjeta para saber contra qué corte se comparó. El dato ya llegaba como prop — estaba
+  // escondido, no ausente. El tooltip conserva la fecha y la explicación, que sí son
+  // secundarias; el nombre del corte no lo era.
   if (generation === 'previous') {
     return (
       <span
@@ -160,6 +314,7 @@ export function GenerationBadge({ generation, label, at }: {
         title={label ? `Anterior al corte «${label}» (${fmtDate(at)}). La juzgó un flujo que ya se arregló.` : 'Anterior al último corte del flujo.'}
       >
         <History size={10} /> Flujo anterior
+        {label && <span className="text-amber-300/60">· {label}</span>}
       </span>
     );
   }
@@ -170,6 +325,7 @@ export function GenerationBadge({ generation, label, at }: {
         title={label ? `Posterior al corte «${label}» (${fmtDate(at)}).` : 'Posterior al último corte del flujo.'}
       >
         <GitBranch size={10} /> Flujo corregido
+        {label && <span className="text-sky-300/50">· {label}</span>}
       </span>
     );
   }
@@ -190,7 +346,7 @@ export function CutoffsNotice({ source }: { source: 'unavailable' | 'empty' | 's
       <span>
         {source === 'unavailable'
           ? 'intel.pipeline_cutoffs no está disponible todavía — la generación del flujo se muestra como «sin corte».'
-          : 'intel.pipeline_cutoffs está vacía — sembrá los cortes para que la generación del flujo se calcule.'}
+          : 'intel.pipeline_cutoffs está vacía — sembrar los cortes para que la generación del flujo se calcule.'}
       </span>
     </div>
   );
@@ -223,7 +379,7 @@ export function WatcherBadge({ verdict, reason, failedRules, rulesEvaluated, pas
     REJECT: {
       cls: 'bg-rose-500/10 border-rose-500/30 text-rose-300',
       icon: <ShieldAlert size={10} />, label: 'Watcher: RECHAZÓ',
-      title: 'El watcher rechazó esta pieza. Si creés que se equivocó, aprobala igual — ese es el dato valioso.',
+      title: 'El watcher rechazó esta pieza. Si se equivocó, la pieza se aprueba igual — ese es el dato valioso.',
     },
     PASS: {
       cls: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400/80',

@@ -39,6 +39,9 @@ import {
   latestPerQueue, generationOf, watcherOf, toContext, PIECES_CAP,
   type ContentPiece, type PipelineCutoff, type GenerationInfo,
 } from './_calibrationShared.js';
+// FIX-CARD-06 — los topes del canal y la firma esperada son DATO: se leen acá, una vez
+// por request, y viajan resueltos en cada pieza. La UI no conoce ni un tope.
+import { fetchPlatformLimits, fetchSignatureClosers, metricsOf } from './_pieceMetrics.js';
 
 // Ejes de orden y filtro. Son del SISTEMA (una pieza tiene fecha, marca y veredicto en
 // cualquier marca), no de ningún caso particular.
@@ -116,10 +119,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Se lee sin filtro de marca para que by_brand sea global y estable aunque venga
     // filtro; los cortes se leen en runtime (nunca hay fechas de corte en este código).
-    const [allPieces, evaluated, cutoffsRaw] = await Promise.all([
+    const [allPieces, evaluated, cutoffsRaw, limits, closers] = await Promise.all([
       fetchCalibrationPieces(),
       fetchEvaluatedIds(),
       fetchPipelineCutoffs(),
+      fetchPlatformLimits(),
+      fetchSignatureClosers(),
     ]);
     const cutoffs: PipelineCutoff[] = cutoffsRaw ?? [];
 
@@ -154,6 +159,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       trace: p.orchestrator_job_id ? traces.get(p.orchestrator_job_id) : undefined,
       attempts: p.queue_id ? (attempts.get(p.queue_id) ?? null) : null,
       generation: genById.get(p.id),
+      metrics: metricsOf(p, limits, closers),
     }));
 
     const truncated = allPieces.length >= PIECES_CAP;

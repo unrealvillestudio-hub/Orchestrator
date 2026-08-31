@@ -12,7 +12,7 @@ import {
 // Presentación compartida con la bandeja de publicación: la procedencia se cuenta igual
 // en las dos vistas o no sirve para compararlas.
 import {
-  CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, shortId,
+  CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader, shortId,
 } from './pieceUi';
 
 const PAGE = 20;
@@ -281,22 +281,22 @@ function CalibrationCard({ piece, token, onResolved }: {
       style={{ borderLeftWidth: 3, borderLeftColor: rejected ? '#f43f5e' : '#FFAB00' }}
     >
       <div className="p-4 space-y-4">
-        {/* Contexto + primera opinión del watcher + generación del flujo */}
-        <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono text-zinc-600">
-          <span className="text-accent/80 font-semibold">{piece.brand_id}</span>
-          {piece.platform && <span>· {piece.platform}</span>}
-          {piece.format && <span>· {piece.format}</span>}
-          {piece.voice && <span>· voice:{piece.voice}</span>}
-          {piece.domain && <span>· {piece.domain}</span>}
-          {piece.psycho_preset && <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">{piece.psycho_preset}</span>}
-          <WatcherBadge
-            verdict={piece.watcher_verdict}
-            reason={piece.watcher_reason}
-            failedRules={piece.watcher_failed_rules}
-            rulesEvaluated={piece.watcher_rules_evaluated}
-            passType={piece.pass_type}
-          />
-          <GenerationBadge generation={piece.generation} label={piece.cutoff_label} at={piece.cutoff_at} />
+        {/* Cabecera (compartida con la bandeja de publicación) + veredicto + generación.
+            FIX-CARD-06: la identidad y los conteos salen de `PieceHeader`, así las dos
+            bandejas no pueden contar distinto la misma pieza. */}
+        <div className="space-y-1.5">
+          <PieceHeader piece={piece} />
+          <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono text-zinc-600">
+            {piece.psycho_preset && <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">{piece.psycho_preset}</span>}
+            <WatcherBadge
+              verdict={piece.watcher_verdict}
+              reason={piece.watcher_reason}
+              failedRules={piece.watcher_failed_rules}
+              rulesEvaluated={piece.watcher_rules_evaluated}
+              passType={piece.pass_type}
+            />
+            <GenerationBadge generation={piece.generation} label={piece.cutoff_label} at={piece.cutoff_at} />
+          </div>
         </div>
 
         {/* Procedencia */}
