@@ -12,6 +12,9 @@ import {
   type ChallengedResult, type ChallengedRow, type ChallengeVerdict, type GuardHit,
 } from '../../services/challengedInbox';
 import { CountPill, Pager, CopyableId, fmtDate } from './pieceUi';
+// Lectura en voz alta. Aquí el texto YA llega plano: el adaptador sólo normaliza la forma.
+import { SpeechReader } from '../../ui/SpeechReader';
+import { readableFromChallengedPiece } from './readablePiece';
 
 const PAGE = 20;
 
@@ -248,6 +251,9 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
   });
 
   const piece = row.piece;
+  // El texto de la pieza para el lector en voz alta. Aquí no hay artefacto HTML: la bandeja
+  // ya recibe `title` y `body` en texto plano, y el adaptador sólo normaliza la forma.
+  const readable = useMemo(() => readableFromChallengedPiece(row.piece), [row.piece]);
 
   return (
     <motion.div
@@ -313,6 +319,10 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
             {piece.pass_type && <span>pass_type: {piece.pass_type}</span>}
             {piece.edited_at && <span className="text-zinc-500">editada {fmtDate(piece.edited_at)}{piece.edited_by ? ` · ${piece.edited_by}` : ''}</span>}
           </div>
+
+          {/* Lectura en voz alta. Mismo componente que las otras dos bandejas: lo único
+              propio de esta es el adaptador, porque aquí el texto no viene de un artefacto. */}
+          <SpeechReader piece={readable} className="mt-3" />
         </div>
       ) : (
         <p className="text-[12px] text-zinc-600 italic mb-3">
