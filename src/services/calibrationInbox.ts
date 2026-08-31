@@ -33,6 +33,53 @@ export type GenerationFilter = 'all' | 'current';
 export type FlowGeneration = 'current' | 'previous' | 'unknown';
 
 /**
+ * FIX-CARD-06 — LO QUE LA CABECERA DE UNA PIEZA DICE SIN ABRIR NADA.
+ *
+ * Los topes NO viven acá: salen de `public.platform_configs` por canal (`char_limit`,
+ * `char_target`, `hashtag_limit`) y la firma esperada de `brand_voice_genome`, resueltos
+ * en el server (`api/_pieceMetrics.ts`). Este archivo declara la FORMA del contrato; ni
+ * un número de tope, ni un nombre de canal, ni un nombre de marca.
+ */
+
+/** Qué texto se contó: el adaptado al canal, o el maestro cuando no hay adaptación. */
+export type TextSource = 'channel_adapted' | 'master_copy' | 'empty';
+
+/**
+ * Estado de un conteo contra su tope. `no_data` NUNCA se pinta verde: un tope sin sembrar
+ * es una ausencia, y una ausencia con forma de aprobación es lo que hace aprobar a ciegas.
+ */
+export type LimitStatus = 'ok' | 'over_target' | 'over_limit' | 'no_data';
+
+export interface CountAgainstLimit {
+  count: number;
+  target: number | null;
+  limit: number | null;
+  status: LimitStatus;
+  /** Qué falta y dónde se siembra. null cuando hay dato. */
+  reason: string | null;
+}
+
+/** La firma es una COMPARACIÓN entre lo que el genoma declara y lo que la pieza estampa. */
+export type SignatureStatus = 'match' | 'mismatch' | 'not_declared' | 'no_voice' | 'no_data';
+
+export interface SignatureCheck {
+  /** `signature_closer` del genoma, por `brand_id`/`voice_id`. */
+  expected: string | null;
+  /** Con qué cierra la pieza de verdad. */
+  stamped: string | null;
+  status: SignatureStatus;
+  reason: string | null;
+}
+
+export interface PieceMetrics {
+  chars: CountAgainstLimit;
+  hashtags: CountAgainstLimit;
+  signature: SignatureCheck;
+  platform: string | null;
+  text_source: TextSource;
+}
+
+/**
  * SIGN-01 corte E — MOTIVOS DE RECHAZO, lista cerrada en la UI y texto libre en la columna.
  *
  * Hoy Sam escribe el criterio a mano y esos motivos NO son agregables: para saber que el 40% de los
@@ -99,6 +146,9 @@ export interface CalibrationPiece {
   generation: FlowGeneration;
   cutoff_label: string | null;         // corte de referencia usado
   cutoff_at: string | null;
+  // FIX-CARD-06 — conteos contra los topes del canal y comparación de la firma. `null` =
+  // el server no resolvió los catálogos: ausencia declarada, no un cero que parezca medido.
+  metrics: PieceMetrics | null;
 }
 
 export interface QueueResult {

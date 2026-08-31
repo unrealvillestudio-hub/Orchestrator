@@ -10,7 +10,7 @@ import {
   type ChannelInfo, type ChannelStatusFilter, type GenerationFilter,
 } from '../../services/publishInbox';
 import {
-  CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance,
+  CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader,
 } from './pieceUi';
 
 const PAGE = 20;
@@ -233,21 +233,22 @@ function PublishCard({ piece, token }: { piece: PublishablePiece; token: string 
       style={{ borderLeftWidth: 3, borderLeftColor: blocked ? '#f43f5e' : '#FFAB00' }}
     >
       <div className="p-4 space-y-4">
-        {/* Contexto + canal + watcher + generación */}
-        <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono text-zinc-600">
-          <span className="text-accent/80 font-semibold">{piece.brand_id}</span>
-          {piece.format && <span>· {piece.format}</span>}
-          {piece.voice && <span>· voice:{piece.voice}</span>}
-          {piece.domain && <span>· {piece.domain}</span>}
-          <ChannelBadge channel={piece.channel} />
-          <WatcherBadge
-            verdict={piece.watcher_verdict}
-            reason={piece.watcher_reason}
-            failedRules={piece.watcher_failed_rules}
-            rulesEvaluated={piece.watcher_rules_evaluated}
-            passType={piece.pass_type}
-          />
-          <GenerationBadge generation={piece.generation} label={piece.cutoff_label} at={piece.cutoff_at} />
+        {/* Cabecera (la MISMA que la bandeja de calibración) + canal + watcher + generación.
+            FIX-CARD-06: identidad y conteos salen de `PieceHeader`; el canal es lo propio
+            de esta bandeja y por eso se queda acá. */}
+        <div className="space-y-1.5">
+          <PieceHeader piece={piece} />
+          <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono text-zinc-600">
+            <ChannelBadge channel={piece.channel} />
+            <WatcherBadge
+              verdict={piece.watcher_verdict}
+              reason={piece.watcher_reason}
+              failedRules={piece.watcher_failed_rules}
+              rulesEvaluated={piece.watcher_rules_evaluated}
+              passType={piece.pass_type}
+            />
+            <GenerationBadge generation={piece.generation} label={piece.cutoff_label} at={piece.cutoff_at} />
+          </div>
         </div>
 
         <Provenance piece={piece} />

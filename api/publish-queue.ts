@@ -43,6 +43,9 @@ import {
   RESOLVED_STATUSES, fetchPublishChannels, channelOf, channelBlocks,
   type ChannelInfo, type PublishablePiece,
 } from './_publishShared.js';
+// FIX-CARD-06 — misma cabecera que la bandeja de calibración, mismos catálogos leídos en
+// runtime. Las dos bandejas cuentan lo mismo porque llaman a la misma función.
+import { fetchPlatformLimits, fetchSignatureClosers, metricsOf } from './_pieceMetrics.js';
 
 const CHANNEL_STATUS_FILTERS = ['all', 'operational', 'blocked'] as const;
 type ChannelStatusFilter = (typeof CHANNEL_STATUS_FILTERS)[number];
@@ -88,10 +91,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Sin filtro de marca en la lectura: by_brand tiene que ser global y estable aunque
     // venga filtro. Los cortes se leen en runtime (cero fechas de corte en el código).
-    const [allPieces, cutoffsRaw, channels] = await Promise.all([
+    const [allPieces, cutoffsRaw, channels, limits, closers] = await Promise.all([
       fetchLivePieces({ excludeStatuses: RESOLVED_STATUSES }),
       fetchPipelineCutoffs(),
       fetchPublishChannels(),
+      fetchPlatformLimits(),
+      fetchSignatureClosers(),
     ]);
     const cutoffs: PipelineCutoff[] = cutoffsRaw ?? [];
 
@@ -145,6 +150,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         trace: p.orchestrator_job_id ? traces.get(p.orchestrator_job_id) : undefined,
         attempts: p.queue_id ? (attempts.get(p.queue_id) ?? null) : null,
         generation: genById.get(p.id),
+        metrics: metricsOf(p, limits, closers),
       }),
       channel: channelById.get(p.id) ?? channelOf(p, channels),
     }));

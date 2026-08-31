@@ -16,11 +16,12 @@
 import {
   CalibrationError,
   type FlowGeneration,
+  type PieceMetrics,
 } from './calibrationInbox';
 
 // El error tipado es el mismo mecanismo; se reexporta para no obligar a importar de dos lados.
 export { CalibrationError } from './calibrationInbox';
-export type { FlowGeneration } from './calibrationInbox';
+export type { FlowGeneration, PieceMetrics } from './calibrationInbox';
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 /**
@@ -73,6 +74,9 @@ export interface PublishablePiece {
   generation: FlowGeneration;
   cutoff_label: string | null;
   cutoff_at: string | null;
+  // FIX-CARD-06 — la MISMA cabecera que la bandeja de calibración: las dos llaman a
+  // `metricsOf` en el server, así que no pueden contar distinto la misma pieza.
+  metrics: PieceMetrics | null;
   // Canal de destino y su estado operativo.
   channel: ChannelInfo;
 }
