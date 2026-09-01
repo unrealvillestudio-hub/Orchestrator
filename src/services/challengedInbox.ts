@@ -45,6 +45,11 @@ export interface ChallengedRow {
   pattern_found: boolean;
   /** La razón de la retención en una línea, redactada por el server. */
   reason: string;
+  /**
+   * En qué idioma se lee esta pieza en voz alta (BCP-47 o prefijo). Lo resuelve el server desde
+   * `public.brands` por `brand_id`; `null` = sin dato, y el lector usa la voz del sistema.
+   */
+  reading_language: string | null;
   piece: ChallengedPiece | null;
 }
 
@@ -193,7 +198,10 @@ export function savePieceEdit(
 export const EDIT_REASONS = [
   { value: 'titulo_ambiguo',  label: 'Título ambiguo' },
   { value: 'dato_incorrecto', label: 'Dato incorrecto' },
-  { value: 'registro',        label: 'Registro' },
+  // La etiqueta se aclaró («Registro» se leía a la vez como tono y como alta/suscripción, y
+  // un chip ambiguo agrupa mal, que es para lo que existe). EL VALOR NO CAMBIA: viaja dentro
+  // del texto libre con su prefijo estable, y tocarlo huérfanaría las filas que ya lo usan.
+  { value: 'registro',        label: 'Tono y registro' },
   { value: 'longitud',        label: 'Longitud' },
   { value: 'otro',            label: 'Otro' },
 ] as const;

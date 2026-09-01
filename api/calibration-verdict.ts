@@ -155,20 +155,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (err) {
     if (err instanceof PieceNotFound) return res.status(404).json({ error: 'piece_not_found', piece_id: pieceId });
 
-    // LA VENTANA SE DICE, NO SE DISFRAZA DE FALLO. Mientras la migración del veredicto no esté
-    // aplicada, la columna no existe y un 500 genérico es indistinguible de un fallo real: el
-    // operador no puede saber que no hay nada roto y que el arreglo es aplicar la migración.
-    // Mismo criterio que `challenged-queue` con su tabla ausente («está vacía porque no hay de
-    // dónde leer, no porque no haya retenidas»). 503 y no 500: no es un error del servidor, es
-    // una capacidad que todavía no está desplegada.
+    // EL DESAJUSTE DE ESQUEMA SE DICE, NO SE DISFRAZA DE FALLO. Un 500 genérico es
+    // indistinguible de un fallo real y no le dice al operador qué hacer. Mismo criterio que
+    // `challenged-queue` con su tabla ausente. 503 y no 500: no es un error del servidor, es
+    // una capacidad que el esquema no soporta.
+    //
+    // EL MENSAJE DICE QUÉ FALTA Y QUÉ HACER, Y NADA MÁS. La versión anterior añadía «no hay
+    // nada roto» y «aprobar y rechazar siguen funcionando»: afirmaciones sobre el estado del
+    // resto del sistema que este endpoint NO comprueba antes de emitirlas. Y como la detección
+    // se apoya en el texto del error de PostgREST —una heurística, no una medición—, si acertara
+    // sobre el error equivocado esas dos frases tranquilizarían en el caso exacto en que no
+    // deben. Se dice lo que se sabe: qué columna falta y que hay que aplicar la migración.
     if (err instanceof CorpusColumnMissing) {
-      console.warn(`[calibration-verdict] ${pieceId}: ${err.message} — migración del veredicto sin aplicar`);
+      console.warn(`[calibration-verdict] ${pieceId}: ${err.message} — el esquema del corpus no acompaña`);
       return res.status(503).json({
         error: 'corpus_column_missing',
         column: err.column,
-        detail: `El corpus todavía no tiene la columna '${err.column}': la migración del veredicto `
-          + 'fixable no está aplicada. No se guardó nada y la pieza NO se movió — no hay nada roto. '
-          + 'Aprobar y rechazar siguen funcionando con normalidad.',
+        detail: `El corpus no tiene la columna '${err.column}'. El veredicto no se guardó y la `
+          + 'pieza no se movió. Se arregla aplicando la migración que añade esa columna.',
         server_detail: err.server_detail,
       });
     }

@@ -58,6 +58,12 @@ export interface PublishablePiece {
   watcher_verdict: 'PASS' | 'REJECT' | 'RESCHEDULE' | 'not_evaluated';
   watcher_reason: string | null;
   pass_type: string | null;
+  /**
+   * En qué idioma se lee esta pieza en voz alta (BCP-47 o prefijo). Lo resuelve el server desde
+   * `public.brands` por `brand_id`; `null` = sin dato, y el lector usa la voz del sistema.
+   * Ni un idioma escrito en el código: la lista de idiomas es la del operador y la del catálogo.
+   */
+  reading_language: string | null;
   watcher_gate: string | null;
   watcher_failed_rules: string[];
   watcher_rules_evaluated: number | null;

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Play, Pause, Square, Volume2 } from 'lucide-react';
 import { cn } from './components';
 
@@ -58,6 +58,11 @@ function langPrefix(tag: string | null | undefined): string {
   return (tag ?? '').trim().toLowerCase().split(/[-_]/)[0] ?? '';
 }
 
+/** Tag completo normalizado: 'es_ES' → 'es-es'. Para comparar locales, no sólo prefijos. */
+function langTag(tag: string | null | undefined): string {
+  return (tag ?? '').trim().toLowerCase().replace('_', '-');
+}
+
 /**
  * Nombre legible de un idioma, resuelto por el propio navegador. No hay tabla de idiomas
  * en este archivo a propósito: la lista es la del sistema del operador, y una tabla aquí
@@ -70,6 +75,54 @@ function languageNamer(): (code: string) => string {
   } catch {
     return (code) => code;
   }
+}
+
+// ── La voz elegida se recuerda, POR IDIOMA, mientras dure la sesión ──────────────
+
+/**
+ * EL DEFECTO QUE CIERRA: el lector reelegía voz en CADA tarjeta, así que el operador que
+ * recorre veinte piezas de la misma marca tenía que volver a elegir veinte veces.
+ *
+ * Se recuerda POR IDIOMA y no una sola voz global, y esa es la decisión que hace que las dos
+ * cosas convivan: mantener la elección entre tarjetas, y que una pieza en otro idioma NO herede
+ * la voz del anterior. Una voz global obligaría a elegir entre las dos.
+ *
+ * Vive en `sessionStorage` —dura lo que dura la sesión del navegador, que es exactamente lo
+ * pedido— con una copia en memoria y suscripción, para que todas las tarjetas montadas reflejen
+ * el cambio en el momento. Nunca sale del navegador del operador.
+ */
+const VOICE_MEMORY_KEY = 'unrlvl.speechReader.voiceByLang';
+
+let voiceByLang: Record<string, string> = readVoiceMemory();
+const voiceMemoryListeners = new Set<() => void>();
+
+function readVoiceMemory(): Record<string, string> {
+  // Cualquier acceso puede lanzar (modo privado, almacenamiento bloqueado). Nunca rompe: la
+  // ausencia de recuerdo es un estado válido, no un fallo.
+  try {
+    const raw = window.sessionStorage.getItem(VOICE_MEMORY_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function rememberVoice(lang: string, voiceUri: string) {
+  if (!lang || !voiceUri) return;
+  voiceByLang = { ...voiceByLang, [lang]: voiceUri };
+  try { window.sessionStorage.setItem(VOICE_MEMORY_KEY, JSON.stringify(voiceByLang)); } catch { /* sin recuerdo */ }
+  for (const notify of voiceMemoryListeners) notify();
+}
+
+function subscribeVoiceMemory(notify: () => void): () => void {
+  voiceMemoryListeners.add(notify);
+  return () => { voiceMemoryListeners.delete(notify); };
+}
+
+/** El recuerdo vivo. Todas las tarjetas montadas leen el mismo. */
+function useVoiceMemory(): Record<string, string> {
+  return useSyncExternalStore(subscribeVoiceMemory, () => voiceByLang, () => voiceByLang);
 }
 
 /**
@@ -123,25 +176,51 @@ export function SpeechReader({ piece, suggestedLang, className }: SpeechReaderPr
   /** Si la voz que suena la inició ESTE lector. Sin esta marca, una tarjeta hermana que
    *  termina de cargar cortaría la lectura de la tarjeta que el operador está oyendo. */
   const owns = useRef(false);
-  const preset = useRef(false);
+  /** Qué sugerencia se aplicó ya. Si cambia la sugerencia se vuelve a resolver; si no cambia,
+   *  manda el operador y ni las voces que llegan tarde le pisan la elección. */
+  const appliedFor = useRef<string | null>(null);
+  const remembered = useVoiceMemory();
 
   const title = (piece.title ?? '').trim();
   const body = (piece.body ?? '').trim();
   /** Título y cuerpo, en ese orden. El salto de línea es lo que la síntesis lee como pausa. */
   const fullText = [title, body].filter(Boolean).join('\n');
 
-  // Preselección: el idioma sugerido si hay al menos una voz que empiece por ese prefijo;
-  // si no, la voz `default` del sistema. Ocurre UNA vez: después manda el operador.
+  /**
+   * PRESELECCIÓN, en este orden y por este motivo:
+   *
+   *   1. la voz que el operador ya eligió PARA ESE IDIOMA en esta sesión — no se le vuelve a
+   *      preguntar tarjeta tras tarjeta, que es el defecto que esto cierra;
+   *   2. una voz del locale exacto (`es-ES` antes que un `es` cualquiera), si la sugerencia
+   *      trae la forma completa;
+   *   3. la primera voz del idioma sugerido;
+   *   4. la voz `default` del sistema, cuando no hay sugerencia o el idioma no tiene voces
+   *      instaladas — degradar a lo que había antes, nunca inventar.
+   *
+   * Se rehace SÓLO cuando cambia la sugerencia. Mientras no cambie, manda el operador: ni las
+   * voces que Chrome entrega tarde le pisan la elección.
+   */
   useEffect(() => {
-    if (!voices.length || preset.current) return;
-    preset.current = true;
+    if (!voices.length) return;
+    const suggestion = langTag(suggestedLang);
+    if (appliedFor.current === suggestion) return;
+    appliedFor.current = suggestion;
+
     const wanted = langPrefix(suggestedLang);
     const matching = wanted ? voices.filter((v) => langPrefix(v.lang) === wanted) : [];
-    const chosen = matching[0] ?? voices.find((v) => v.default) ?? voices[0];
+
+    const rememberedUri = wanted ? remembered[wanted] : undefined;
+    const chosen =
+      matching.find((v) => v.voiceURI === rememberedUri)
+      ?? (suggestion.includes('-') ? matching.find((v) => langTag(v.lang) === suggestion) : undefined)
+      ?? matching[0]
+      ?? voices.find((v) => v.default)
+      ?? voices[0];
+
     if (!chosen) return;
     setLang(langPrefix(chosen.lang));
     setVoiceUri(chosen.voiceURI);
-  }, [voices, suggestedLang]);
+  }, [voices, suggestedLang, remembered]);
 
   const languages = useMemo(() => {
     const nameOf = languageNamer();
@@ -220,10 +299,20 @@ export function SpeechReader({ piece, suggestedLang, className }: SpeechReaderPr
     else if (playback === 'paused') { synth.resume(); setPlayback('speaking'); }
   }, [playback]);
 
+  /** Elegir a mano —voz o idioma— es una decisión del operador, y se recuerda. */
+  const onVoiceChange = (uri: string) => {
+    setVoiceUri(uri);
+    rememberVoice(lang, uri);
+  };
+
   const onLangChange = (next: string) => {
     setLang(next);
-    const first = voices.find((v) => langPrefix(v.lang) === next);
-    setVoiceUri(first?.voiceURI ?? '');
+    // Si ya eligió voz para ese idioma en esta sesión, se le devuelve la suya.
+    const rememberedUri = remembered[next];
+    const pool = voices.filter((v) => langPrefix(v.lang) === next);
+    const chosen = pool.find((v) => v.voiceURI === rememberedUri) ?? pool[0];
+    setVoiceUri(chosen?.voiceURI ?? '');
+    if (chosen) rememberVoice(next, chosen.voiceURI);
   };
 
   if (!SUPPORTED) return null;
@@ -300,7 +389,7 @@ export function SpeechReader({ piece, suggestedLang, className }: SpeechReaderPr
             Voz de lectura
             <select
               value={voiceUri}
-              onChange={(e) => setVoiceUri(e.target.value)}
+              onChange={(e) => onVoiceChange(e.target.value)}
               className="bg-zinc-950 border border-zinc-800 rounded-lg px-1.5 py-1 text-[11px] text-zinc-300 max-w-[12rem]"
             >
               {voicesForLang.length === 0 && <option value="">sin voces</option>}

@@ -106,7 +106,10 @@ export const REJECT_REASONS = [
   { value: 'falta_firma',     label: 'Falta la firma' },
   { value: 'texto_truncado',  label: 'Texto truncado' },
   { value: 'dato_incorrecto', label: 'Dato incorrecto' },
-  { value: 'registro',        label: 'Registro' },
+  // La etiqueta se aclaró («Registro» se leía a la vez como tono y como alta/suscripción, y
+  // un chip ambiguo agrupa mal, que es para lo que existe). EL VALOR NO CAMBIA: viaja dentro
+  // del texto libre con su prefijo estable, y tocarlo huérfanaría las filas que ya lo usan.
+  { value: 'registro',        label: 'Tono y registro' },
   { value: 'titulo',          label: 'Título' },
   { value: 'otro',            label: 'Otro' },
 ] as const;
@@ -142,6 +145,12 @@ export interface CalibrationPiece {
   watcher_verdict: 'PASS' | 'REJECT' | 'RESCHEDULE' | 'not_evaluated';
   watcher_reason: string | null;
   pass_type: string | null;
+  /**
+   * En qué idioma se lee esta pieza en voz alta (BCP-47 o prefijo). Lo resuelve el server desde
+   * `public.brands` por `brand_id`; `null` = sin dato, y el lector usa la voz del sistema.
+   * Ni un idioma escrito en el código: la lista de idiomas es la del operador y la del catálogo.
+   */
+  reading_language: string | null;
 
   // ── Procedencia ────────────────────────────────────────────────────────────
   status: string | null;
