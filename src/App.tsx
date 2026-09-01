@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send, ShieldQuestion } from 'lucide-react';
+import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send, ShieldQuestion, Archive } from 'lucide-react';
 import { useFlowStore } from './store/useFlowStore';
 import { cn, GlowDot } from './ui/components';
 import HubModule from './modules/hub/HubModule';
@@ -15,11 +15,12 @@ import CalibrationConsole from './modules/iid/CalibrationConsole';
 import ApprovalCalibrationModule from './modules/iid/ApprovalCalibrationModule';
 import PublishQueueModule from './modules/iid/PublishQueueModule';
 import ChallengedInboxModule from './modules/iid/ChallengedInboxModule';
+import EvaluatedHistoryModule from './modules/iid/EvaluatedHistoryModule';
 import type { IidSession } from './services/iidInbound';
 
 const BUILD_TAG = "OR_1.1";
 
-type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" | "calibration" | "challenged" | "publish";
+type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" | "calibration" | "challenged" | "publish" | "history";
 
 const NAV_ITEMS = [
   { id: "hub" as View,         label: "Orchestrator", icon: LayoutGrid },
@@ -30,6 +31,9 @@ const NAV_ITEMS = [
   // CALIB-01-E — las retenidas van junto a la calibración, que es donde Sam ya mira.
   { id: "challenged" as View,  label: "Retenidas",    icon: ShieldQuestion },
   { id: "publish" as View,     label: "Publicación",  icon: Send },
+  // BRIEF-02 — el historial va DESPUÉS de las tres bandejas: es donde se mira lo que ya
+  // pasó por ellas, no una cuarta cosa que decidir.
+  { id: "history" as View,     label: "Historial",    icon: Archive },
 ];
 
 // Deep-link ?view=calibration → abre la bandeja directo (botón del email despertador).
@@ -40,6 +44,8 @@ function initialView(): View {
     // Deep-link del email de RETENIDA y del digest → la bandeja de arbitraje.
     if (v === 'challenged') return 'challenged';
     if (v === 'publish') return 'publish';
+    // Deep-link al historial: sirve para mandarle a alguien una pieza ya evaluada.
+    if (v === 'history') return 'history';
   } catch { /* SSR / entorno sin window */ }
   return 'hub';
 }
@@ -86,6 +92,7 @@ export default function App() {
     calibration: "Calibración",
     challenged:  "Retenidas",
     publish:     "Publicación",
+    history:     "Historial",
   };
 
   const goHub = () => setView("hub");
@@ -191,6 +198,7 @@ export default function App() {
           {view === "calibration" && <ApprovalCalibrationModule session={session} />}
           {view === "challenged"  && <ChallengedInboxModule session={session} />}
           {view === "publish"     && <PublishQueueModule session={session} />}
+          {view === "history"     && <EvaluatedHistoryModule session={session} />}
         </motion.div>
       </AnimatePresence>
 
