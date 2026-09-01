@@ -288,7 +288,7 @@ function PublishCard({ piece, token }: { piece: PublishablePiece; token: string 
         {/* Lectura en voz alta. Va debajo de la vista previa porque se lee lo mismo que se
             ve, y su propio bloque de texto es donde ocurre la selección: dentro del
             `<iframe sandbox="">` de arriba, `getSelection()` no alcanza. */}
-        {readable && <SpeechReader piece={readable} />}
+        {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
 
         {/* Estado de salida. Cuando el canal bloquea, el motivo se lee sin abrir nada; cuando
             no bloquea, tampoco hay acción todavía y se dice por qué. */}

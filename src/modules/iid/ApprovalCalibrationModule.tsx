@@ -221,7 +221,14 @@ function CalibrationCard({ piece, token, onResolved }: {
   // cualquier clase para avanzar, y eso envenena la serie igual que un criterio de relleno.
   const [reason, setReason]   = useState('');
   const [busy, setBusy]       = useState<null | Action>(null);
-  const [error, setError]     = useState<string | null>(null);
+  /**
+   * El error de la tarjeta conserva DOS cosas. La frase redactada es la que se lee; el texto
+   * crudo del server es la mitigación de que esa frase se apoya en una heurística sobre el
+   * cuerpo del error de PostgREST. Guardar sólo `err.message` —como hacía antes— tiraba el
+   * objeto entero: el detalle viajaba hasta el navegador y no era alcanzable ni por consola,
+   * así que la mitigación existía sobre el papel y no en la pantalla.
+   */
+  const [error, setError]     = useState<null | { message: string; detail: string | null }>(null);
   const [done, setDone]       = useState<null | Outcome>(null);
 
   useEffect(() => {
@@ -231,6 +238,14 @@ function CalibrationCard({ piece, token, onResolved }: {
       .catch((err) => { if (alive) setArtErr(err instanceof CalibrationError ? err.message : 'No se pudo renderizar el artefacto.'); });
     return () => { alive = false; };
   }, [piece.piece_id, token]);
+
+  /** Lo que la tarjeta muestra de un error: la frase, y el crudo del server si lo hay. */
+  const cardError = (err: unknown, caida: string) => {
+    if (!(err instanceof CalibrationError)) return { message: caida, detail: null };
+    const body = err.body as { server_detail?: unknown } | null | undefined;
+    const detail = typeof body?.server_detail === 'string' ? body.server_detail : null;
+    return { message: err.message, detail };
+  };
 
   // El texto de la pieza para el lector en voz alta. Sale del MISMO `html` que ya se recibe
   // de `preview-render`, así que no hay una segunda lectura ni una segunda fuente de texto.
@@ -265,7 +280,7 @@ function CalibrationCard({ piece, token, onResolved }: {
       // silencio: guardaría un rechazo donde Sam pidió otra cosa y el corpus quedaría mintiendo
       // sin que nadie se entere. Mientras la migración del corpus no esté aplicada, un `fixable`
       // falla acá y se ve — eso es lo correcto, no un fallo de la interfaz.
-      setError(err instanceof CalibrationError ? err.message : 'No se pudo guardar el veredicto.');
+      setError(cardError(err, 'No se pudo guardar el veredicto.'));
       setBusy(null);
     }
   };
@@ -276,7 +291,7 @@ function CalibrationCard({ piece, token, onResolved }: {
       await discardPiece(token, { piece_id: piece.piece_id, reason: buildCriterion(reason, note) });
       finish('discarded');
     } catch (err) {
-      setError(err instanceof CalibrationError ? err.message : 'No se pudo descartar la pieza.');
+      setError(cardError(err, 'No se pudo descartar la pieza.'));
       setBusy(null);
     }
   };
@@ -403,9 +418,21 @@ function CalibrationCard({ piece, token, onResolved }: {
         {/* Lectura en voz alta. Va debajo de la vista previa porque se lee lo mismo que se
             ve, y su propio bloque de texto es donde ocurre la selección: dentro del
             `<iframe sandbox="">` de arriba, `getSelection()` no alcanza. */}
-        {readable && <SpeechReader piece={readable} />}
+        {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
 
-        {error && <p className="text-xs text-rose-400 font-mono leading-snug">{error}</p>}
+        {error && (
+          <div className="text-xs text-rose-400 font-mono leading-snug space-y-1">
+            <p>{error.message}</p>
+            {/* Plegado, pero ALCANZABLE. La frase de arriba la redacta el endpoint sobre una
+                heurística; esto es lo que respondió la base, sin interpretar. */}
+            {error.detail && (
+              <details className="text-[10px] text-rose-300/70">
+                <summary className="cursor-pointer hover:text-rose-300">Respuesta del servidor</summary>
+                <pre className="mt-1 whitespace-pre-wrap break-all">{error.detail}</pre>
+              </details>
+            )}
+          </div>
+        )}
 
         {/* Acciones — tres salidas */}
         <AnimatePresence mode="wait">

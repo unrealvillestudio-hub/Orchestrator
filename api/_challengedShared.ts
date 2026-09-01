@@ -36,6 +36,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { SB_URL, SB_KEY } from './_calibrationShared.js';
+import { readingLanguageOf, type BrandLanguageCatalog } from './_brandLanguage.js';
 
 // ── Tipos del contrato (CALIB-01 §2) ─────────────────────────────────────────────
 
@@ -73,6 +74,12 @@ export interface ChallengedRow {
   pattern_found: boolean;
   reason: string;
   // La pieza
+  /**
+   * En qué idioma se lee esta pieza en voz alta (BCP-47 o prefijo). Sale de `public.brands`
+   * por `brand_id`, resuelto en runtime — ver `_brandLanguage.ts`. `null` = sin dato, y el
+   * lector usa la voz del sistema en vez de inventar un idioma.
+   */
+  reading_language: string | null;
   piece: {
     id: string;
     title: string | null;
@@ -221,6 +228,7 @@ export function toChallengedRow(
   row: JudgeCalibrationRow,
   pieces: Map<string, RawPiece>,
   statements: Map<string, string>,
+  brandLangs: BrandLanguageCatalog = null,
 ): ChallengedRow {
   const p = row.piece_id ? pieces.get(row.piece_id) ?? null : null;
   return {
@@ -233,6 +241,8 @@ export function toChallengedRow(
     verify_pattern: row.verify_pattern,
     pattern_found: row.pattern_found,
     reason: retentionReason(row.rule_code),
+    // La marca del ARBITRAJE, que es la misma que la de su pieza. `null` = sin dato.
+    reading_language: readingLanguageOf(row.brand_id, brandLangs),
     piece: p
       ? {
           id: p.id,

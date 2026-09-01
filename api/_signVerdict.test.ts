@@ -243,13 +243,35 @@ describe('fixable · sella igual que un rechazo, y la diferencia vive en el corp
     expect(VERDICT).toMatch(/const fix_proposal = verdict === 'fixable' \? proposal : null/);
   });
 
-  it('la ventana entre el PR de código y el de DDL no tumba approved ni rejected', () => {
-    // La migración va DESPUÉS del código (`MULTIBRAND_RULE` §5), así que hay un intervalo en el
-    // que la columna no existe. PostgREST rechaza el cuerpo ENTERO ante una columna desconocida:
-    // sin el reintento caerían también los dos veredictos que hoy funcionan. Y el reintento sólo
-    // corre cuando NO hay propuesta que perder — un fixable falla fuerte, que es lo correcto.
-    expect(SHARED).toMatch(/row\.fix_proposal === null/);
+  it('el reintento sin la columna se RETIRÓ: el upsert nunca degrada el payload', () => {
+    // Existió para la ventana entre el PR de código y el de DDL. Con la migración aplicada esa
+    // rama no puede ejecutarse nunca, y un camino inalcanzable es deuda, no seguridad — además
+    // degradaba en silencio lo que se escribe al corpus. Lo que se conserva es DECIR qué falta:
+    // eso no cambia lo que se escribe, sólo lo que se cuenta.
+    expect(SHARED).not.toMatch(/row\.fix_proposal === null/);
+    expect(SHARED).not.toMatch(/\.\.\.legacy/);
     expect(SHARED).toMatch(/detail\.includes\('fix_proposal'\)/);
+    expect(SHARED).toMatch(/class CorpusColumnMissing/);
+  });
+
+  it('el mensaje dice qué falta y qué hacer, y NO promete el estado de lo demás', () => {
+    // «No hay nada roto» y «aprobar y rechazar siguen funcionando» eran afirmaciones sobre el
+    // resto del sistema que este endpoint no comprueba antes de emitirlas. Y como la detección
+    // se apoya en el texto del error de PostgREST —heurística, no medición—, si acertara sobre
+    // el error equivocado tranquilizarían en el caso exacto en que no deben.
+    // Se mide el CÓDIGO, no el comentario: el comentario cita las dos frases retiradas para
+    // explicar por qué se fueron, y nombrarlas ahí no las reintroduce en la respuesta.
+    const emitido = sinComentarios(VERDICT);
+    expect(emitido).not.toMatch(/no hay nada roto/i);
+    expect(emitido).not.toMatch(/siguen funcionando/i);
+    expect(emitido).toMatch(/aplicando la migración/);
+  });
+
+  it('el texto crudo del server es ALCANZABLE en la tarjeta, no sólo enviado', () => {
+    // Viajaba al navegador y la tarjeta guardaba únicamente `err.message`, tirando el objeto:
+    // la mitigación existía sobre el papel y no en la pantalla. Plegado está bien; ausente no.
+    expect(MOD).toMatch(/server_detail/);
+    expect(MOD).toMatch(/<details/);
   });
 
   it('la UI no degrada un fixable a rejected en silencio: muestra el error del server', () => {

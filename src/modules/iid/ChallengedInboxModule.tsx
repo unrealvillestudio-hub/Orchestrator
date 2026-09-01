@@ -322,7 +322,7 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
 
           {/* Lectura en voz alta. Mismo componente que las otras dos bandejas: lo único
               propio de esta es el adaptador, porque aquí el texto no viene de un artefacto. */}
-          <SpeechReader piece={readable} className="mt-3" />
+          <SpeechReader piece={readable} suggestedLang={row.reading_language} className="mt-3" />
         </div>
       ) : (
         <p className="text-[12px] text-zinc-600 italic mb-3">

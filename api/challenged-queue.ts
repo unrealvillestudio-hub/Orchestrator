@@ -23,6 +23,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, extractToken, requireAdmin } from './_calibrationShared.js';
+import { fetchBrandLanguages } from './_brandLanguage.js';
 import {
   fetchPendingChallenges, fetchPiecesByIds, fetchRuleStatements, toChallengedRow,
   CHALLENGED_CAP,
@@ -86,7 +87,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       fetchRuleStatements(page.map((r) => r.rule_code)),
     ]);
 
-    const rows = page.map((r) => toChallengedRow(r, pieces, statements));
+    const brandLangs = await fetchBrandLanguages();
+    const rows = page.map((r) => toChallengedRow(r, pieces, statements, brandLangs));
 
     const truncated = all.length >= CHALLENGED_CAP;
     if (truncated) console.warn(`[challenged-queue] judge_calibration hit cap ${CHALLENGED_CAP} — la bandeja puede estar truncada`);

@@ -355,6 +355,12 @@ export interface PieceContext {
   watcher_verdict: 'PASS' | 'REJECT' | 'RESCHEDULE' | 'not_evaluated';
   watcher_reason: string | null;
   pass_type: string | null;
+  /**
+   * En qué idioma se lee esta pieza en voz alta (BCP-47 o prefijo). Sale de `public.brands`
+   * por `brand_id`, resuelto en runtime — ver `_brandLanguage.ts`. `null` = sin dato, y el
+   * lector usa la voz del sistema en vez de inventar un idioma.
+   */
+  reading_language: string | null;
 
   // ── Procedencia (CALIB-UI-01 §4.2) ──────────────────────────────────────────
   status: string | null;
@@ -384,6 +390,8 @@ export interface ContextExtras {
   generation?: GenerationInfo;
   /** Métricas de cabecera ya resueltas por el endpoint (ver `_pieceMetrics.metricsOf`). */
   metrics?: PieceMetrics;
+  /** Idioma en que se lee la pieza en voz alta, resuelto por marca (`_brandLanguage`). */
+  reading_language?: string | null;
 }
 
 export function toContext(piece: ContentPiece, extras: ContextExtras = {}): PieceContext {
@@ -414,6 +422,9 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     watcher_verdict: w.result ?? 'not_evaluated',
     watcher_reason: verdictReason(w),
     pass_type: piece.pass_type ?? null,
+    // Idioma de lectura, resuelto por marca contra `public.brands`. `null` = nada que sugerir,
+    // y el lector cae en la voz del sistema. Ni un idioma escrito en el código.
+    reading_language: extras.reading_language ?? null,
 
     status: piece.status ?? null,
     created_at: piece.created_at ?? null,
@@ -825,35 +836,22 @@ export async function upsertVerdict(row: {
     body: JSON.stringify(payload),
   });
 
-  const first = await post(row);
-  let res = first;
+  const res = await post(row);
 
-  // VENTANA ENTRE EL PR DE CÓDIGO Y EL DE DDL. La migración va DESPUÉS del código
-  // (`MULTIBRAND_RULE` §5), así que hay un intervalo en el que `fix_proposal` todavía no existe
-  // como columna. PostgREST no ignora una columna desconocida: rechaza el cuerpo ENTERO, y eso
-  // tumbaría también `approved` y `rejected`, que hoy funcionan. Se reintenta sin la columna,
-  // pero SÓLO cuando no hay propuesta que perder: un `fixable` falla fuerte y se ve en la
-  // interfaz, porque guardarlo sin su propuesta sería exactamente el rechazo con otro nombre
-  // que este veredicto existe para no ser.
+  // EL REINTENTO SIN LA COLUMNA SE RETIRÓ. Existió para una ventana concreta —el PR de código
+  // entra antes que el de DDL (`MULTIBRAND_RULE` §5), así que hubo un intervalo en el que
+  // `fix_proposal` no existía y PostgREST rechazaba el cuerpo ENTERO, tumbando también
+  // `approved` y `rejected`—. Con la migración aplicada esa rama no puede ejecutarse nunca, y un
+  // camino inalcanzable es deuda, no seguridad: además degradaba el payload en silencio, que es
+  // justo lo que no debe hacer un upsert al corpus.
   //
-  // La rama se apaga sola cuando la migración entra: el primer intento pasa siempre y el
-  // reintento deja de ejecutarse. No hace falta volver a tocar este archivo.
-  if (!first.ok) {
-    const detail = await first.clone().text().catch(() => '');
-    if (detail.includes('fix_proposal')) {
-      if (row.fix_proposal === null) {
-        const { fix_proposal: _sinColumnaTodavia, ...legacy } = row;
-        res = await post(legacy);
-      } else {
-        // Hay propuesta que perder: se corta y se dice QUÉ falta. El texto crudo del server viaja
-        // con el error para que, si esta detección alguna vez se equivoca, el operador siga
-        // leyendo lo que de verdad respondió la base en vez de una explicación inventada.
-        throw new CorpusColumnMissing('fix_proposal', detail.slice(0, 300));
-      }
-    }
+  // Lo que SÍ se conserva es DECIR qué falta cuando el esquema no acompaña: eso no cambia lo que
+  // se escribe, sólo lo que se cuenta, y protege contra el mismo desajuste en el futuro.
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => '')).slice(0, 300);
+    if (detail.includes('fix_proposal')) throw new CorpusColumnMissing('fix_proposal', detail);
+    throw new Error(`corpus upsert failed: ${res.status} ${detail}`);
   }
-
-  if (!res.ok) throw new Error(`corpus upsert failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`);
   const rows = (await res.json().catch(() => [])) as Array<Record<string, unknown>>;
   return Array.isArray(rows) && rows.length ? rows[0] : {};
 }
