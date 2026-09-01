@@ -116,7 +116,12 @@ async function req<T>(path: string, token: string): Promise<T> {
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const msg = (data && ((data as any).error || (data as any).message)) || `Error ${res.status}`;
+    // EL MENSAJE DEL SERVER NO SE COLAPSA. `error` es un código para la máquina y no le dice
+    // nada al operador; `detail` y `message` son la frase que explica qué pasó. Mismo orden que
+    // `calibrationInbox.req` y `evaluatedHistory.req`: que una bandeja explique y otra no es la
+    // divergencia que se vuelve permanente en el primer cambio. El crudo sigue entero en `body`.
+    const d = data as { detail?: unknown; message?: unknown; error?: unknown };
+    const msg = d?.detail || d?.message || d?.error || `Error ${res.status}`;
     throw new CalibrationError(String(msg), res.status, data);
   }
   return data as T;
