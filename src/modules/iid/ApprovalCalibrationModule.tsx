@@ -13,6 +13,7 @@ import {
 // en las dos vistas o no sirve para compararlas.
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader, shortId,
+  ForecastLine, SlotsNotice,
 } from './pieceUi';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
 import { SpeechReader } from '../../ui/SpeechReader';
@@ -167,6 +168,7 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
       </div>
 
       {/* Por qué la generación puede venir sin dato — se dice, no se disimula. */}
+      {data && <SlotsNotice source={data.slots_source} />}
       {data && <CutoffsNotice source={data.cutoffs_source} />}
 
       {error && (
@@ -187,7 +189,10 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
       ) : (
         <div className="space-y-4">
           {pieces.map((p) => (
-            <CalibrationCard key={p.piece_id} piece={p} token={token} onResolved={onResolved} />
+            <CalibrationCard
+              key={p.piece_id} piece={p} token={token} onResolved={onResolved}
+              slotsRead={data?.slots_source !== 'unavailable'}
+            />
           ))}
         </div>
       )}
@@ -204,8 +209,10 @@ type Outcome = 'approved' | 'rejected' | 'fixable' | 'discarded';
 /** Qué panel de texto está abierto. `fix` es el tercer veredicto; `discard` no es veredicto. */
 type Panel = 'reject' | 'fix' | 'discard';
 
-function CalibrationCard({ piece, token, onResolved }: {
+function CalibrationCard({ piece, token, onResolved, slotsRead }: {
   piece: CalibrationPiece; token: string; onResolved: (id: string) => void;
+  /** ¿Se pudieron leer las franjas? Cuando no, la previsión calla y avisa `SlotsNotice`. */
+  slotsRead: boolean;
 }) {
   // Render lazy del artefacto. Guardamos el HTML crudo (para <iframe srcdoc>) y la URL
   // del CDN (link durable). NO se usa src={cdn_url}: Supabase sirve el objeto como
@@ -384,6 +391,12 @@ function CalibrationCard({ piece, token, onResolved }: {
             <GenerationBadge generation={piece.generation} label={piece.cutoff_label} at={piece.cutoff_at} />
           </div>
         </div>
+
+        {/* DÓNDE CAERÍA SI SE APROBARA AHORA. PREVISIÓN, no compromiso: esta pieza todavía
+            no está aprobada, así que no tiene franja. Se llama «fecha prevista» y no «fecha
+            de publicación» porque otra pieza aprobada antes puede llevarse esa franja — y
+            dos cosas distintas con el mismo nombre ya costaron dos PR correctivos. */}
+        <ForecastLine forecast={piece.forecast_slot} slotsRead={slotsRead} />
 
         {/* Procedencia */}
         <Provenance piece={piece} />

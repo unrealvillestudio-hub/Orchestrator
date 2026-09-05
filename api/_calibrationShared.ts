@@ -365,6 +365,14 @@ export interface PieceContext {
   // ── Procedencia (CALIB-UI-01 §4.2) ──────────────────────────────────────────
   status: string | null;
   created_at: string | null;        // content_pieces.created_at
+  /**
+   * PR-C — cuándo se aprobó la pieza, o `null` si todavía no. La bandeja de publicación lo
+   * necesita para distinguir dos ausencias de franja que no son lo mismo: en una pieza
+   * APROBADA, no tener franja es una anomalía y se avisa; en una pieza sin aprobar es lo
+   * esperado y no se dice nada. Sin este campo, el aviso diría «aprobada» de piezas que no
+   * lo están — y un aviso que describe mal el sistema deja de leerse.
+   */
+  approved_at: string | null;       // content_pieces.approved_at
   queue_id: string | null;
   job_id: string | null;            // content_pieces.orchestrator_job_id
   finding_id: string | null;
@@ -428,6 +436,7 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
 
     status: piece.status ?? null,
     created_at: piece.created_at ?? null,
+    approved_at: piece.approved_at ?? null,
     queue_id: piece.queue_id ?? null,
     job_id: piece.orchestrator_job_id ?? null,
     finding_id: piece.finding_id ?? null,

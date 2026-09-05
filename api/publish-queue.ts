@@ -1,16 +1,19 @@
 /**
  * UNRLVL Orchestrator — api/publish-queue.ts  (PUBLISH-UI-01 · parcial de SOLO LECTURA)
  *
- * Lista las piezas candidatas a salir, con su canal de destino y el estado operativo de
- * ese canal. NO aprueba, NO programa, NO publica — ver `_publishShared.ts` y el cuerpo del
- * PR: el eje de colocación de una pieza producida en la franja de su canal no existe
- * todavía en el ecosistema, y una interfaz que prometa una fecha que nadie honra es peor
- * que no tener el botón.
+ * Lista las piezas candidatas a salir, con su canal de destino, el estado operativo de ese
+ * canal y —desde PR-C— la FRANJA RESERVADA de cada una. NO aprueba, NO programa, NO
+ * publica y NO escribe nada: aprobar es del carril de calibración (ver `approval.reason`).
  *
  * Fuente y filtros:
  *   1. `content.content_pieces` con `discarded_at IS NULL`     (base común con calibración)
- *   2. estado no resuelto — fuera `scheduled/published/rejected/failed`
+ *   2. estado no resuelto — fuera `published/rejected/failed`
  *   3. la última versión por `queue_id`                        (una tarjeta por pieza)
+ *
+ * PR-C — `scheduled` DEJÓ de estar en el punto 2, y el motivo no es un ajuste de filtro:
+ * con PLACE-01 ese estado pasó a significar «aprobada y con franja reservada», que es
+ * exactamente lo que una cola de publicación tiene que listar. La constante se había
+ * quedado describiendo el sistema anterior. Ver `_publishShared.RESOLVED_STATUSES`.
  *
  * NO filtra por veredicto del watcher: no haría falta. Una fila de `content_pieces` sólo
  * se crea cuando el watcher dio PASS — verificado contra la base el 2026-08-23, las 24
@@ -47,6 +50,9 @@ import {
 // runtime. Las dos bandejas cuentan lo mismo porque llaman a la misma función.
 import { fetchPlatformLimits, fetchSignatureClosers, metricsOf } from './_pieceMetrics.js';
 import { fetchBrandLanguages, readingLanguageOf } from './_brandLanguage.js';
+// PR-C — la franja RESERVADA de cada pieza y el huso de su marca, resueltos EN EL SERVER
+// junto al resto de la fila. Nunca una llamada extra desde el navegador por cada tarjeta.
+import { fetchBrandTimezones, fetchSlotsByPiece, slotOf } from './_publishSlots.js';
 
 const CHANNEL_STATUS_FILTERS = ['all', 'operational', 'blocked'] as const;
 type ChannelStatusFilter = (typeof CHANNEL_STATUS_FILTERS)[number];
@@ -92,13 +98,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Sin filtro de marca en la lectura: by_brand tiene que ser global y estable aunque
     // venga filtro. Los cortes se leen en runtime (cero fechas de corte en el código).
-    const [allPieces, cutoffsRaw, channels, limits, closers, brandLangs] = await Promise.all([
+    const [allPieces, cutoffsRaw, channels, limits, closers, brandLangs, brandZones] = await Promise.all([
       fetchLivePieces({ excludeStatuses: RESOLVED_STATUSES }),
       fetchPipelineCutoffs(),
       fetchPublishChannels(),
       fetchPlatformLimits(),
       fetchSignatureClosers(),
       fetchBrandLanguages(),
+      fetchBrandTimezones(),
     ]);
     const cutoffs: PipelineCutoff[] = cutoffsRaw ?? [];
 
@@ -141,10 +148,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const ordered = inBrand.slice().sort((a, b) => ms(b.created_at) - ms(a.created_at));
     const page    = ordered.slice(offset, offset + limit);
 
-    // Procedencia: sólo para la página visible (el `in.()` de PostgREST crece con la lista).
-    const [traces, attempts] = await Promise.all([
+    // Procedencia y franja: sólo para la página visible (el `in.()` de PostgREST crece con
+    // la lista). La fecha se resuelve acá, junto al resto de la fila — nunca con una llamada
+    // extra desde el navegador por cada tarjeta.
+    const [traces, attempts, slots] = await Promise.all([
       fetchWatcherTraces(page.map((p) => p.orchestrator_job_id ?? '')),
       fetchAttemptsByQueue(page.map((p) => p.queue_id ?? '')),
+      fetchSlotsByPiece(page.map((p) => p.id)),
     ]);
 
     const pieces: PublishablePiece[] = page.map((p) => ({
@@ -156,6 +166,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         reading_language: readingLanguageOf(p.brand_id, brandLangs),
       }),
       channel: channelById.get(p.id) ?? channelOf(p, channels),
+      // El COMPROMISO de esta pieza: la franja que tiene reservada. `null` = no tiene, que
+      // es un estado real. La tarjeta decide qué decir de ese `null` mirando `approved_at`.
+      slot: slotOf(p, slots, brandZones),
     }));
 
     const truncated = allPieces.length >= PIECES_CAP;
@@ -173,8 +186,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       channel_status: channelStatus,
       generation,
       pieces,
-      // El estado de la acción viaja en el contrato, no en una constante de la UI: cuando el
-      // eje de colocación exista, se habilita acá y la interfaz lo refleja sin tocar el front.
+      // PR-C — si las franjas no se pudieron leer, la pantalla tiene que decir que las
+      // fechas FALTAN, no que estén vacías: `slot: null` significaría «sin franja» y el
+      // aviso «Aprobada sin franja asignada» se dispararía en todas las tarjetas aprobadas
+      // a la vez. Mismo mecanismo que `cutoffs_source`: la ausencia se declara.
+      slots_source: slots === null ? 'unavailable' : 'ok',
+      // El estado de la acción viaja en el contrato, no en una constante de la UI: si algún
+      // día esta bandeja aprueba, se habilita acá y la interfaz lo refleja sin tocar el front.
       // SIGN-01 corte E — el motivo estaba OBSOLETO: decía que el eje de colocación no existía, y
       // existe desde PLACE-01 (content-scheduler modo `placement`, cron 66, franjas calculadas contra
       // cadencia real). Un aviso que describe un sistema que ya cambió es peor que ninguno: enseña a

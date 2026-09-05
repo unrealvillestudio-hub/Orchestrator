@@ -40,7 +40,6 @@ const CATALOG = indexChannels([
 // ── Estados que salen de la bandeja ──────────────────────────────────────────────
 describe('RESOLVED_STATUSES', () => {
   it('saca de la bandeja lo que ya salió del circuito', () => {
-    expect(RESOLVED_STATUSES).toContain('scheduled');
     expect(RESOLVED_STATUSES).toContain('published');
     expect(RESOLVED_STATUSES).toContain('failed');
   });
@@ -52,6 +51,17 @@ describe('RESOLVED_STATUSES', () => {
   it('deja pasar lo que todavía no se resolvió', () => {
     expect(RESOLVED_STATUSES).not.toContain('awaiting_approval');
     expect(RESOLVED_STATUSES).not.toContain('draft');
+  });
+
+  // PR-C — la prueba anterior fijaba `scheduled` DENTRO de la lista. No estaba mal cuando se
+  // escribió: entonces `scheduled` era el estado terminal de un planificador que programaba
+  // filas de cola antes de producirlas. Con PLACE-01 pasó a significar «aprobada y con franja
+  // reservada», y una pieza así es precisamente la que una cola de publicación tiene que
+  // listar. La prueba se invierte porque el significado del estado cambió, no porque el
+  // filtro se haya aflojado — medido el 2026-09-05: las 10 piezas con franja y las 15
+  // aprobadas sin franja estaban TODAS en `scheduled`, y la bandeja no mostraba ni una.
+  it('deja pasar lo programado: aprobada y con franja todavía no es haber salido', () => {
+    expect(RESOLVED_STATUSES).not.toContain('scheduled');
   });
 });
 

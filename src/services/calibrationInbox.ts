@@ -123,6 +123,28 @@ export function buildCriterion(reason: string | null | undefined, prose: string 
   return p ? `${REASON_PREFIX}${r} · ${p}` : `${REASON_PREFIX}${r}`;
 }
 
+/**
+ * PR-C · PREVISIÓN de fecha, NO compromiso.
+ *
+ * Dónde CAERÍA esta pieza si se aprobara ahora: la próxima franja libre de su marca × canal,
+ * resuelta por el server contra `intel.brand_publish_slots`. Puede cambiar — otra pieza
+ * aprobada antes se la lleva. La franja COMPROMETIDA se llama `slot`, vive en el contrato de
+ * la bandeja de publicación y significa otra cosa; los dos nombres existen justamente para
+ * que no se puedan confundir.
+ *
+ * `null` = no hay franja libre futura para ese canal, o el canal no tiene política sembrada.
+ * Es información, no error.
+ */
+export interface ForecastSlot {
+  /** Instante UTC, ISO-8601. La pantalla nunca lo muestra crudo: lo sitúa en `timezone`. */
+  slot_at: string;
+  /**
+   * Huso de la marca, nombre IANA, desde `public.brands.publish_timezone`. `null` = la marca
+   * no lo tiene sembrado, y entonces la hora NO se sitúa: se dice qué falta por sembrar.
+   */
+  timezone: string | null;
+}
+
 export interface CalibrationPiece {
   piece_id: string;
   brand_id: string;
@@ -155,6 +177,7 @@ export interface CalibrationPiece {
   // ── Procedencia ────────────────────────────────────────────────────────────
   status: string | null;
   created_at: string | null;           // cuándo se creó la pieza
+  approved_at: string | null;          // cuándo se aprobó, o null si todavía no
   queue_id: string | null;
   job_id: string | null;               // job del carril que la produjo
   finding_id: string | null;           // hallazgo que la originó
@@ -168,6 +191,11 @@ export interface CalibrationPiece {
   // FIX-CARD-06 — conteos contra los topes del canal y comparación de la firma. `null` =
   // el server no resolvió los catálogos: ausencia declarada, no un cero que parezca medido.
   metrics: PieceMetrics | null;
+  /**
+   * PR-C — dónde caería esta pieza si se aprobara ahora. PREVISIÓN, no compromiso: la
+   * etiqueta en pantalla es «Fecha prevista de publicación», nunca «fecha de publicación».
+   */
+  forecast_slot: ForecastSlot | null;
 }
 
 export interface QueueResult {
@@ -181,6 +209,12 @@ export interface QueueResult {
   pieces: CalibrationPiece[];
   /** Por qué la generación puede venir 'unknown': tabla ausente vs vacía vs sembrada. */
   cutoffs_source: 'unavailable' | 'empty' | 'seeded';
+  /**
+   * PR-C — si las franjas se pudieron leer. `unavailable` NO significa «sin franja libre»:
+   * significa que no se pudo consultar, y la pantalla lo dice en vez de afirmar algo sobre
+   * el canal que nadie midió.
+   */
+  slots_source: 'ok' | 'unavailable';
   truncated?: boolean;
 }
 

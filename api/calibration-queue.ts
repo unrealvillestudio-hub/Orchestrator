@@ -37,12 +37,24 @@ import {
   fetchCalibrationPieces, fetchEvaluatedIds, fetchPipelineCutoffs,
   fetchWatcherTraces, fetchAttemptsByQueue,
   latestPerQueue, generationOf, watcherOf, toContext, PIECES_CAP,
-  type ContentPiece, type PipelineCutoff, type GenerationInfo,
+  type ContentPiece, type PieceContext, type PipelineCutoff, type GenerationInfo,
 } from './_calibrationShared.js';
 // FIX-CARD-06 — los topes del canal y la firma esperada son DATO: se leen acá, una vez
 // por request, y viajan resueltos en cada pieza. La UI no conoce ni un tope.
 import { fetchPlatformLimits, fetchSignatureClosers, metricsOf } from './_pieceMetrics.js';
 import { fetchBrandLanguages, readingLanguageOf } from './_brandLanguage.js';
+// PR-C — la PREVISIÓN de fecha: dónde caería esta pieza si se aprobara ahora. Se resuelve
+// en el server, en la misma pasada que arma la bandeja, y NO reserva nada.
+import {
+  fetchBrandTimezones, fetchNextFreeSlots, forecastFor, type ForecastSlot,
+} from './_publishSlots.js';
+
+/**
+ * Lo que viaja a la tarjeta de calibración: el contexto de la pieza más su PREVISIÓN de
+ * fecha. La previsión es de esta bandeja y de ninguna otra — la cola de publicación muestra
+ * `slot`, que es un compromiso. Dos cosas distintas, dos nombres distintos, a propósito.
+ */
+type CalibrationInboxPiece = PieceContext & { forecast_slot: ForecastSlot | null };
 
 // Ejes de orden y filtro. Son del SISTEMA (una pieza tiene fecha, marca y veredicto en
 // cualquier marca), no de ningún caso particular.
@@ -120,13 +132,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Se lee sin filtro de marca para que by_brand sea global y estable aunque venga
     // filtro; los cortes se leen en runtime (nunca hay fechas de corte en este código).
-    const [allPieces, evaluated, cutoffsRaw, limits, closers, brandLangs] = await Promise.all([
+    const [allPieces, evaluated, cutoffsRaw, limits, closers, brandLangs, brandZones, freeSlots] = await Promise.all([
       fetchCalibrationPieces(),
       fetchEvaluatedIds(),
       fetchPipelineCutoffs(),
       fetchPlatformLimits(),
       fetchSignatureClosers(),
       fetchBrandLanguages(),
+      fetchBrandTimezones(),
+      // Las franjas LIBRES futuras: son el horizonte sembrado (decenas de filas), no una
+      // tabla de piezas, así que se traen enteras una vez y se indexan por (marca, canal).
+      fetchNextFreeSlots(),
     ]);
     const cutoffs: PipelineCutoff[] = cutoffsRaw ?? [];
 
@@ -157,12 +173,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       fetchAttemptsByQueue(page.map((p) => p.queue_id ?? '')),
     ]);
 
-    const pieces = page.map((p) => toContext(p, {
-      trace: p.orchestrator_job_id ? traces.get(p.orchestrator_job_id) : undefined,
-      attempts: p.queue_id ? (attempts.get(p.queue_id) ?? null) : null,
-      generation: genById.get(p.id),
-      metrics: metricsOf(p, limits, closers),
-      reading_language: readingLanguageOf(p.brand_id, brandLangs),
+    const pieces: CalibrationInboxPiece[] = page.map((p) => ({
+      ...toContext(p, {
+        trace: p.orchestrator_job_id ? traces.get(p.orchestrator_job_id) : undefined,
+        attempts: p.queue_id ? (attempts.get(p.queue_id) ?? null) : null,
+        generation: genById.get(p.id),
+        metrics: metricsOf(p, limits, closers),
+        reading_language: readingLanguageOf(p.brand_id, brandLangs),
+      }),
+      // PREVISIÓN, no compromiso. La pieza todavía no está aprobada, así que no tiene
+      // franja: esto es dónde caería si se aprobara ahora, y otra pieza aprobada antes se
+      // la lleva. Por eso NO se llama `slot` — el nombre distingue las dos cosas.
+      forecast_slot: forecastFor(p, freeSlots, brandZones),
     }));
 
     const truncated = allPieces.length >= PIECES_CAP;
@@ -181,6 +203,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       pieces,
       // Por qué la generación puede venir 'unknown': tabla ausente vs tabla vacía.
       cutoffs_source: cutoffsRaw === null ? 'unavailable' : (cutoffs.length ? 'seeded' : 'empty'),
+      // PR-C — por qué la previsión puede venir `null`: «no hay franja libre» y «no se pudo
+      // leer» son dos cosas distintas, y la primera es una afirmación sobre el canal.
+      slots_source: freeSlots === null ? 'unavailable' : 'ok',
       ...(truncated ? { truncated: true } : {}),
     });
   } catch (err) {

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+// PR-C — el formateador con huso SÍ se ejercita, no sólo se lee: es cálculo, no presentación.
+import { fmtInZone, zoneLabel } from './pieceUi';
 
 /**
  * FIX-CARD-06 — lo que la CABECERA de una pieza tiene que decir sin que nadie pase el cursor.
@@ -95,7 +97,85 @@ describe('GenerationBadge', () => {
   });
 });
 
-// ── 5 · Idioma: ES neutro internacional, sin voseo ───────────────────────────────
+// ── 5 · PR-C · La fecha se sitúa en el huso de la MARCA ─────────────────────────
+//
+// Lo que se fija acá no es el formato: es que la hora salga del huso que llega como dato.
+// Que la fecha «aparezca» no prueba nada — un desfase cableado también la haría aparecer, y
+// acertaría hasta el cambio de horario.
+describe('fmtInZone — el único formateador con huso', () => {
+  // Instante de invierno y de verano del mismo año: si el huso se resolviera con un desfase
+  // fijo, los dos darían la misma diferencia y una de las dos horas sería falsa.
+  const VERANO   = '2026-07-08T17:30:00.000Z';
+  const INVIERNO = '2026-01-08T17:30:00.000Z';
+
+  it('dos husos distintos dan dos horas distintas para el MISMO instante', () => {
+    const uno = fmtInZone(VERANO, 'America/Panama');
+    const otro = fmtInZone(VERANO, 'America/New_York');
+    expect(uno).not.toBeNull();
+    expect(otro).not.toBeNull();
+    expect(uno!.when).not.toBe(otro!.when);
+  });
+
+  it('el huso se resuelve por NOMBRE, no por desfase: el cambio de horario se nota', () => {
+    // El mismo par de husos separa una hora en verano y ninguna en invierno. Un `-05:00`
+    // cableado no podría producir las dos cosas.
+    const difVerano   = fmtInZone(VERANO, 'America/Panama')!.when   !== fmtInZone(VERANO, 'America/New_York')!.when;
+    const difInvierno = fmtInZone(INVIERNO, 'America/Panama')!.when !== fmtInZone(INVIERNO, 'America/New_York')!.when;
+    expect(difVerano).toBe(true);
+    expect(difInvierno).toBe(false);
+  });
+
+  it('la etiqueta del huso se DERIVA del nombre IANA, sin mapa ni enumeración', () => {
+    expect(zoneLabel('America/Panama')).toBe('Panama');
+    expect(zoneLabel('America/New_York')).toBe('New York');
+    // Un huso de otro continente se lee bien sin tocar el código.
+    expect(zoneLabel('Europe/Madrid')).toBe('Madrid');
+    expect(zoneLabel('Asia/Ho_Chi_Minh')).toBe('Ho Chi Minh');
+  });
+
+  it('el nombre IANA y el instante crudo quedan a mano, en el título', () => {
+    const z = fmtInZone(VERANO, 'America/Panama')!;
+    expect(z.title).toContain('America/Panama');
+    expect(z.title).toContain(VERANO);
+  });
+
+  it('sin huso, sin instante o con un huso que el motor no reconoce → null, nunca una hora aproximada', () => {
+    expect(fmtInZone(VERANO, null)).toBeNull();
+    expect(fmtInZone(null, 'America/Panama')).toBeNull();
+    expect(fmtInZone('no-es-una-fecha', 'America/Panama')).toBeNull();
+    expect(fmtInZone(VERANO, 'Region/Inventada')).toBeNull();
+  });
+});
+
+// ── 6 · Las dos bandejas no dicen lo mismo con las mismas palabras ──────────────
+describe('compromiso y previsión se nombran distinto', () => {
+  it('la cola de publicación dice «Publica:» y la calibración «Fecha prevista de publicación:»', () => {
+    expect(CODE).toContain('Publica:');
+    expect(CODE).toContain('Fecha prevista de publicación:');
+  });
+
+  it('la previsión se declara previsión en la propia línea, no sólo en el tooltip', () => {
+    const bloque = CODE.slice(CODE.indexOf('export function ForecastLine'), CODE.indexOf('/** Id corto'));
+    expect(bloque).toContain('previsión, no reserva');
+  });
+
+  it('el aviso de «sin franja» se condiciona a que la pieza esté aprobada', () => {
+    const bloque = CODE.slice(CODE.indexOf('export function SlotLine'), CODE.indexOf('export function ForecastLine'));
+    expect(bloque).toContain('if (!approvedAt) return null');
+    expect(bloque).toContain('Aprobada sin franja asignada');
+  });
+
+  it('cuando falta el huso se nombra la columna que hay que sembrar, y no se sitúa la hora', () => {
+    expect(CODE).toContain('public.brands.publish_timezone');
+  });
+
+  it('ningún huso ni desfase escrito en la pantalla', () => {
+    expect(CODE).not.toMatch(/\b(America|Europe|Asia|Africa|Australia|Pacific|Atlantic|Indian)\//);
+    expect(CODE).not.toMatch(/[+-]\d{2}:\d{2}/);
+  });
+});
+
+// ── 7 · Idioma: ES neutro internacional, sin voseo ───────────────────────────────
 describe('la interfaz habla ES neutro internacional', () => {
   it('no queda ni una forma voseante en el texto de pantalla', () => {
     const VOSEO = /\b(sembrá|creés|tenés|podés|querés|sabés|mirá|hacé|poné|elegí|escribí|revisá|verificá|aprobala|rechazala|fijate|andá|dejá|mandá|probá|agregá|cargá)\b/i;
