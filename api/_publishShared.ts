@@ -9,36 +9,59 @@
  *  hoy sirve a dos bandejas con nombre de una. No se hace en este PR para no mezclar.)
  *
  * ── Qué NO hace este módulo ───────────────────────────────────────────────────────
- * No aprueba, no programa, no publica. La bandeja de publicación es de SOLO LECTURA en
- * esta entrega: el eje de "colocación de una pieza ya producida en la franja de su canal"
- * NO EXISTE en el ecosistema (verificado el 2026-08-23; ver el cuerpo del PR). Ni
- * `content-scheduler` ni `scheduled_posts` lo ofrecen:
- *   · content-scheduler v2.1 selecciona `intel.iid_content_queue` con
- *     `orchestrator_status='pending'` — es decir, ANTES de que la pieza exista — y escribe
- *     `iid_content_queue.scheduled_for`. Una pieza producida ya no es candidata suya.
- *   · `public.scheduled_posts` es una tabla sin endpoint, sin columna que la ate a una
- *     pieza, escrita automáticamente por el carril y hoy sin ningún consumidor.
- * Hasta que ese eje exista, aprobar desde acá sería prometer una fecha que nadie honra.
+ * No aprueba, no programa, no publica, y no escribe NADA. La bandeja de publicación es de
+ * SOLO LECTURA: muestra a dónde va cada pieza, si su canal está operativo y —desde PR-C—
+ * cuándo sale.
+ *
+ * No aprueba por DISEÑO, no por carencia: aprobar es del carril de CALIBRACIÓN, que es
+ * donde se juzga la pieza. Aprobar allá sella la habilitación y `content-scheduler` (modo
+ * `placement`) calcula la franja.
+ *
+ * > ⛔ NO OPERATIVO — motivo anterior, derogado. Se conserva por trazabilidad y NO se
+ * > obedece: *«el eje de colocación de una pieza ya producida en la franja de su canal NO
+ * > EXISTE en el ecosistema (verificado el 2026-08-23); ni content-scheduler ni
+ * > scheduled_posts lo ofrecen; hasta que ese eje exista, aprobar desde acá sería prometer
+ * > una fecha que nadie honra.»*
+ * >
+ * > Ese eje EXISTE desde PLACE-01 (`content-scheduler` en modo `placement`, franjas en
+ * > `intel.brand_publish_slots`). El mismo aviso ya se había retirado de `publish-queue.ts`
+ * > por obsoleto; acá sobrevivió. Un comentario que describe un sistema que ya cambió es
+ * > peor que ninguno: enseña a desconfiar de los comentarios.
  */
 
 import {
   SB_URL, SB_KEY,
   type ContentPiece, type PieceContext,
 } from './_calibrationShared.js';
+import type { PieceSlot } from './_publishSlots.js';
 
 // ── Qué pieza es candidata a publicarse ──────────────────────────────────────────
 /**
- * Estados que ya salieron del circuito de publicación: la pieza se programó, salió, la
- * rechazaron o falló. Son ejes de ESTADO del sistema (los del CHECK de
- * `content.content_pieces`), no vocabulario de marca ni de canal — cualquier marca los
- * atraviesa igual.
+ * Estados que ya salieron del circuito de publicación: la pieza salió, la rechazaron o
+ * falló. Son ejes de ESTADO del sistema (los del CHECK de `content.content_pieces`), no
+ * vocabulario de marca ni de canal — cualquier marca los atraviesa igual.
  *
  * `rejected` está acá a propósito: es una pieza que Sam rechazó, no material publicable.
  * Meterla en la bandeja para tener casos de prueba sería ensuciar la fuente.
  *
- * Lo que queda: `draft` y `awaiting_approval`.
+ * ── PR-C · POR QUÉ `scheduled` YA NO ESTÁ EN ESTA LISTA ──────────────────────────
+ * No es un ajuste de filtro: es que el SIGNIFICADO de `scheduled` cambió con PLACE-01 y la
+ * constante se quedó describiendo el sistema anterior.
+ *
+ * Cuando se escribió, no existía el eje de colocación: `scheduled` era el estado terminal
+ * de un planificador que programaba filas de cola ANTES de producirlas, y una pieza con ese
+ * estado efectivamente ya no era asunto de esta bandeja. Desde PLACE-01, `scheduled`
+ * significa otra cosa: la pieza está APROBADA y tiene una franja reservada en
+ * `intel.brand_publish_slots`. Es decir, exactamente la pieza que una cola de publicación
+ * tiene que listar — la que todavía no salió y tiene fecha comprometida.
+ *
+ * Medido el 2026-09-05: las 10 piezas con franja reservada y las 15 aprobadas sin franja
+ * están TODAS en `scheduled`. Con la constante anterior, la cola no mostraba ni una.
+ *
+ * `published`, `rejected` y `failed` siguen fuera: ésos sí salieron del circuito.
+ * Lo que queda: `draft`, `awaiting_approval`, `deferred` y `scheduled`.
  */
-export const RESOLVED_STATUSES = ['scheduled', 'published', 'rejected', 'failed'];
+export const RESOLVED_STATUSES = ['published', 'rejected', 'failed'];
 
 // ── Canal de destino ─────────────────────────────────────────────────────────────
 /**
@@ -126,5 +149,12 @@ export function channelBlocks(info: ChannelInfo): boolean {
   return info.status !== 'operational';
 }
 
-/** Lo que la tarjeta de publicación muestra: el contexto de la pieza + su canal. */
-export type PublishablePiece = PieceContext & { channel: ChannelInfo };
+/**
+ * Lo que la tarjeta de publicación muestra: el contexto de la pieza, su canal y su franja.
+ *
+ * `slot` es el COMPROMISO de esta pieza —la franja que tiene reservada—, no una previsión:
+ * la previsión vive en la bandeja de calibración y se llama `forecast_slot` justamente para
+ * que las dos no se puedan confundir. `slot: null` es un estado real (aprobada y sin franja,
+ * o todavía sin aprobar), no un hueco de datos.
+ */
+export type PublishablePiece = PieceContext & { channel: ChannelInfo; slot: PieceSlot | null };

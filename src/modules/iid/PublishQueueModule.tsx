@@ -11,6 +11,7 @@ import {
 } from '../../services/publishInbox';
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader,
+  SlotLine, SlotsNotice,
 } from './pieceUi';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
 import { SpeechReader } from '../../ui/SpeechReader';
@@ -21,16 +22,15 @@ const PAGE = 20;
 /**
  * PublishQueueModule — bandeja de publicación (PUBLISH-UI-01 · parcial de SOLO LECTURA).
  *
- * Lista las piezas candidatas a salir con su canal de destino y el estado operativo de ese
- * canal, reutilizando la capa de datos y la presentación de la bandeja de calibración.
+ * Lista las piezas candidatas a salir con su canal de destino, el estado operativo de ese
+ * canal y —desde PR-C— CUÁNDO SALEN, reutilizando la capa de datos y la presentación de la
+ * bandeja de calibración.
  *
- * NO APRUEBA, y eso es deliberado, no una omisión: el eje de "colocación de una pieza ya
- * producida en la franja de su canal" no existe todavía en el ecosistema. `content-scheduler`
- * programa filas de cola ANTES de producirlas (`orchestrator_status='pending'`) y
- * `scheduled_posts` es una tabla sin endpoint, sin vínculo con la pieza y sin consumidor.
- * Un botón "Aprobar" acá prometería una fecha que nadie honra — que es exactamente lo que la
- * bandeja debe evitar. El motivo viaja en el contrato del endpoint (`approval.reason`), así
- * que cuando el eje exista se habilita del lado del server.
+ * NO APRUEBA, y eso es deliberado, no una omisión: aprobar es del carril de CALIBRACIÓN,
+ * que es donde se juzga la pieza. Aprobar allá sella la habilitación y `content-scheduler`
+ * (modo `placement`) calcula la franja; acá se ve a dónde va cada pieza, si su canal está
+ * operativo y qué franja tiene reservada. El motivo viaja en el contrato del endpoint
+ * (`approval.reason`), no en una constante de esta pantalla.
  *
  * Calibrar y publicar son ejes independientes: esta bandeja no mira el corpus, y la de
  * calibración no mira el canal.
@@ -96,8 +96,8 @@ export default function PublishQueueModule({ session }: { session: IidSession })
         <div>
           <h3 className="font-display text-lg font-bold text-white">Bandeja de publicación</h3>
           <p className="text-sm text-zinc-500 mt-0.5">
-            Piezas listas para salir, con su canal de destino y si ese canal está operativo.
-            <span className="text-zinc-400"> Solo lectura por ahora</span> — ver el aviso.
+            Piezas listas para salir: cuándo publica cada una, por qué canal y si ese canal está operativo.
+            <span className="text-zinc-400"> Solo lectura</span> — ver el aviso.
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
@@ -161,6 +161,7 @@ export default function PublishQueueModule({ session }: { session: IidSession })
         />
       </div>
 
+      {data && <SlotsNotice source={data.slots_source} />}
       {data && <CutoffsNotice source={data.cutoffs_source} />}
 
       {error && (
@@ -179,7 +180,9 @@ export default function PublishQueueModule({ session }: { session: IidSession })
         </div>
       ) : (
         <div className="space-y-4">
-          {pieces.map((p) => <PublishCard key={p.piece_id} piece={p} token={token} />)}
+          {pieces.map((p) => (
+            <PublishCard key={p.piece_id} piece={p} token={token} slotsRead={data?.slots_source !== 'unavailable'} />
+          ))}
         </div>
       )}
 
@@ -212,7 +215,9 @@ function ChannelBadge({ channel }: { channel: ChannelInfo }) {
 }
 
 // ── Tarjeta ──────────────────────────────────────────────────────────────────────
-function PublishCard({ piece, token }: { piece: PublishablePiece; token: string }) {
+function PublishCard({ piece, token, slotsRead }: {
+  piece: PublishablePiece; token: string; slotsRead: boolean;
+}) {
   // Artefacto renderizado (texto tal como saldría + imagen compuesta si la hay). Mismo
   // mecanismo que la bandeja de calibración: srcdoc, porque el CDN sirve text/plain.
   const [artHtml, setArtHtml] = useState<string | null>(null);
@@ -257,6 +262,12 @@ function PublishCard({ piece, token }: { piece: PublishablePiece; token: string 
             <GenerationBadge generation={piece.generation} label={piece.cutoff_label} at={piece.cutoff_at} />
           </div>
         </div>
+
+        {/* CUÁNDO SALE. Va arriba del artefacto porque es lo que Sam viene a mirar: hasta
+            PR-C la única forma de saberlo era una consulta SQL. Es el COMPROMISO de esta
+            pieza —su franja reservada—, no una previsión; la previsión vive en la bandeja
+            de calibración y se llama distinto a propósito. */}
+        <SlotLine slot={piece.slot} approvedAt={piece.approved_at} slotsRead={slotsRead} />
 
         <Provenance piece={piece} />
 

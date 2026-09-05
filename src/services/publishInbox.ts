@@ -5,10 +5,13 @@
  *   GET  /api/publish-queue     → piezas candidatas a salir, con canal y estado del canal
  *   POST /api/preview-render    → artefacto de una pieza (reutilizado de calibración)
  *
- * NO hay acción de aprobar. El eje de colocación de una pieza producida en la franja de su
- * canal no existe en el ecosistema (ver el cuerpo del PR); el endpoint devuelve
- * `approval.available = false` con el motivo, y la interfaz lo muestra en vez de ofrecer un
- * botón que no puede cumplir.
+ * NO hay acción de aprobar, y es por DISEÑO: aprobar es del carril de CALIBRACIÓN, que es
+ * donde se juzga la pieza. El endpoint devuelve `approval.available = false` con el motivo
+ * y la interfaz lo muestra, en vez de ofrecer un botón que pertenece a otra bandeja.
+ *
+ * PR-C — cada pieza trae además su FRANJA RESERVADA (`slot`): cuándo sale, en la hora de su
+ * marca. Es un compromiso, no una previsión; la previsión vive en `calibrationInbox.ts` y
+ * se llama `forecast_slot` para que las dos no se puedan confundir.
  *
  * Reutiliza los tipos de procedencia de `calibrationInbox.ts` — no se duplican.
  */
@@ -41,6 +44,30 @@ export interface ChannelInfo {
   reason: string | null;
 }
 
+/**
+ * PR-C · el COMPROMISO de una pieza: la franja que tiene RESERVADA.
+ *
+ * La resuelve el server desde `intel.brand_publish_slots` por `piece_id`. `null` en el
+ * contrato = la pieza no tiene franja, que es un estado real y visible, no un hueco de
+ * datos: en una pieza APROBADA es una anomalía y la tarjeta la avisa; en una que todavía no
+ * se aprobó es lo esperado y no se dice nada.
+ *
+ * No confundir con `ForecastSlot` (bandeja de calibración), que es una PREVISIÓN y puede
+ * cambiar. Dos cosas distintas, dos nombres distintos.
+ */
+export interface PieceSlot {
+  /** Instante UTC, ISO-8601. La pantalla nunca lo muestra crudo: lo sitúa en `timezone`. */
+  slot_at: string;
+  /** Estado de la franja tal como lo declara la tabla (`free`, `reserved`, `published`, …). */
+  status: string;
+  /**
+   * Huso de la marca, nombre IANA, desde `public.brands.publish_timezone`. `null` = la marca
+   * no lo tiene sembrado, y entonces la hora NO se sitúa: se dice qué falta por sembrar.
+   * El nombre IANA es la única forma que sobrevive al cambio de horario — nunca un desfase.
+   */
+  timezone: string | null;
+}
+
 export interface PublishablePiece {
   piece_id: string;
   brand_id: string;
@@ -70,6 +97,7 @@ export interface PublishablePiece {
   // Procedencia (idéntica a la de la bandeja de calibración).
   status: string | null;
   created_at: string | null;
+  approved_at: string | null;
   queue_id: string | null;
   job_id: string | null;
   finding_id: string | null;
@@ -85,6 +113,11 @@ export interface PublishablePiece {
   metrics: PieceMetrics | null;
   // Canal de destino y su estado operativo.
   channel: ChannelInfo;
+  /**
+   * PR-C — la franja RESERVADA de esta pieza. Etiqueta en pantalla: «Publica:». `null` =
+   * sin franja; la tarjeta sólo lo avisa cuando la pieza está aprobada (ver `approved_at`).
+   */
+  slot: PieceSlot | null;
 }
 
 export type ChannelStatusFilter = 'all' | 'operational' | 'blocked';
@@ -103,6 +136,12 @@ export interface PublishQueueResult {
   /** Por qué la bandeja no aprueba todavía. Viene del server, no de una constante del front. */
   approval: { available: boolean; reason: string };
   cutoffs_source: 'unavailable' | 'empty' | 'seeded';
+  /**
+   * PR-C — si las franjas se pudieron leer. `unavailable` NO significa que las piezas no
+   * tengan fecha: significa que la fecha falta por no haberse podido consultar, y la pantalla
+   * dice eso en vez de avisar «Aprobada sin franja asignada» en cada tarjeta aprobada.
+   */
+  slots_source: 'ok' | 'unavailable';
   truncated?: boolean;
 }
 

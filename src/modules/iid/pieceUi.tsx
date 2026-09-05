@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   ChevronLeft, ChevronRight, ShieldCheck, ShieldAlert, ShieldQuestion, Copy, Check, Clock, GitBranch, History,
+  CalendarCheck, CalendarClock, CalendarOff, CalendarX,
 } from 'lucide-react';
 import { cn } from '../../ui/components';
 import type {
@@ -27,6 +28,231 @@ export function fmtDate(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '—' : DT.format(d);
+}
+
+// ── PR-C · EL ÚNICO FORMATEADOR DE FECHA CON HUSO DEL REPO ──────────────────────
+//
+// `fmtDate` de arriba sitúa un instante en la hora del OPERADOR: sirve para la procedencia
+// («cuándo se creó esta pieza», que se lee desde donde uno esté). `fmtInZone` sitúa un
+// instante en la hora de la MARCA: sirve para cuándo SALE una pieza, que es una hora de su
+// público y no de quien mira la pantalla.
+//
+// Son dos ejes distintos y por eso son dos funciones — pero viven juntas a propósito: un
+// tercer formateador escrito en otro archivo divergiría de éstos en el primer cambio, y
+// este repo ya tiene el precedente documentado con el idioma. Si hace falta formatear una
+// fecha con huso en cualquier otra pantalla, se importa ésta.
+//
+// NI UN HUSO NI UN DESFASE ESCRITOS ACÁ. El `timeZone` llega como dato desde
+// `public.brands.publish_timezone`, en forma IANA. Un desfase cableado acertaría hasta el
+// cambio de horario y luego mentiría en silencio; el nombre IANA no.
+//
+// El IDIOMA tampoco se escribe: el locale es `undefined` —el del operador—, igual que en
+// `fmtDate`. La lista de idiomas es la del operador y la del catálogo, nunca la del código.
+
+const ZONED_OPTS: Intl.DateTimeFormatOptions = {
+  weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+};
+
+/**
+ * El huso en forma legible, DERIVADO del propio nombre IANA: último segmento, sin guiones
+ * bajos. `America/Panama` → `Panama`. Cero mapas, cero enumeraciones: un huso nuevo se lee
+ * bien sin tocar este archivo.
+ */
+export function zoneLabel(timeZone: string): string {
+  const last = timeZone.split('/').pop() ?? timeZone;
+  return last.replace(/_/g, ' ').trim() || timeZone;
+}
+
+export interface ZonedDate {
+  /** Día, fecha y hora, ya situados en el huso de la marca. */
+  when: string;
+  /** El huso en forma legible, para la pantalla. */
+  zone: string;
+  /** El nombre IANA y el instante original, para quien pase el cursor. */
+  title: string;
+}
+
+/**
+ * Sitúa un instante en el huso de una marca. Devuelve `null` —y NO una hora aproximada—
+ * cuando el instante o el huso no se pueden usar: una fecha mostrada en el huso equivocado
+ * es peor que no mostrarla, porque se decide sobre ella.
+ */
+export function fmtInZone(iso: string | null | undefined, timeZone: string | null | undefined): ZonedDate | null {
+  if (!iso || !timeZone) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  try {
+    const when = new Intl.DateTimeFormat(undefined, { ...ZONED_OPTS, timeZone }).format(d);
+    // El nombre largo del huso enriquece el tooltip cuando el motor lo da; si no, el IANA
+    // solo ya identifica el huso sin ambigüedad.
+    let long = '';
+    try {
+      long = new Intl.DateTimeFormat(undefined, { timeZone, timeZoneName: 'long' })
+        .formatToParts(d).find((p) => p.type === 'timeZoneName')?.value ?? '';
+    } catch { long = ''; }
+    return {
+      when,
+      zone: zoneLabel(timeZone),
+      title: `${timeZone}${long ? ` · ${long}` : ''} · ${d.toISOString()}`,
+    };
+  } catch {
+    // Huso que el motor no reconoce: se declara la ausencia, no se cae a la hora local del
+    // operador — eso mostraría una hora creíble y falsa.
+    return null;
+  }
+}
+
+// ── PR-C · CUÁNDO SALE ESTA PIEZA ───────────────────────────────────────────────
+//
+// DOS BANDEJAS, DOS COSAS DISTINTAS, DOS ETIQUETAS DISTINTAS. La distinción no es
+// cosmética y no se puede colapsar:
+//
+//   · Cola de publicación → «Publica:»  — COMPROMISO. Existe la fila reservada.
+//   · Calibración         → «Fecha prevista de publicación:» — PREVISIÓN. La pieza todavía
+//     no está aprobada, así que no tiene franja: es dónde CAERÍA si se aprobara ahora, y
+//     otra pieza aprobada antes se la lleva.
+//
+// Llamar «fecha de publicación» a las dos sería tener dos cosas distintas con el mismo
+// nombre. Los dos bloques viven acá, juntos, por el mismo motivo que el formateador: separados
+// divergen.
+
+const DATE_ROW = 'flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] font-mono leading-snug border';
+
+/**
+ * LAS FRANJAS NO SE PUDIERON LEER — un aviso de la bandeja entera, no de cada tarjeta.
+ *
+ * Existe porque «esta pieza no tiene franja» y «no se pudo saber si la tiene» son dos
+ * afirmaciones distintas. Sin este aviso, una lectura caída pintaría «Aprobada sin franja
+ * asignada» en todas las tarjetas aprobadas a la vez: una alarma falsa a escala, que es la
+ * forma más rápida de enseñar a ignorar la alarma verdadera. Con él, las tarjetas callan y
+ * la pantalla dice que las fechas FALTAN, no que estén vacías.
+ */
+export function SlotsNotice({ source }: { source: 'ok' | 'unavailable' | undefined }) {
+  if (source !== 'unavailable') return null;
+  return (
+    <div className="flex items-start gap-2.5 text-[12px] text-amber-300/90 bg-amber-500/[0.06] border border-amber-500/25 rounded-xl px-3.5 py-3 mb-5 leading-relaxed">
+      <CalendarOff size={15} className="shrink-0 mt-0.5" />
+      <div>
+        <p className="font-semibold text-amber-200">Las fechas de esta pantalla faltan, no están vacías.</p>
+        <p className="mt-1 text-amber-300/75">
+          No se pudo leer <span className="text-amber-200">intel.brand_publish_slots</span>, así que ninguna
+          tarjeta muestra franja. Que no aparezca una fecha acá no significa que la pieza no la tenga.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** Falta el huso de la marca: se nombra la columna exacta, no se aproxima la hora. */
+function ZoneMissing({ what }: { what: string }) {
+  return (
+    <div className={cn(DATE_ROW, 'bg-amber-500/[0.06] border-amber-500/40 border-dashed text-amber-300/90')}>
+      <CalendarClock size={13} className="shrink-0 mt-0.5" />
+      <span>
+        {what} — el huso de esta marca no está sembrado (<span className="text-amber-200">public.brands.publish_timezone</span>),
+        así que la hora no se sitúa. Sembrar esa fila la muestra; acá no se supone ninguna.
+      </span>
+    </div>
+  );
+}
+
+/**
+ * La franja RESERVADA de una pieza — el COMPROMISO.
+ *
+ * EL AVISO DE «SIN FRANJA» SÓLO SE PINTA EN PIEZAS APROBADAS, y eso es deliberado: en una
+ * pieza que todavía no se aprobó, no tener franja no es una anomalía, es lo esperado.
+ * Pintarlo igual diría «aprobada» de piezas que no lo están, y un aviso que describe mal el
+ * sistema deja de leerse — que es exactamente el modo de fallo que el aviso viene a evitar.
+ *
+ * POR QUÉ EXISTE EL AVISO, para que nadie lo quite por parecer redundante: medido el
+ * 2026-09-05, hay 15 piezas aprobadas sin franja. La suposición de que una pieza aprobada
+ * «ya tendrá franja» es falsa hoy. Y cuando el reservador falle, este aviso es lo único que
+ * lo hará visible antes de que un canal lleve una semana mudo.
+ */
+export function SlotLine({ slot, approvedAt, slotsRead }: {
+  slot: { slot_at: string; status: string; timezone: string | null } | null;
+  approvedAt: string | null;
+  /** ¿Se pudieron leer las franjas? Cuando no, la tarjeta calla y avisa `SlotsNotice`. */
+  slotsRead: boolean;
+}) {
+  if (!slotsRead) return null; // sin lectura no se afirma nada sobre esta pieza.
+  if (!slot) {
+    if (!approvedAt) return null; // sin aprobar y sin franja: nada que avisar.
+    return (
+      <div className={cn(DATE_ROW, 'bg-amber-500/[0.08] border-amber-500/40 text-amber-200')}>
+        <CalendarOff size={13} className="shrink-0 mt-0.5" />
+        <span>
+          <span className="font-semibold">Aprobada sin franja asignada.</span>{' '}
+          <span className="text-amber-300/80">
+            Esta pieza tiene el visto bueno y ninguna franja reservada, así que no va a salir sola.
+          </span>
+        </span>
+      </div>
+    );
+  }
+
+  const z = fmtInZone(slot.slot_at, slot.timezone);
+  if (!z) return <ZoneMissing what="Franja reservada" />;
+
+  return (
+    <div className={cn(DATE_ROW, 'bg-emerald-500/[0.07] border-emerald-500/25 text-emerald-200/90')} title={z.title}>
+      <CalendarCheck size={13} className="shrink-0 mt-0.5" />
+      <span>
+        <span className="text-emerald-300/70">Publica:</span>{' '}
+        <span className="font-semibold">{z.when}</span>{' '}
+        <span className="text-emerald-300/70">({z.zone})</span>
+        {/* El estado de la franja se dice sólo cuando NO es el de una reserva viva: una
+            franja fallida no es un compromiso y no se puede leer como tal. */}
+        {slot.status !== 'reserved' && (
+          <span className="text-amber-300/90"> · franja en estado {slot.status}</span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * La PREVISIÓN de una pieza en calibración: la próxima franja libre de su marca × canal.
+ *
+ * Borde punteado y verbo en condicional a propósito: lo que se muestra puede cambiar, y una
+ * previsión que se ve igual que un compromiso se recuerda como un compromiso. Cuando no hay
+ * franja libre futura se dice, porque eso es información sobre el canal, no un error.
+ */
+export function ForecastLine({ forecast, slotsRead }: {
+  forecast: { slot_at: string; timezone: string | null } | null;
+  /** ¿Se pudieron leer las franjas? Cuando no, «sin franja libre» sería una afirmación sin medir. */
+  slotsRead: boolean;
+}) {
+  if (!slotsRead) return null;
+  if (!forecast) {
+    return (
+      <div className={cn(DATE_ROW, 'bg-zinc-800/40 border-zinc-700/60 border-dashed text-zinc-400')}>
+        <CalendarX size={13} className="shrink-0 mt-0.5" />
+        <span>
+          Sin franja libre en el horizonte — este canal no tiene ninguna franja futura sin ocupar.
+          Aprobarla no le daría fecha todavía.
+        </span>
+      </div>
+    );
+  }
+
+  const z = fmtInZone(forecast.slot_at, forecast.timezone);
+  if (!z) return <ZoneMissing what="Franja libre prevista" />;
+
+  return (
+    <div
+      className={cn(DATE_ROW, 'bg-sky-500/[0.06] border-sky-500/30 border-dashed text-sky-200/90')}
+      title={`${z.title} — previsión: otra pieza aprobada antes puede llevarse esta franja.`}
+    >
+      <CalendarClock size={13} className="shrink-0 mt-0.5" />
+      <span>
+        <span className="text-sky-300/70">Fecha prevista de publicación:</span>{' '}
+        <span className="font-semibold">{z.when}</span>{' '}
+        <span className="text-sky-300/70">({z.zone})</span>
+        <span className="text-sky-300/55"> · previsión, no reserva: otra pieza aprobada antes se la lleva</span>
+      </span>
+    </div>
+  );
 }
 
 /** Id corto: lo que Sam le pasa a Claude en el chat para referirse a una pieza. */
