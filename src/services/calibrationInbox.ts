@@ -306,6 +306,40 @@ export function renderArtifact(token: string, piece_id: string): Promise<{ ok: t
 }
 
 /**
+ * BRIEF-N05 — REGENERAR LA IMAGEN DE UNA PIEZA, SIN EMITIR VEREDICTO.
+ *
+ * No es un cuarto veredicto y por eso no vive junto a `saveVerdict`: la pieza NO se sella, no
+ * entra al corpus y no sale de la bandeja. Se corrige la imagen, se mira, y recién después se
+ * vota — que es la única forma de que un `fixable` de imagen se arregle sin salir de la
+ * herramienta, porque `fixable` sella la pieza igual que un rechazo.
+ *
+ * `visual_directive` es OBLIGATORIA, al revés que el criterio de un veredicto: aquí la directriz
+ * ES la operación, y regenerar sin ella devuelve el mismo defecto cobrando una generación.
+ *
+ * Devuelve el HTML del artefacto ya rehecho, para que la tarjeta muestre la imagen corregida sin
+ * recargar. `artifact_refreshed:false` significa que la imagen SÍ cambió pero el artefacto no se
+ * pudo rehacer: son dos cosas distintas y la interfaz tiene que poder decir cuál pasó.
+ */
+export function recomposeImage(
+  token: string,
+  input: { piece_id: string; visual_directive: string; edit_reason?: string | null },
+): Promise<{
+  ok: true; piece_id: string; image_url: string | null; composed: boolean;
+  visual_directive_domain: string | null; visual_directive_piece: string | null;
+  scheduled_posts_updated: number;
+  artifact_url: string | null; html: string | null; artifact_refreshed: boolean;
+}> {
+  return req('/api/recompose-image', token, {
+    method: 'POST',
+    body: {
+      piece_id: input.piece_id,
+      visual_directive: input.visual_directive,
+      edit_reason: input.edit_reason ?? null,
+    },
+  });
+}
+
+/**
  * Guarda un veredicto en el corpus. `criterion` es OPCIONAL en los tres veredictos: el
  * criterio se dicta en el chat con Claude, no acá. Obligarlo en la interfaz empuja a
  * escribir relleno para avanzar, y eso envenena el corpus.

@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { RefreshCw, Inbox, CheckCircle2, XCircle, AlertTriangle, Archive, Wrench } from 'lucide-react';
+import { RefreshCw, Inbox, CheckCircle2, XCircle, AlertTriangle, Archive, Wrench, ImagePlay } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import type { IidSession } from '../../services/iidInbound';
 import {
-  fetchQueue, saveVerdict, discardPiece, renderArtifact, CalibrationError,
+  fetchQueue, saveVerdict, discardPiece, renderArtifact, recomposeImage, CalibrationError,
   REJECT_REASONS, buildCriterion,
   type CalibrationPiece, type QueueResult, type QueueOrder, type VerdictFilter,
   type GenerationFilter, type Verdict,
@@ -204,10 +204,18 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
 }
 
 // ── Card de calibración ──────────────────────────────────────────────────────────
-type Action = 'approve' | 'reject' | 'fix' | 'discard';
+type Action = 'approve' | 'reject' | 'fix' | 'discard' | 'regen';
 type Outcome = 'approved' | 'rejected' | 'fixable' | 'discarded';
-/** Qué panel de texto está abierto. `fix` es el tercer veredicto; `discard` no es veredicto. */
-type Panel = 'reject' | 'fix' | 'discard';
+/**
+ * Qué panel de texto está abierto. `fix` es el tercer veredicto; `discard` no es veredicto;
+ * `regen` TAMPOCO lo es, y es la diferencia que sostiene BRIEF-N05.
+ *
+ * `fixable` SELLA la pieza —`status:'rejected'` + `discarded_at`, y la bandeja lista
+ * `discarded_at IS NULL`—, así que una corrección que pasara por el veredicto entregaría la
+ * imagen nueva sobre una pieza que ya nadie va a publicar. Por eso `regen` corre ANTES de votar:
+ * se corrige, se mira, y recién después se elige uno de los tres.
+ */
+type Panel = 'reject' | 'fix' | 'discard' | 'regen';
 
 function CalibrationCard({ piece, token, onResolved, slotsRead }: {
   piece: CalibrationPiece; token: string; onResolved: (id: string) => void;
@@ -237,6 +245,12 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
    */
   const [error, setError]     = useState<null | { message: string; detail: string | null }>(null);
   const [done, setDone]       = useState<null | Outcome>(null);
+  /**
+   * BRIEF-N05 — el resultado de la última regeneración. NO es un veredicto ni un `done`: la
+   * tarjeta sigue viva y la pieza sigue en la bandeja. Se guarda para poder decir qué pasó
+   * exactamente, porque «la imagen cambió» y «el artefacto se rehízo» son dos cosas distintas.
+   */
+  const [regen, setRegen]     = useState<null | { compuesta: boolean; refrescado: boolean; posts: number }>(null);
 
   useEffect(() => {
     let alive = true;
@@ -288,6 +302,33 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
       // sin que nadie se entere. Mientras la migración del corpus no esté aplicada, un `fixable`
       // falla acá y se ve — eso es lo correcto, no un fallo de la interfaz.
       setError(cardError(err, 'No se pudo guardar el veredicto.'));
+      setBusy(null);
+    }
+  };
+
+  /**
+   * BRIEF-N05 — regenerar la escena con una corrección, sin votar.
+   *
+   * El textarea de este panel NO es un criterio ni una propuesta: es la directriz ya redactada
+   * para el generador. Sam la escribe en sus palabras en el chat y lo que se pega aquí es lo que
+   * Claude convierte en directriz — esa traducción es la parte que este PR no automatiza.
+   *
+   * Al volver, el artefacto se reemplaza EN LA TARJETA. Sin eso, la pieza tendría la imagen nueva
+   * en la base y la vieja en pantalla, y quien mira concluiría que la corrección no funcionó.
+   */
+  const submitRegen = async () => {
+    setBusy('regen'); setError(null); setRegen(null);
+    try {
+      const r = await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: note.trim() });
+      if (r.html) { setArtHtml(r.html); setArtErr(null); }
+      if (r.artifact_url) setArtUrl(r.artifact_url);
+      setRegen({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated });
+      // El panel se cierra y la directriz se limpia: dejarla escrita invitaría a pulsar dos veces
+      // y a pagar una segunda generación por la misma corrección.
+      setNote(''); setPanel(null);
+    } catch (err) {
+      setError(cardError(err, 'No se pudo regenerar la imagen.'));
+    } finally {
       setBusy(null);
     }
   };
@@ -353,6 +394,17 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
       button: 'bg-sky-500/90 hover:bg-sky-500',
       icon: <Wrench size={14} />,
     },
+    regen: {
+      label: 'Directriz para el generador',
+      placeholder: 'La directriz ya redactada para el generador — la que Claude escribe a partir de tus palabras…',
+      confirm: 'Regenerar imagen',
+      foot: 'Esto NO es un veredicto: la pieza sigue en la bandeja y no entra al corpus. Cuesta una '
+        + 'generación de imagen, reemplaza la de ESTA pieza (no crea una nueva) y actualiza los posts '
+        + 'que sigan pendientes de publicar. La directriz es obligatoria y queda registrada.',
+      focus: 'focus:border-violet-500/60',
+      button: 'bg-violet-500/90 hover:bg-violet-500',
+      icon: <ImagePlay size={14} />,
+    },
     discard: {
       label: null,
       placeholder: 'Motivo del descarte (opcional)…',
@@ -364,8 +416,12 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
     },
   } as const;
   const copy = panel ? PANEL_COPY[panel] : null;
-  /** La propuesta es el único texto obligatorio de la tarjeta. Sin ella el botón no se puede pulsar. */
-  const faltaPropuesta = panel === 'fix' && !note.trim();
+  /**
+   * Los DOS textos obligatorios de la tarjeta, y lo son por el mismo motivo: en los dos casos el
+   * texto ES la operación, no su explicación. Un `fixable` sin propuesta es un rechazo con otro
+   * nombre; una regeneración sin directriz devuelve el mismo defecto cobrando una generación.
+   */
+  const faltaTexto = (panel === 'fix' || panel === 'regen') && !note.trim();
 
   return (
     <motion.div
@@ -433,6 +489,20 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
             `<iframe sandbox="">` de arriba, `getSelection()` no alcanza. */}
         {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
 
+        {/* BRIEF-N05 — qué pasó exactamente en la última regeneración. La imagen puede haber
+            cambiado sin que la composición saliera bien, y el artefacto puede no haberse rehecho
+            aunque la imagen sí cambió: un «listo» genérico taparía las tres cosas. */}
+        {regen && (
+          <div className="text-[11px] font-mono leading-snug text-violet-300/80 bg-violet-500/[0.06] border border-violet-500/20 rounded-xl px-3 py-2 space-y-0.5">
+            <p>{regen.compuesta
+              ? 'Imagen regenerada y compuesta.'
+              : 'Escena regenerada, pero la composición falló: la pieza queda con la imagen limpia, sin titular ni franja.'}</p>
+            {!regen.refrescado && <p className="text-amber-300/80">La imagen cambió, pero el artefacto no se pudo rehacer: la vista de arriba puede estar mostrando la anterior.</p>}
+            {regen.posts > 0 && <p className="text-violet-300/60">{regen.posts} post pendiente de publicar actualizado con la imagen nueva.</p>}
+            <p className="text-violet-300/50">Sigue sin veredicto: la pieza no se ha movido de la bandeja.</p>
+          </div>
+        )}
+
         {error && (
           <div className="text-xs text-rose-400 font-mono leading-snug space-y-1">
             <p>{error.message}</p>
@@ -455,7 +525,9 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
                   motivos no son agregables: para saber que el 40% de los rechazos son "falta la
                   firma" hay que leerlos uno por uno — que es exactamente lo que pasó. Son clases de
                   defecto, nunca marcas. */}
-              <div className="flex items-center gap-1.5 flex-wrap">
+              {/* Los motivos son clases de defecto de un VEREDICTO. En `regen` no hay veredicto que
+                  clasificar, y ofrecerlos ahí haría creer que la elección viaja a algún sitio. */}
+              <div className={cn('flex items-center gap-1.5 flex-wrap', panel === 'regen' && 'hidden')}>
                 {REJECT_REASONS.map((r) => (
                   <button
                     key={r.value}
@@ -472,7 +544,8 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
                 ))}
               </div>
               {copy?.label && (
-                <label className="block text-[11px] font-medium text-sky-300/90">{copy.label}</label>
+                <label className={cn('block text-[11px] font-medium',
+                  panel === 'regen' ? 'text-violet-300/90' : 'text-sky-300/90')}>{copy.label}</label>
               )}
               <textarea
                 value={note}
@@ -490,10 +563,13 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
                   onClick={() => {
                     if (panel === 'reject') return submitVerdict('rejected');
                     if (panel === 'fix') return submitVerdict('fixable');
+                    if (panel === 'regen') return submitRegen();
                     return submitDiscard();
                   }}
-                  disabled={!!busy || faltaPropuesta}
-                  title={faltaPropuesta ? 'Escribir la propuesta antes de confirmar' : undefined}
+                  disabled={!!busy || faltaTexto}
+                  title={faltaTexto
+                    ? (panel === 'regen' ? 'Escribir la directriz antes de regenerar' : 'Escribir la propuesta antes de confirmar')
+                    : undefined}
                   className={cn(
                     'flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
                     copy?.button,
@@ -511,7 +587,7 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
               </div>
               <p className={cn(
                 'text-[10px] font-mono leading-snug',
-                panel === 'fix' ? 'text-sky-300/70' : 'text-zinc-600',
+                panel === 'fix' ? 'text-sky-300/70' : panel === 'regen' ? 'text-violet-300/70' : 'text-zinc-600',
               )}>
                 {copy?.foot}
               </p>
@@ -539,6 +615,14 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
                 className="px-4 py-2.5 rounded-lg text-sm font-medium border border-sky-500/30 text-sky-300/90 hover:bg-sky-500/10 transition-colors disabled:opacity-50"
               >
                 <Wrench size={14} className="inline mr-1" /> Fixable
+              </button>
+              <button
+                onClick={() => { setPanel('regen'); setError(null); }}
+                disabled={!!busy}
+                title="Regenerar la escena con una corrección, sin votar. La pieza sigue en la bandeja."
+                className="px-4 py-2.5 rounded-lg text-sm font-medium border border-violet-500/30 text-violet-300/90 hover:bg-violet-500/10 transition-colors disabled:opacity-50"
+              >
+                {busy === 'regen' ? <Spinner size={14} /> : <><ImagePlay size={14} className="inline mr-1" /> Regenerar imagen</>}
               </button>
               <button
                 onClick={() => { setPanel('discard'); setError(null); }}
