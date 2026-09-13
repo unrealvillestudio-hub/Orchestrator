@@ -242,28 +242,11 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
   // de `preview-render`, así que no hay una segunda lectura ni una segunda fuente de texto.
   const readable = useMemo(() => (artHtml ? readableFromArtifactHtml(artHtml) : null), [artHtml]);
 
-  // Estado resuelto → tarjeta de confirmación.
-  if (done) {
-    const style = done === 'approved'
-      ? { box: 'bg-emerald-500/[0.07] border-emerald-500/30', text: 'text-emerald-300', icon: <CheckCircle2 size={18} />, label: 'Aprobada — guardada en el corpus' }
-      : done === 'rejected'
-        ? { box: 'bg-rose-500/[0.07] border-rose-500/30', text: 'text-rose-300', icon: <XCircle size={18} />, label: 'Rechazada — guardada en el corpus' }
-        : done === 'fixable'
-          ? { box: 'bg-sky-500/[0.07] border-sky-500/30', text: 'text-sky-300', icon: <Wrench size={18} />, label: 'Fixable — la propuesta quedó en el corpus' }
-          : { box: 'bg-zinc-800/40 border-zinc-700/60', text: 'text-zinc-300', icon: <Archive size={18} />, label: 'Descartada — fuera de la bandeja, NO entra al corpus' };
-    return (
-      <motion.div
-        initial={{ opacity: 1 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className={cn('rounded-2xl p-4 border', style.box)}
-      >
-        <div className={cn('flex items-center gap-2', style.text)}>
-          {style.icon}
-          <p className="text-sm font-medium">{style.label}</p>
-        </div>
-        <p className="mt-1 text-[10px] font-mono text-zinc-600">pieza: {shortId(piece.piece_id)}</p>
-      </motion.div>
-    );
-  }
+  // U-5 (corrección del 2026-09-13) — LA TARJETA DE CONFIRMACIÓN PROPIA SE RETIRÓ.
+  // El acuse lo da ahora `PieceActionsBar`, igual en las dos bandejas. Tenerlo aquí también
+  // era la última divergencia que quedaba: calibración decía qué había pasado y publicación
+  // quitaba la pieza en seco, así que aprobar desde ahí no acusaba nada — y un acuse ausente
+  // no se distingue de una acción que no ocurrió. Un solo acuse, en el sitio de la acción.
 
   const rejected = piece.watcher_result === 'REJECT';
 
@@ -335,7 +318,7 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
             title: piece.title,
           }}
           token={token}
-          onResolved={(id, outcome) => { setDone(outcome); setTimeout(() => onResolved(id), 1500); }}
+          onResolved={(id) => onResolved(id)}
           onRegenerated={(r) => {
             if (r.html) { setArtHtml(r.html); setArtErr(null); }
             if (r.artifact_url) setArtUrl(r.artifact_url);
