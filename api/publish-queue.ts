@@ -204,11 +204,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // depende de SU ESTADO, no de la bandeja donde se la mire. Eso viaja ahora en
       // `pieces[].actions`, una entrada por acción y con su motivo cuando no está disponible.
       //
-      // POR QUÉ SIGUE EN `false`, Y NO ES UN OLVIDO. `PublishQueueModule` pinta su aviso
-      // ámbar exactamente cuando este campo es `false`. Ponerlo en `true` acá apagaría ese
-      // aviso UN CORTE ANTES de que exista el botón, y dejaría la bandeja muda: ni avisa ni
-      // aprueba. El campo vuelve a `true` en U-5, que es cuando la bandeja aprueba de verdad.
-      // Decisión de Sam del 2026-09-13, sobre la contradicción entre §3 y §5.a del brief.
+      // U-5 — Y ÉSTE ES EL CORTE. El aviso ámbar que este campo encendía se retira con él:
+      // la bandeja aprueba desde ahora, así que decir que no puede sería el tercer texto
+      // caduco en dos días. El campo queda por compatibilidad y sin lector; su borrado es
+      // de U-6, cuando ninguna pantalla lo mire.
       //
       // La nota de SIGN-01 corte E que vivía acá queda cumplida por segunda vez: advertía que
       // un motivo obsoleto enseña a desconfiar de los avisos, y era este motivo el que había
@@ -218,11 +217,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // `deprecated: true` es la señal de que este campo de nivel superior se retira en
       // cuanto ningún consumidor lo lea: la respuesta ya vive por pieza, en `actions`.
       approval: {
-        available: false,
+        available: true,
         deprecated: true,
-        reason: 'Todavía no hay botón de aprobar en esta bandeja: llega en el corte siguiente. '
-          + 'Lo que se puede hacer con cada pieza ya viaja por pieza, en `pieces[].actions`, '
-          + 'con su motivo cuando una acción no está disponible.',
+        reason: 'Obsoleto desde U-5: la disponibilidad se declara por pieza en `pieces[].actions`, '
+          + 'con su motivo. Este campo se retira cuando ningún consumidor lo lea.',
       },
       cutoffs_source: cutoffsRaw === null ? 'unavailable' : (cutoffs.length ? 'seeded' : 'empty'),
       ...(truncated ? { truncated: true } : {}),

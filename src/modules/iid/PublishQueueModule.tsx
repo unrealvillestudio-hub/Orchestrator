@@ -13,6 +13,8 @@ import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader,
   SlotLine, SlotsNotice,
 } from './pieceUi';
+// U-5 — el ÚNICO componente de acciones del sistema, el mismo que monta calibración.
+import { PieceActionsBar } from './pieceActions';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
 import { SpeechReader } from '../../ui/SpeechReader';
 import { readableFromArtifactHtml } from './readablePiece';
@@ -26,14 +28,19 @@ const PAGE = 20;
  * canal y —desde PR-C— CUÁNDO SALEN, reutilizando la capa de datos y la presentación de la
  * bandeja de calibración.
  *
- * NO APRUEBA, y eso es deliberado, no una omisión: aprobar es del carril de CALIBRACIÓN,
- * que es donde se juzga la pieza. Aprobar allá sella la habilitación y `content-scheduler`
- * (modo `placement`) calcula la franja; acá se ve a dónde va cada pieza, si su canal está
- * operativo y qué franja tiene reservada. El motivo viaja en el contrato del endpoint
- * (`approval.reason`), no en una constante de esta pantalla.
+ * U-5 — ESTA BANDEJA YA ACTÚA. Hasta este corte no aprobaba, y el motivo escrito decía que
+ * era «por diseño»: aprobar sería del carril de calibración. Dejó de ser cierto por decisión
+ * de Sam del 2026-09-13 — lo que se puede hacer con una pieza depende de SU ESTADO, no de la
+ * bandeja donde se la mire.
  *
- * Calibrar y publicar son ejes independientes: esta bandeja no mira el corpus, y la de
- * calibración no mira el canal.
+ * Las acciones las pinta `PieceActionsBar`, el mismo componente que monta calibración, y su
+ * disponibilidad la declara el contrato en `pieces[].actions`. **Esta pantalla no evalúa
+ * estado**: ni `status`, ni `discarded_at`, ni la presencia de una imagen.
+ *
+ * Lo propio de esta bandeja sigue siendo lo que era: a dónde va cada pieza, si su canal está
+ * operativo, y CUÁNDO sale — su franja reservada, que es un compromiso y no una previsión.
+ * Por eso es la única que entrega `slot` al componente de acciones: antes de sellar una
+ * pieza, el diálogo repite esa fecha y avisa de que la franja se libera.
  */
 export default function PublishQueueModule({ session }: { session: IidSession }) {
   const token = session.session_token;
@@ -81,6 +88,18 @@ export default function PublishQueueModule({ session }: { session: IidSession })
   };
   const goPage = (o: number) => { setOffset(o); load({ ...current(), offset: o }); };
 
+  /**
+   * U-5 — una pieza que sale de circulación sale de la lista. Se quita en memoria en vez de
+   * recargar la página entera: recargar perdería el scroll y volvería a pedir los artefactos
+   * de todas las demás tarjetas, que es caro y no aporta nada.
+   */
+  const onResolved = (pieceId: string) => {
+    setData((prev) => {
+      if (!prev) return prev;
+      return { ...prev, pieces: prev.pieces.filter((p) => p.piece_id !== pieceId), total: Math.max(0, prev.total - 1) };
+    });
+  };
+
   const total     = data?.total ?? 0;
   const byBrand   = data?.by_brand ?? {};
   const byChannel = data?.by_channel ?? {};
@@ -97,7 +116,7 @@ export default function PublishQueueModule({ session }: { session: IidSession })
           <h3 className="font-display text-lg font-bold text-white">Bandeja de publicación</h3>
           <p className="text-sm text-zinc-500 mt-0.5">
             Piezas listas para salir: cuándo publica cada una, por qué canal y si ese canal está operativo.
-            <span className="text-zinc-400"> Solo lectura</span> — ver el aviso.
+            <span className="text-zinc-400"> Cada tarjeta dice qué se puede hacer con su pieza</span>, y por qué cuando no se puede.
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
@@ -114,16 +133,11 @@ export default function PublishQueueModule({ session }: { session: IidSession })
         </div>
       </div>
 
-      {/* Por qué no hay botón de aprobar. El motivo lo da el server, no esta pantalla. */}
-      {data && !data.approval.available && (
-        <div className="flex items-start gap-2.5 text-[12px] text-amber-300/90 bg-amber-500/[0.06] border border-amber-500/25 rounded-xl px-3.5 py-3 mb-5 leading-relaxed">
-          <Lock size={15} className="shrink-0 mt-0.5" />
-          <div>
-            <p className="font-semibold text-amber-200">Esta bandeja todavía no aprueba.</p>
-            <p className="mt-1 text-amber-300/75">{data.approval.reason}</p>
-          </div>
-        </div>
-      )}
+      {/* U-5 — EL AVISO DE «ESTA BANDEJA NO APRUEBA» SE RETIRÓ, PORQUE YA APRUEBA.
+          Decía lo que otra pantalla podía hacer, y un aviso así caduca en cuanto esa otra
+          pantalla cambia — sin que nadie se entere hasta que un usuario lo lee. Lo que se
+          puede hacer con cada pieza lo declara `actions`, por pieza y con su motivo: una
+          pantalla no vuelve a afirmar dónde vive una acción. */}
 
       {/* Filtro por marca */}
       {brands.length > 0 && (
@@ -181,7 +195,10 @@ export default function PublishQueueModule({ session }: { session: IidSession })
       ) : (
         <div className="space-y-4">
           {pieces.map((p) => (
-            <PublishCard key={p.piece_id} piece={p} token={token} slotsRead={data?.slots_source !== 'unavailable'} />
+            <PublishCard
+              key={p.piece_id} piece={p} token={token} onResolved={onResolved}
+              slotsRead={data?.slots_source !== 'unavailable'}
+            />
           ))}
         </div>
       )}
@@ -215,8 +232,10 @@ function ChannelBadge({ channel }: { channel: ChannelInfo }) {
 }
 
 // ── Tarjeta ──────────────────────────────────────────────────────────────────────
-function PublishCard({ piece, token, slotsRead }: {
+function PublishCard({ piece, token, onResolved, slotsRead }: {
   piece: PublishablePiece; token: string; slotsRead: boolean;
+  /** La pieza salió de circulación: la bandeja la quita de la lista. */
+  onResolved: (pieceId: string) => void;
 }) {
   // Artefacto renderizado (texto tal como saldría + imagen compuesta si la hay). Mismo
   // mecanismo que la bandeja de calibración: srcdoc, porque el CDN sirve text/plain.
@@ -301,8 +320,13 @@ function PublishCard({ piece, token, slotsRead }: {
             `<iframe sandbox="">` de arriba, `getSelection()` no alcanza. */}
         {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
 
-        {/* Estado de salida. Cuando el canal bloquea, el motivo se lee sin abrir nada; cuando
-            no bloquea, tampoco hay acción todavía y se dice por qué. */}
+        {/* ESTADO DEL CANAL, y sólo eso.
+            U-5 — la coletilla que remitía a la otra bandeja para aprobar se retiró: estaba
+            escrita a mano en esta pantalla, no salía de ningún campo del contrato, y
+            con este corte dejó de ser cierta. Es el tercer texto caduco en dos días y todos
+            compartían la misma forma: una frase que afirma qué puede hacer OTRA pantalla.
+            La regla que deja escrita — si un texto afirma algo sobre disponibilidad, sale del
+            contrato o no se escribe. Lo que esta pieza puede hacer está en sus botones. */}
         <div
           className={cn(
             'flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] font-mono leading-snug border',
@@ -314,10 +338,30 @@ function PublishCard({ piece, token, slotsRead }: {
           {blocked ? <Lock size={13} className="shrink-0 mt-0.5" /> : <Send size={13} className="shrink-0 mt-0.5" />}
           <span>
             {blocked
-              ? `${piece.channel.reason} — esta pieza no podría salir aunque la bandeja aprobara.`
-              : 'Canal operativo. La aprobación se hace en la bandeja de calibración.'}
+              ? `${piece.channel.reason} — esta pieza no podría salir por su canal.`
+              : 'Canal operativo.'}
           </span>
         </div>
+
+        {/* U-5 — LAS ACCIONES. El MISMO componente que monta la bandeja de calibración.
+            Aquí SÍ viaja `slot`: esta bandeja entrega el COMPROMISO de fecha, así que antes
+            de sellar una pieza el diálogo repite esa fecha y avisa de que la franja se
+            libera. Sam decide con el compromiso delante, no después de haberlo roto. */}
+        <PieceActionsBar
+          piece={{
+            piece_id: piece.piece_id,
+            actions: piece.actions,
+            body: piece.body,
+            title: piece.title,
+            slot: slotsRead ? piece.slot : null,
+          }}
+          token={token}
+          onResolved={(id) => onResolved(id)}
+          onRegenerated={(r) => {
+            if (r.html) { setArtHtml(r.html); setArtErr(null); }
+            if (r.artifact_url) setArtUrl(r.artifact_url);
+          }}
+        />
       </div>
     </motion.div>
   );

@@ -5,9 +5,12 @@
  *   GET  /api/publish-queue     → piezas candidatas a salir, con canal y estado del canal
  *   POST /api/preview-render    → artefacto de una pieza (reutilizado de calibración)
  *
- * NO hay acción de aprobar, y es por DISEÑO: aprobar es del carril de CALIBRACIÓN, que es
- * donde se juzga la pieza. El endpoint devuelve `approval.available = false` con el motivo
- * y la interfaz lo muestra, en vez de ofrecer un botón que pertenece a otra bandeja.
+ * U-5 — ESTA BANDEJA YA ACTÚA. Hasta este corte no aprobaba «por diseño», y el endpoint
+ * devolvía `approval.available:false` con el motivo. Dejó de ser cierto: lo que se puede
+ * hacer con una pieza depende de SU ESTADO, no de la bandeja donde se la mire, y viaja por
+ * pieza en `actions` desde U-4. Las acciones se ejecutan con las funciones de
+ * `calibrationInbox.ts` — se reutilizan, no se duplican: dos clientes del mismo endpoint
+ * divergen en el primer cambio.
  *
  * PR-C — cada pieza trae además su FRANJA RESERVADA (`slot`): cuándo sale, en la hora de su
  * marca. Es un compromiso, no una previsión; la previsión vive en `calibrationInbox.ts` y
@@ -20,11 +23,21 @@ import {
   CalibrationError,
   type FlowGeneration,
   type PieceMetrics,
+  type PieceActions,
 } from './calibrationInbox';
 
 // El error tipado es el mismo mecanismo; se reexporta para no obligar a importar de dos lados.
 export { CalibrationError } from './calibrationInbox';
 export type { FlowGeneration, PieceMetrics } from './calibrationInbox';
+/**
+ * U-5 — LAS ACCIONES SE REEXPORTAN, NO SE REDECLARAN. Una segunda declaración del mismo
+ * contrato es una segunda fuente, y las dos divergen en el primer cambio. Lo mismo vale
+ * para las FUNCIONES que las ejecutan: viven en `calibrationInbox.ts` y esta bandeja las
+ * importa de ahí, igual que ya hacía con `renderArtifact`.
+ */
+export type { PieceActionKey, PieceAction, PieceActions, SlotRelease } from './calibrationInbox';
+export { saveVerdict, discardPiece, recomposeImage, renderArtifact } from './calibrationInbox';
+export { savePieceEdit } from './challengedInbox';
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 /**
@@ -69,6 +82,10 @@ export interface PieceSlot {
 }
 
 export interface PublishablePiece {
+  /** U-4 — las seis acciones y su disponibilidad. La pantalla las pinta, no las decide. */
+  actions: PieceActions;
+  /** U-5 — el texto efectivo de la pieza, que es lo que el panel de edición carga. */
+  body: string | null;
   piece_id: string;
   brand_id: string;
   voice: string | null;
@@ -133,8 +150,13 @@ export interface PublishQueueResult {
   channel_status: ChannelStatusFilter;
   generation: GenerationFilter;
   pieces: PublishablePiece[];
-  /** Por qué la bandeja no aprueba todavía. Viene del server, no de una constante del front. */
-  approval: { available: boolean; reason: string };
+  /**
+   * ⛔ OBSOLETO desde U-5, y por eso `deprecated`. Declaraba si la bandeja entera podía
+   * aprobar; la respuesta vive ahora POR PIEZA en `pieces[].actions`, con su motivo.
+   * **Ninguna pantalla lo lee ya.** Se conserva sin lector para no romper un consumidor
+   * viejo, y se borra en U-6.
+   */
+  approval: { available: boolean; reason: string; deprecated?: boolean };
   cutoffs_source: 'unavailable' | 'empty' | 'seeded';
   /**
    * PR-C — si las franjas se pudieron leer. `unavailable` NO significa que las piezas no

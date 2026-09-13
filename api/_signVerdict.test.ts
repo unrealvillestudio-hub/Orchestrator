@@ -28,7 +28,15 @@ const sinComentarios = (src: string) => src
   .join('\n');
 
 const UI = readFileSync(new URL('../src/modules/iid/pieceUi.tsx', import.meta.url), 'utf8');
-const MOD = readFileSync(new URL('../src/modules/iid/ApprovalCalibrationModule.tsx', import.meta.url), 'utf8');
+/**
+ * U-5 REAPUNTÓ ESTA LECTURA, Y NO LA DEBILITÓ. Lo que estas pruebas fijan seguía siendo
+ * cierto; lo que cambió es DÓNDE vive. Los botones, sus paneles y sus llamadas se
+ * extrajeron de `ApprovalCalibrationModule.tsx` al componente único `pieceActions.tsx`,
+ * que montan las dos bandejas. Dejar la lectura en el archivo viejo habría hecho pasar las
+ * pruebas contra un archivo que ya no contiene lo que afirman — verde sin verificar nada,
+ * que es peor que rojo.
+ */
+const MOD = readFileSync(new URL('../src/modules/iid/pieceActions.tsx', import.meta.url), 'utf8');
 const VERDICT = readFileSync(new URL('./calibration-verdict.ts', import.meta.url), 'utf8');
 const SHARED = readFileSync(new URL('./_calibrationShared.ts', import.meta.url), 'utf8');
 
@@ -279,7 +287,12 @@ describe('fixable · sella igual que un rechazo, y la diferencia vive en el corp
     // quedaría mintiendo sin que nadie se entere.
     const limpio = sinComentarios(MOD);
     expect(limpio).not.toMatch(/catch[\s\S]{0,200}submitVerdict\('rejected'\)/);
-    expect(limpio).toMatch(/setError\(err instanceof CalibrationError \? err\.message/);
+    // U-5 — la MISMA propiedad, en la forma nueva. El `setError(err instanceof …)` repetido
+    // en cada handler se encapsuló en `cardError`, que conserva las dos mitades: la frase
+    // redactada por el endpoint y el crudo del server. Lo que este test fija no cambió — que
+    // el error del server LLEGA a la pantalla en vez de degradarse en silencio.
+    expect(limpio).toMatch(/setError\(cardError\(err,/);
+    expect(limpio).toMatch(/return \{ message: err\.message, detail \}/);
   });
 });
 

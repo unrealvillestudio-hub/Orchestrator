@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { DIRECTIVE_MAX_CHARS } from './recompose-image.js';
+// U-5 — el copy de los paneles vive en el componente único de acciones.
+import { PANEL_COPY } from '../src/modules/iid/pieceActions';
 
 /**
  * BRIEF-N05 — REGENERAR LA IMAGEN NO ES UN VEREDICTO. Las cinco propiedades que sostienen eso.
@@ -15,7 +17,15 @@ import { DIRECTIVE_MAX_CHARS } from './recompose-image.js';
  */
 
 const API = readFileSync(new URL('./recompose-image.ts', import.meta.url), 'utf8');
-const MOD = readFileSync(new URL('../src/modules/iid/ApprovalCalibrationModule.tsx', import.meta.url), 'utf8');
+/**
+ * U-5 REAPUNTÓ ESTA LECTURA, Y NO LA DEBILITÓ. Lo que estas pruebas fijan seguía siendo
+ * cierto; lo que cambió es DÓNDE vive. Los botones, sus paneles y sus llamadas se
+ * extrajeron de `ApprovalCalibrationModule.tsx` al componente único `pieceActions.tsx`,
+ * que montan las dos bandejas. Dejar la lectura en el archivo viejo habría hecho pasar las
+ * pruebas contra un archivo que ya no contiene lo que afirman — verde sin verificar nada,
+ * que es peor que rojo.
+ */
+const MOD = readFileSync(new URL('../src/modules/iid/pieceActions.tsx', import.meta.url), 'utf8');
 const SERVICE = readFileSync(new URL('../src/services/calibrationInbox.ts', import.meta.url), 'utf8');
 
 /** Sin comentarios: se mide el código, no la documentación que lo explica. */
@@ -42,13 +52,15 @@ describe('la regeneración no toca el veredicto', () => {
   });
 
   it('el handler de la tarjeta no llama a saveVerdict ni marca la pieza como resuelta', () => {
+    // U-5 — el delimitador cambió con la extracción (el orden de los handlers ya no es el
+    // mismo), la propiedad no: regenerar NO es un veredicto y la pieza no se mueve.
     const i = modCodigo.indexOf('const submitRegen');
-    const j = modCodigo.indexOf('const submitDiscard');
+    const j = modCodigo.indexOf('const submitEdit');
     expect(i, 'submitRegen no existe').toBeGreaterThan(-1);
-    expect(j).toBeGreaterThan(i);
+    expect(j, 'submitEdit no existe').toBeGreaterThan(i);
     const cuerpo = modCodigo.slice(i, j);
     expect(cuerpo).not.toContain('saveVerdict');
-    expect(cuerpo).not.toContain('setDone');
+    expect(cuerpo).not.toContain('sealed(');
     expect(cuerpo, 'la pieza NO sale de la bandeja: `onResolved` la quitaría').not.toContain('onResolved');
   });
 
@@ -81,7 +93,12 @@ describe('la directriz', () => {
   });
 
   it('el botón no se puede pulsar sin ella', () => {
-    expect(modCodigo).toContain("const faltaTexto = (panel === 'fix' || panel === 'regen') && !note.trim()");
+    // U-5 — la obligatoriedad dejó de ser una condición escrita a mano en la tarjeta y pasó a
+    // ser un dato del panel (`required`), que es lo que permite que las cuatro bandejas la
+    // respeten sin repetirla. La propiedad es la misma y la comprobación es más fuerte:
+    // se fija el dato Y el botón que lo obedece.
+    expect(PANEL_COPY.regen.required, 'la directriz es obligatoria').toBe(true);
+    expect(modCodigo).toContain('const faltaTexto = !!copy?.required && !note.trim()');
     expect(modCodigo).toContain('disabled={!!busy || faltaTexto}');
   });
 });
@@ -96,14 +113,27 @@ describe('el artefacto vuelve a renderizarse', () => {
 
   it('«no se pudo rehacer el artefacto» se distingue de «la imagen no cambió»', () => {
     expect(apiCodigo).toContain('artifact_refreshed');
-    expect(modCodigo, 'la tarjeta lo dice en pantalla, no sólo en el JSON').toContain('regen.refrescado');
-    expect(modCodigo, 'y distingue la composición fallida de la escena no regenerada').toContain('regen.compuesta');
+    expect(modCodigo, 'la tarjeta lo dice en pantalla, no sólo en el JSON').toContain('regenNote.refrescado');
+    expect(modCodigo, 'y distingue la composición fallida de la escena no regenerada').toContain('regenNote.compuesta');
   });
 
   it('la tarjeta reemplaza el HTML embebido con el que vuelve', () => {
+    // U-5 — AHORA SON DOS PANTALLAS, y por eso este test cubre más que antes. El componente
+    // de acciones no posee el artefacto —cada bandeja lo tiene en su propio estado—, así que
+    // PROPAGA el html nuevo y cada una lo aplica. Comprobar sólo el componente dejaría pasar
+    // una bandeja que recibe el html y no lo pinta: la pieza tendría la imagen nueva en la
+    // base y la vieja en pantalla, que es el defecto que este test existe para impedir.
     const i = modCodigo.indexOf('const submitRegen');
-    const cuerpo = modCodigo.slice(i, modCodigo.indexOf('const submitDiscard'));
-    expect(cuerpo).toContain('setArtHtml(r.html)');
+    const cuerpo = modCodigo.slice(i, modCodigo.indexOf('const submitEdit'));
+    expect(cuerpo, 'el componente propaga el html nuevo').toContain('onRegenerated?.({ html: r.html');
+
+    for (const [nombre, ruta] of [
+      ['calibración', '../src/modules/iid/ApprovalCalibrationModule.tsx'],
+      ['publicación', '../src/modules/iid/PublishQueueModule.tsx'],
+    ] as const) {
+      const bandeja = readFileSync(new URL(ruta, import.meta.url), 'utf8');
+      expect(bandeja, `la bandeja de ${nombre} lo aplica`).toContain('setArtHtml(r.html)');
+    }
   });
 });
 

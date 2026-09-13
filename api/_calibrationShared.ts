@@ -405,6 +405,20 @@ export function actionsFor(piece: {
 export interface PieceContext {
   /** U-4 — qué se puede hacer con esta pieza. Lo decide el contrato, nunca la pantalla. */
   actions: PieceActions;
+  /**
+   * U-5 — EL TEXTO QUE SE EDITA, el mismo que `actionsFor` declara editable.
+   *
+   * Sale de `channelTextOf`, que es la función que ya resuelve el texto efectivo de una
+   * pieza: el adaptado a SU canal, con caída al maestro. No es una segunda fuente y no
+   * duplica nada — es la misma que la bandeja de retenidas usa para pintar el cuerpo.
+   *
+   * POR QUÉ ENTRA AQUÍ: hasta U-5 el contrato declaraba `edit_text` disponible y no
+   * entregaba el texto que editar, así que la acción era inejecutable en dos de las tres
+   * bandejas. Una acción declarada disponible sin el dato que necesita es una promesa que
+   * la pantalla no puede cumplir, y el front no puede arreglarlo sin decidir por su cuenta
+   * — que es justo lo que U-4 y U-5 existen para impedir.
+   */
+  body: string | null;
   piece_id: string;
   brand_id: string;
   voice: string | null;
@@ -484,6 +498,8 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     // `calibration-queue` y `publish-queue` lo heredan sin tocarse, porque las dos arman
     // su pieza con esta función.
     actions: actionsFor(piece),
+    // U-5 — el texto efectivo, por la MISMA función que lo resuelve en el resto del carril.
+    body: channelTextOf(piece).text || null,
     piece_id: piece.id,
     brand_id: piece.brand_id,
     voice: piece.voice ?? null,
