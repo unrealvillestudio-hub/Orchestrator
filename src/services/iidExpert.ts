@@ -15,6 +15,7 @@
  */
 
 import { IidError, capture, type CaptureResult } from './iidInbound';
+import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 
 const SB_URL = (import.meta as any).env.VITE_SUPABASE_URL as string;
 const SB_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY as string;
@@ -95,13 +96,14 @@ export interface ExtractFramesResult {
 async function callApi<T>(path: string, body: Record<string, unknown>): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, {
+    res = await fetchWithTimeout('own-api', path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
   } catch (err) {
-    throw new IidError('No se pudo contactar el servidor (red).', 0, { cause: String(err) });
+    // U-8 bis — POST: si venció el plazo, el servidor puede haberla aplicado igual.
+    throw new IidError(mensajeDeFallo(err, true), 0, { cause: String(err) });
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -159,7 +161,7 @@ export function extractFrames(token: string, videoPath: string): Promise<Extract
 async function callOcrFn<T>(payload: Record<string, unknown>): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(FN_URL, {
+    res = await fetchWithTimeout('edge', FN_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -169,7 +171,7 @@ async function callOcrFn<T>(payload: Record<string, unknown>): Promise<T> {
       body: JSON.stringify(payload),
     });
   } catch (err) {
-    throw new IidError('No se pudo contactar el servidor (red).', 0, { cause: String(err) });
+    throw new IidError(mensajeDeFallo(err, true), 0, { cause: String(err) });
   }
 
   const data = await res.json().catch(() => ({}));

@@ -27,6 +27,7 @@
  */
 
 import { BrandProfile } from '../core/types';
+import { fetchWithTimeout } from './fetchWithTimeout';
 
 /**
  * Se leen EN CADA LLAMADA, no una vez al importar el módulo: capturarlas al importar ata el
@@ -108,7 +109,7 @@ export async function loadBrands(): Promise<BrandsResult> {
   try {
     // `display_name`, no `name`: ése era el error que dejaba muerto este camino. Y
     // `status=eq.active` es la frontera de perímetro descrita arriba — no se quita.
-    const res = await fetch(
+    const res = await fetchWithTimeout('db',
       `${SB_URL()}/rest/v1/brands?select=id,display_name,market,status&status=eq.active&order=display_name`,
       { headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}` } }
     );

@@ -24,6 +24,7 @@
  * corpus. Un veredicto que no sella deja la pieza viva y reaparece mañana: sería una nota, no un
  * veredicto. El contrato completo está en `api/calibration-verdict.ts`.
  */
+import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 export type Verdict = 'approved' | 'rejected' | 'fixable';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
@@ -321,7 +322,7 @@ async function req<T>(
 ): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, {
+    res = await fetchWithTimeout('own-api', path, {
       method: init.method ?? 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -330,7 +331,9 @@ async function req<T>(
       ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
     });
   } catch (err) {
-    throw new CalibrationError('No se pudo contactar el servidor (red).', 0, { cause: String(err) });
+    // U-8 bis — un plazo vencido NO es una caída de red, y confundirlos manda a quien
+    // depura al sitio equivocado. `mensajeDeFallo` los separa y dice qué es seguro repetir.
+    throw new CalibrationError(mensajeDeFallo(err, (init.method ?? 'GET') !== 'GET'), 0, { cause: String(err) });
   }
 
   const data = await res.json().catch(() => ({}));

@@ -26,6 +26,7 @@ import {
   type SequencePieceMeta,
 } from './sequenceBridge';
 
+import { fetchWithTimeout } from './fetchWithTimeout';
 import type {
   InterpretResult,
   FlowStage,
@@ -56,7 +57,7 @@ let _labConfigsCache: LabConfig[] | null = null;
 async function getLabConfigs(): Promise<LabConfig[]> {
   if (_labConfigsCache) return _labConfigsCache;
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout('db',
       `${SB_URL}/rest/v1/lab_configs?select=lab_key,api_endpoint,execute_path,active,default_params&lab_key=not.is.null`,
       { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
     );
@@ -72,7 +73,7 @@ async function getLabConfigs(): Promise<LabConfig[]> {
 // ── INTERPRET ─────────────────────────────────────────────────────────────────
 
 export async function interpretPrompt(userPrompt: string): Promise<InterpretResult> {
-  const res = await fetch('/api/interpret-intent', {
+  const res = await fetchWithTimeout('own-api', '/api/interpret-intent', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt: userPrompt }),
@@ -147,7 +148,7 @@ export async function loadBrandContext(brandId: string): Promise<BrandContext | 
   if (_brandContextCache.has(brandId)) return _brandContextCache.get(brandId) ?? null;
 
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout('db',
       `${SB_URL}/rest/v1/brand_cache_snapshots?brand_id=eq.${encodeURIComponent(brandId)}&select=voice,persona,tone,benefits,icp,snapshot&order=created_at.desc&limit=1`,
       { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } }
     );
@@ -226,7 +227,7 @@ export async function executeStage(
   }
 
   try {
-    const res = await fetch(endpoint, {
+    const res = await fetchWithTimeout('lab', endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -313,7 +314,7 @@ async function uploadImageToStorage(
 
   const uploadEndpoint = `${META_MCP_URL}/api/upload`;
 
-  const res = await fetch(uploadEndpoint, {
+  const res = await fetchWithTimeout('lab', uploadEndpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -345,7 +346,7 @@ async function executeMetaStage(
     const socialConfig = configs.find(c => c.lab_key === 'sociallab');
     const socialBase = socialConfig?.api_endpoint ?? 'https://social-lab-flame.vercel.app';
 
-    const res = await fetch(`${socialBase}/api/publish`, {
+    const res = await fetchWithTimeout('lab', `${socialBase}/api/publish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ brand_id: brandId }),
