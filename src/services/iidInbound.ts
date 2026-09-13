@@ -15,6 +15,7 @@
  * La EF ya está verde en prod; este módulo solo la consume.
  */
 
+import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 const SB_URL = (import.meta as any).env.VITE_SUPABASE_URL as string;
 const SB_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY as string;
 
@@ -109,7 +110,7 @@ export class IidError extends Error {
 async function call<T>(payload: Record<string, unknown>): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(FN_URL, {
+    res = await fetchWithTimeout('edge', FN_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -119,7 +120,9 @@ async function call<T>(payload: Record<string, unknown>): Promise<T> {
       body: JSON.stringify(payload),
     });
   } catch (err) {
-    throw new IidError('No se pudo contactar el servidor (red).', 0, { cause: String(err) });
+    // U-8 bis — un plazo vencido NO es una caída de red, y confundirlos manda a quien
+    // depura al sitio equivocado. `mensajeDeFallo` los separa y dice qué es seguro repetir.
+    throw new IidError(mensajeDeFallo(err, true), 0, { cause: String(err) });
   }
 
   const data = await res.json().catch(() => ({}));

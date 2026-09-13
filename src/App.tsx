@@ -18,7 +18,13 @@ import ChallengedInboxModule from './modules/iid/ChallengedInboxModule';
 import EvaluatedHistoryModule from './modules/iid/EvaluatedHistoryModule';
 import type { IidSession } from './services/iidInbound';
 
-const BUILD_TAG = "OR_1.1";
+/**
+ * La versión sale de `package.json` y el commit de la plataforma; los inyecta
+ * `vite.config.ts` en el build. Ver allí por qué esto dejó de escribirse a mano.
+ */
+declare const __APP_VERSION__: string;
+declare const __APP_COMMIT__: string;
+const BUILD_TAG = __APP_COMMIT__ ? `v${__APP_VERSION__} · ${__APP_COMMIT__}` : `v${__APP_VERSION__}`;
 
 type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" | "calibration" | "challenged" | "publish" | "history";
 

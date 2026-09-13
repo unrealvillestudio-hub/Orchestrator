@@ -20,6 +20,7 @@
  */
 
 import { IidError } from './iidInbound';
+import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 
 // ── Tipos ──────────────────────────────────────────────────────────────────────
 
@@ -131,13 +132,15 @@ export interface StatusResult {
 async function callApi<T>(path: string, body: Record<string, unknown>): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, {
+    res = await fetchWithTimeout('own-api', path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
   } catch (err) {
-    throw new IidError('No se pudo contactar el servidor (red).', 0, { cause: String(err) });
+    // U-8 bis — un plazo vencido NO es una caída de red, y confundirlos manda a quien
+    // depura al sitio equivocado. `mensajeDeFallo` los separa y dice qué es seguro repetir.
+    throw new IidError(mensajeDeFallo(err, true), 0, { cause: String(err) });
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

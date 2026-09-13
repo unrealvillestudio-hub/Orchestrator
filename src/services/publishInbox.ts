@@ -33,6 +33,7 @@ import {
 } from './calibrationInbox';
 
 // El error tipado es el mismo mecanismo; se reexporta para no obligar a importar de dos lados.
+import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 export { CalibrationError } from './calibrationInbox';
 export type { FlowGeneration, PieceMetrics } from './calibrationInbox';
 /**
@@ -176,9 +177,11 @@ export interface PublishQueueResult {
 async function req<T>(path: string, token: string): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
+    res = await fetchWithTimeout('own-api', path, { headers: { Authorization: `Bearer ${token}` } });
   } catch (err) {
-    throw new CalibrationError('No se pudo contactar el servidor (red).', 0, { cause: String(err) });
+    // U-8 bis — un plazo vencido NO es una caída de red, y confundirlos manda a quien
+    // depura al sitio equivocado. `mensajeDeFallo` los separa y dice qué es seguro repetir.
+    throw new CalibrationError(mensajeDeFallo(err, false), 0, { cause: String(err) });
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

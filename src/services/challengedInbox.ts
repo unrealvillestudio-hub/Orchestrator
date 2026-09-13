@@ -15,6 +15,7 @@
  */
 
 import { CalibrationError, type SearchInfo, type PieceActions } from './calibrationInbox';
+import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 
 // ── Tipos (contrato de CALIB-01 §2) ──────────────────────────────────────────
 export type ChallengeVerdict = 'judge_was_right' | 'rule_failed';
@@ -121,7 +122,7 @@ async function req<T>(
 ): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, {
+    res = await fetchWithTimeout('own-api', path, {
       method: init.method ?? 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -130,7 +131,9 @@ async function req<T>(
       ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
     });
   } catch (err) {
-    throw new CalibrationError('No se pudo contactar el servidor (red).', 0, { cause: String(err) });
+    // U-8 bis — un plazo vencido NO es una caída de red, y confundirlos manda a quien
+    // depura al sitio equivocado. `mensajeDeFallo` los separa y dice qué es seguro repetir.
+    throw new CalibrationError(mensajeDeFallo(err, (init.method ?? 'GET') !== 'GET'), 0, { cause: String(err) });
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

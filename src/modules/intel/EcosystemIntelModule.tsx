@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, Inbox, RefreshCw, Zap, Telescope, Sprout } f
 import { cn } from '../../ui/components';
 import type { IidSession } from '../../services/iidInbound';
 import IidSeedsAdmin from '../iid/IidSeedsAdmin';
+import { fetchWithTimeout } from '../../services/fetchWithTimeout';
 
 // ── Supabase (same pattern as interpret-intent.ts) ─────────────────
 const SB_URL = (import.meta as any).env.VITE_SUPABASE_URL as string;
@@ -15,7 +16,7 @@ async function fetchFindings(band: 'top' | 'watchlist' | 'discarded'): Promise<F
     watchlist: 'ecosystem_score=gte.50&ecosystem_score=lt.70&order=ecosystem_score.desc,finding_date.desc',
     discarded: 'ecosystem_score=lt.50&order=ecosystem_score.desc,finding_date.desc',
   };
-  const res = await fetch(
+  const res = await fetchWithTimeout('db',
     `${SB_URL}/rest/v1/iid_findings?${ranges[band]}&select=id,title,summary,ecosystem_score,content_score,ecosystem_status,content_eligible,finding_date,r_scores,c_scores,content_flag,source_urls,agent_id&limit=50`,
     {
       headers: {
@@ -30,7 +31,7 @@ async function fetchFindings(band: 'top' | 'watchlist' | 'discarded'): Promise<F
 }
 
 async function fetchAgents(): Promise<Agent[]> {
-  const res = await fetch(
+  const res = await fetchWithTimeout('db',
     `${SB_URL}/rest/v1/iid_agents?select=id,name,tier&order=name`,
     {
       headers: {

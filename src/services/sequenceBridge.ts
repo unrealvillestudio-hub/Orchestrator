@@ -13,6 +13,7 @@
  *     → markPieceDeployed()      → actualiza status a 'deployed'
  */
 
+import { fetchWithTimeout } from './fetchWithTimeout';
 const SB_URL = (import.meta as any).env.VITE_SUPABASE_URL as string;
 const SB_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY as string;
 
@@ -81,7 +82,7 @@ export async function initSequenceRun(
 ): Promise<string | null> {
   try {
     // Llamar a la función Postgres que rota y crea la nueva secuencia
-    const res = await fetch(
+    const res = await fetchWithTimeout('db',
       `${SB_URL}/rest/v1/rpc/rotate_sequence_current`,
       {
         method: 'POST',
@@ -115,7 +116,7 @@ export async function getPreviousMechanism(
   language: string,
 ): Promise<string | null> {
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout('db',
       `${SB_URL}/rest/v1/content_sequence_pieces?sequence_id=eq.${sequenceId}&position=eq.${position - 1}&language=eq.${language}&select=mechanism_primary&limit=1`,
       { headers: SB_HEADERS }
     );
@@ -137,7 +138,7 @@ export async function writeSequencePiece(
   meta: SequencePieceMeta,
 ): Promise<string | null> {
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout('db',
       `${SB_URL}/rest/v1/content_sequence_pieces`,
       {
         method: 'POST',
@@ -185,7 +186,7 @@ export async function deployToKlaviyo(
   try {
     // EF klaviyo-templates-v2 en Supabase
     const efUrl = `${SB_URL}/functions/v1/klaviyo-templates-v2`;
-    const res = await fetch(efUrl, {
+    const res = await fetchWithTimeout('edge', efUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -216,7 +217,7 @@ export async function deployToKlaviyo(
  */
 export async function markPieceDeployed(pieceId: string): Promise<void> {
   try {
-    await fetch(
+    await fetchWithTimeout('db',
       `${SB_URL}/rest/v1/content_sequence_pieces?id=eq.${pieceId}`,
       {
         method: 'PATCH',
@@ -238,7 +239,7 @@ export async function markPieceDeployed(pieceId: string): Promise<void> {
  */
 export async function markSequenceDeployed(sequenceId: string): Promise<void> {
   try {
-    await fetch(
+    await fetchWithTimeout('db',
       `${SB_URL}/rest/v1/content_sequences?id=eq.${sequenceId}`,
       {
         method: 'PATCH',
