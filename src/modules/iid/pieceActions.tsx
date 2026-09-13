@@ -233,8 +233,27 @@ export const PANEL_COPY: Record<PanelKey, {
 };
 
 /** Forma de cada botón. Sin marcas, sin canales: sólo la acción. */
+/**
+ * UN BOTÓN APAGADO TIENE QUE VERSE APAGADO — corrección del 2026-09-13, sobre captura.
+ *
+ * El defecto: `approve` es el único con RELLENO sólido (los otros cinco son sólo borde), así
+ * que atenuarlo con `opacity` lo dejaba siendo **el elemento más llamativo de la fila**.
+ * La pieza decía «ya está aprobada» en su tooltip y el botón seguía leyéndose como la acción
+ * principal disponible — el estado y su apariencia decían cosas opuestas.
+ *
+ * Un botón deshabilitado no se distingue por su transparencia: se distingue por NO tener la
+ * forma de una acción ofrecida. Por eso el apagado no atenúa el estilo activo, lo SUSTITUYE
+ * por uno neutro, igual para las seis acciones — qué acción era deja de importar cuando lo
+ * que hay que leer es que no se puede.
+ *
+ * Esto NO es evaluar estado en el front: la rama va sobre `available`, que es lo que el
+ * contrato declara. La pantalla sigue sin saber por qué.
+ */
+const DISABLED_STYLE =
+  'border border-dashed border-zinc-800 bg-transparent text-zinc-600 shadow-none font-normal';
+
 const BUTTON_STYLE: Record<PieceActionKey, string> = {
-  approve: 'flex-1 bg-accent text-black hover:bg-accent/90 shadow-md shadow-accent/20 font-semibold',
+  approve: 'bg-accent text-black hover:bg-accent/90 shadow-md shadow-accent/20 font-semibold',
   reject: 'border border-rose-500/30 text-rose-300/90 hover:bg-rose-500/10',
   fixable: 'border border-sky-500/30 text-sky-300/90 hover:bg-sky-500/10',
   edit_text: 'border border-emerald-500/30 text-emerald-300/90 hover:bg-emerald-500/10',
@@ -560,8 +579,12 @@ export function PieceActionsBar({
                 title={b.available ? b.hint : (b.reason ?? 'No disponible para esta pieza.')}
                 className={cn(
                   'flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                  'disabled:opacity-40 disabled:cursor-not-allowed',
-                  BUTTON_STYLE[b.key],
+                  // Apagado: estilo neutro en lugar del suyo, no su estilo atenuado.
+                  b.available ? BUTTON_STYLE[b.key] : DISABLED_STYLE,
+                  // `busy` atenúa sin cambiar la forma: la acción sigue siendo la que era,
+                  // sólo está en curso.
+                  !b.available && 'cursor-not-allowed',
+                  !!busy && b.available && 'opacity-50 cursor-wait',
                 )}
               >
                 {busy === b.key ? <Spinner size={14} /> : <>{ICON[b.key]} {b.label}</>}

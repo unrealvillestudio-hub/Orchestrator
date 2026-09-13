@@ -312,3 +312,39 @@ describe('toda acción que resuelve la pieza lo dice, y lo dice igual en las dos
     expect(PUBLISH_CODE).not.toMatch(/guardada en el corpus/);
   });
 });
+
+// ── 10 · Un botón apagado tiene que VERSE apagado — corrección del 2026-09-13 ─────
+/**
+ * EL DEFECTO, visto en una captura de producción: `approve` era el único con relleno sólido
+ * y los otros cinco eran sólo borde, así que atenuarlo con `opacity` lo dejaba siendo el
+ * elemento MÁS llamativo de la fila. El tooltip decía «ya está aprobada» y el botón seguía
+ * leyéndose como la acción principal disponible: el estado y su apariencia decían cosas
+ * opuestas, y la apariencia gana.
+ */
+describe('el apagado se distingue por su forma, no por su transparencia', () => {
+  it('un botón no disponible NO lleva su estilo de acción, lleva el neutro', () => {
+    expect(ACTIONS_CODE).toContain('b.available ? BUTTON_STYLE[b.key] : DISABLED_STYLE');
+    // El barrido se acota a la FILA DE ACCIONES, que es donde vivía el defecto: seis botones
+    // compitiendo entre sí. El botón de confirmar de un panel sí puede atenuarse — está solo
+    // y no compite con nada, así que ahí `disabled:opacity` es correcto y se deja.
+    const i = ACTIONS_CODE.indexOf('buttons.map');
+    const fila = ACTIONS_CODE.slice(i);
+    expect(fila).not.toMatch(/disabled:opacity-\d+/);
+  });
+
+  it('el estilo neutro no tiene relleno ni sombra: nada que compita con los activos', () => {
+    const i = ACTIONS_CODE.indexOf('const DISABLED_STYLE');
+    const decl = ACTIONS_CODE.slice(i, ACTIONS_CODE.indexOf(';', i));
+    expect(decl).toContain('bg-transparent');
+    expect(decl).toContain('shadow-none');
+    expect(decl).not.toMatch(/\bbg-(accent|rose|sky|emerald|violet|zinc-[1-8])/);
+  });
+
+  it('ninguna acción reclama el ancho sobrante: la principal depende de la pieza', () => {
+    // `flex-1` en `approve` empujaba el sexto botón a una segunda fila y lo declaraba
+    // principal siempre — y cuál es la principal lo dice el estado de la pieza, no la tabla.
+    const i = ACTIONS_CODE.indexOf('const BUTTON_STYLE');
+    const tabla = ACTIONS_CODE.slice(i, ACTIONS_CODE.indexOf('};', i));
+    expect(tabla).not.toContain('flex-1');
+  });
+});
