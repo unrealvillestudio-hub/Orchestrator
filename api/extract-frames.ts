@@ -33,6 +33,7 @@ import { mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import ffmpegStatic from 'ffmpeg-static';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 
 // El default export de ffmpeg-static es la RUTA del binario (string) o null.
 // Bajo el typecheck de Vercel (@vercel/node) el default import se tipa como el
@@ -112,7 +113,7 @@ function objectUrl(videoPath: string): string {
 }
 
 async function downloadVideo(videoPath: string): Promise<{ ok: boolean; status: number; buf?: Buffer; body?: string; notFound?: boolean }> {
-  const res = await fetch(objectUrl(videoPath), {
+  const res = await fetchWithTimeout('db', objectUrl(videoPath), {
     headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}` },
   });
   if (!res.ok) {
@@ -128,7 +129,7 @@ async function downloadVideo(videoPath: string): Promise<{ ok: boolean; status: 
 
 async function deleteVideo(videoPath: string): Promise<boolean> {
   try {
-    const res = await fetch(objectUrl(videoPath), {
+    const res = await fetchWithTimeout('db', objectUrl(videoPath), {
       method: 'DELETE',
       headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}` },
     });

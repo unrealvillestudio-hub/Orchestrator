@@ -26,6 +26,7 @@
  */
 
 import { SB_URL, SB_KEY } from './_calibrationShared.js';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 
 /** Tope de lectura del catálogo. Marcas, no piezas: el orden de magnitud es decenas. */
 export const BRANDS_CAP = 500;
@@ -76,7 +77,7 @@ export async function fetchBrandLanguages(): Promise<BrandLanguageCatalog> {
   const url = `${SB_URL()}/rest/v1/brands?select=id,language_primary,voicelab_language&limit=${BRANDS_CAP}`;
   let res: Response;
   try {
-    res = await fetch(url, { headers: publicHeaders() });
+    res = await fetchWithTimeout('db', url, { headers: publicHeaders() });
   } catch {
     console.warn('[brand-language] brands no disponible (red) — sin idioma sugerido');
     return null;

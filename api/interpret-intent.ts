@@ -17,8 +17,16 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';
+
+/**
+ * U-8 — código estable del contexto que no se pudo cargar. Se busca por este texto en los
+ * logs, igual que `FETCH_TIMEOUT`. Un `console.warn` con frase libre no se puede buscar:
+ * cada quien la escribe distinta y el filtro que la encontraba deja de encontrarla.
+ */
+export const CONTEXT_LOAD_FAILED = 'CONTEXT_LOAD_FAILED';
 
 // Normalize SUPABASE_URL — tolerates bare project ref, bare hostname, or
 // full URL. See trigger-job.ts for the full explanation.
@@ -118,18 +126,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
+  /**
+   * U-8 — QUÉ CONTEXTO NO SE PUDO CARGAR, DICHO EN VOZ ALTA.
+   *
+   * Los dos `catch` de abajo SIGUEN sin bloquear: esa decisión es correcta y no cambia.
+   * Lo que cambia es que dejan rastro. Sin él, el modelo recibía menos contexto del que
+   * cree tener y respondía peor sin que nadie se enterara — un fallo que no se distingue
+   * de un modelo que ese día interpretó mal.
+   *
+   * Los nombres son de EJE, no de marca: dicen QUÉ CLASE de contexto faltó.
+   */
+  const contextoFaltante: string[] = [];
+  const contextoFallo = (que: string, detalle: unknown): void => {
+    contextoFaltante.push(que);
+    const msg = detalle instanceof Error ? detalle.message : String(detalle);
+    console.warn(`[interpret-intent] ${CONTEXT_LOAD_FAILED}[${que}] brand=${body.brand_id ?? '-'}: ${msg}`);
+  };
+
   // Cargar brand IDs válidos desde Supabase
   let brandList = '';
   try {
-    const sbRes = await fetch(
+    const sbRes = await fetchWithTimeout('db',
       `${SB_URL()}/rest/v1/brands?select=id,display_name&status=eq.active`,
       { headers: { apikey: SB_KEY() } }
     );
     if (sbRes.ok) {
       const brands = await sbRes.json() as Array<{id: string; display_name: string}>;
       brandList = brands.map(b => `${b.id} (${b.display_name})`).join(', ');
+    } else {
+      // Una respuesta que llega y no sirve es tan «contexto ausente» como una que no llega.
+      contextoFallo('brand_catalog', `HTTP ${sbRes.status}`);
     }
-  } catch { /* no bloqueamos si falla */ }
+  } catch (err) {
+    // No bloquea — igual que antes. Ahora, además, se ve.
+    contextoFallo('brand_catalog', err);
+  }
 
   // Si llega brand_id, intentamos enriquecer con brand_cache_snapshots para que
   // Haiku/Sonnet genere descriptions de stages más alineados con la marca.
@@ -137,7 +168,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   let brandContextHint = '';
   if (body.brand_id) {
     try {
-      const sbCacheRes = await fetch(
+      const sbCacheRes = await fetchWithTimeout('db',
         `${SB_URL()}/rest/v1/brand_cache_snapshots?brand_id=eq.${encodeURIComponent(body.brand_id)}&select=voice,persona,tone,benefits,icp,snapshot&order=created_at.desc&limit=1`,
         { headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}` } }
       );
@@ -147,13 +178,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           const row = rows[0];
           const snap = row.snapshot ?? row;
           brandContextHint = `\n\nCONTEXTO DE MARCA (${body.brand_id}) — usar para precisar descriptions de stages:\n${JSON.stringify(snap).slice(0, 1200)}`;
+        } else {
+          // Que no haya snapshot es legítimo y NO es un fallo de lectura; se declara igual,
+          // porque para el modelo el efecto es el mismo: escribió sin ese contexto.
+          contextoFallo('brand_snapshot', 'sin snapshot para esta marca');
         }
+      } else {
+        contextoFallo('brand_snapshot', `HTTP ${sbCacheRes.status}`);
       }
-    } catch { /* fallback silencioso */ }
+    } catch (err) {
+      // Fallback silencioso, ya no: sigue sin bloquear, pero deja código y motivo.
+      contextoFallo('brand_snapshot', err);
+    }
   }
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetchWithTimeout('model', 'https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -191,7 +231,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       }
     }
 
-    res.status(200).json(parsed);
+    /**
+     * QUÉ ENRIQUECIMIENTO FALTÓ, EN LA RESPUESTA Y NO SÓLO EN EL LOG.
+     *
+     * Un aviso que sólo vive en los logs de Vercel no lo lee nadie hasta que algo ya salió
+     * mal. Acá llega a quien puede hacer algo con él. Vacío = se cargó todo, que es lo
+     * normal y por eso se declara siempre en vez de omitirse cuando está vacío: un campo
+     * ausente no se distingue de una versión vieja que no lo mandaba.
+     */
+    res.status(200).json({ ...parsed, context_missing: contextoFaltante });
 
   } catch (err) {
     console.error('[interpret-intent] error:', err);
@@ -206,6 +254,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       complianceFlags: [],
       dbVariablesKeys: [],
       confidence: 0.3,
+      context_missing: contextoFaltante,
     });
   }
 }

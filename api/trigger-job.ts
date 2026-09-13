@@ -63,6 +63,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 
 // Normalize SUPABASE_URL — same defensive parse used by ImageLab and CopyLab.
 // Tolerates the three shapes commonly pasted into Vercel env panels:
@@ -115,7 +116,7 @@ interface TriggerBody {
 
 async function insertOrchestratorJob(payload: Record<string, unknown>): Promise<string | null> {
   try {
-    const res = await fetch(`${SB_URL()}/rest/v1/lab_jobs`, {
+    const res = await fetchWithTimeout('db', `${SB_URL()}/rest/v1/lab_jobs`, {
       method: 'POST',
       headers: {
         apikey: SB_KEY(),

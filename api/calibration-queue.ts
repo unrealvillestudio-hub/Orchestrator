@@ -186,7 +186,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const cutoffs: PipelineCutoff[] = cutoffsRaw ?? [];
 
     // 1. sin fila en el corpus · 2. última versión por queue_id
-    const pending  = allPieces.filter((p) => !evaluated.has(p.id));
+    const pending  = allPieces.filter((p) => !evaluated.ids.has(p.id));
     const perPiece = latestPerQueue(pending);
 
     // Generación de cada pieza (se calcula una vez: filtra, ordena y viaja a la tarjeta).
@@ -231,8 +231,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       forecast_slot: forecastFor(p, freeSlots, brandZones),
     }));
 
-    const truncated = allPieces.length >= PIECES_CAP;
-    if (truncated) {
+    // U-8 — DOS LOTES PUEDEN CORTARSE, Y CORTARSE MIENTE DE DOS MANERAS DISTINTAS.
+    // El de piezas corta por abajo: falta una pieza que existe. El del corpus corta por
+    // arriba: reaparece una pieza YA JUZGADA, como si nadie la hubiera mirado. Las dos
+    // hacen que esta respuesta no sea completa, así que las dos encienden `truncated`.
+    const piezasTruncadas = allPieces.length >= PIECES_CAP;
+    const truncated = piezasTruncadas || evaluated.truncated;
+    if (piezasTruncadas) {
       console.warn(`[calibration-queue] content_pieces hit cap ${PIECES_CAP} — la cola puede estar truncada`);
     }
 
@@ -253,8 +258,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
        * U-7 — qué se buscó y si el lote se cortó. `truncated:true` significa que una pieza
        * que existe pudo quedarse fuera, y entonces una lista vacía NO es «no existe».
        * Un uuid completo nunca se trunca: va como filtro directo.
+       *
+       * U-8 — acá va `piezasTruncadas`, NO el `truncated` de arriba. El corte del corpus
+       * hace que SOBRE una pieza, no que falte: decir «pudo quedarse fuera» por esa causa
+       * sería una afirmación falsa sobre la búsqueda, en el único campo que existe para no
+       * mentir sobre ella.
        */
-      search: search ? { q: search.q, mode: search.mode, truncated: search.mode === 'prefix' && truncated } : null,
+      search: search ? { q: search.q, mode: search.mode, truncated: search.mode === 'prefix' && piezasTruncadas } : null,
       pieces,
       // Por qué la generación puede venir 'unknown': tabla ausente vs tabla vacía.
       cutoffs_source: cutoffsRaw === null ? 'unavailable' : (cutoffs.length ? 'seeded' : 'empty'),

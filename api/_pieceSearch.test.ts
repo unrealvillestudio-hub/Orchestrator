@@ -140,8 +140,13 @@ describe('el lote cortado se declara — la única forma en que este camino pued
   });
 
   it('un uuid completo NUNCA se marca truncado: va como filtro directo', () => {
+    // Lo que se fija es la GUARDA —que el aviso de truncamiento dependa de estar buscando
+    // por prefijo—, no el nombre de la bandera que va después. U-8 partió el truncamiento
+    // de calibración en dos (`piezasTruncadas` y el del corpus, que miente al revés), y
+    // exigir un nombre concreto habría roto la prueba por un renombrado que no cambia nada
+    // de lo que ella cuida.
     for (const [n, src] of BANDEJAS) {
-      expect(src, `${n} marca truncado un uuid completo`).toContain("search.mode === 'prefix' && truncated");
+      expect(src, `${n} marca truncado un uuid completo`).toMatch(/search\.mode === 'prefix' && \w+/);
     }
   });
 });

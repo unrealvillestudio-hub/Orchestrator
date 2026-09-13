@@ -37,6 +37,7 @@ import { buildBrandKnowledge } from './_genomePromptBuilder.js';
 // PURA y SÍNCRONA (lee .md locales, no la DB) — no necesita el lector inyectado. Ver
 // _craftModules.ts para la técnica de carga (fs.readFileSync + includeFiles en vercel.json).
 import { buildCraftModules, declaredSummary, type SkipRecord } from './_craftModules.js';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';
 const MODEL = 'claude-sonnet-5';
@@ -137,7 +138,7 @@ function writeHeaders(): Record<string, string> {
 }
 
 async function sbSelect<T>(path: string): Promise<T[]> {
-  const res = await fetch(`${SB_URL()}/rest/v1/${path}`, { headers: readHeaders() });
+  const res = await fetchWithTimeout('db', `${SB_URL()}/rest/v1/${path}`, { headers: readHeaders() });
   if (!res.ok) throw new SbError(`select ${path}`, res.status, (await res.text().catch(() => '')).slice(0, 400));
   return (await res.json()) as T[];
 }
@@ -145,7 +146,7 @@ async function sbSelect<T>(path: string): Promise<T[]> {
 // pero con Accept-Profile: public en vez de intel. NO se toca readHeaders() (lo usan las
 // lecturas de intel). El builder recibe esta función inyectada — no abre su propio cliente.
 async function sbSelectPublic<T>(path: string): Promise<T[]> {
-  const res = await fetch(`${SB_URL()}/rest/v1/${path}`, {
+  const res = await fetchWithTimeout('db', `${SB_URL()}/rest/v1/${path}`, {
     headers: {
       apikey: SB_KEY(),
       Authorization: `Bearer ${SB_KEY()}`,
@@ -156,7 +157,7 @@ async function sbSelectPublic<T>(path: string): Promise<T[]> {
   return (await res.json()) as T[];
 }
 async function sbInsert<T>(table: string, row: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${SB_URL()}/rest/v1/${table}`, {
+  const res = await fetchWithTimeout('db', `${SB_URL()}/rest/v1/${table}`, {
     method: 'POST',
     headers: writeHeaders(),
     body: JSON.stringify(row),
@@ -166,7 +167,7 @@ async function sbInsert<T>(table: string, row: Record<string, unknown>): Promise
   return (Array.isArray(data) ? data[0] : data) as T;
 }
 async function sbPatch(path: string, patch: Record<string, unknown>): Promise<void> {
-  const res = await fetch(`${SB_URL()}/rest/v1/${path}`, {
+  const res = await fetchWithTimeout('db', `${SB_URL()}/rest/v1/${path}`, {
     method: 'PATCH',
     headers: writeHeaders(),
     body: JSON.stringify(patch),
@@ -440,7 +441,7 @@ async function generateTurn(
 
   let res: Response;
   try {
-    res = await fetch('https://api.anthropic.com/v1/messages', {
+    res = await fetchWithTimeout('model', 'https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
