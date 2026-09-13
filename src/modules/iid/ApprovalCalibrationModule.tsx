@@ -1,14 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { RefreshCw, Inbox, CheckCircle2, XCircle, AlertTriangle, Archive, Wrench, ImagePlay } from 'lucide-react';
+import { RefreshCw, Inbox, CheckCircle2, XCircle, AlertTriangle, Archive, Wrench } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import type { IidSession } from '../../services/iidInbound';
 import {
-  fetchQueue, saveVerdict, discardPiece, renderArtifact, recomposeImage, CalibrationError,
-  REJECT_REASONS, buildCriterion,
+  fetchQueue, renderArtifact, CalibrationError,
   type CalibrationPiece, type QueueResult, type QueueOrder, type VerdictFilter,
-  type GenerationFilter, type Verdict,
+  type GenerationFilter,
 } from '../../services/calibrationInbox';
+// U-5 — el ÚNICO componente de acciones del sistema. Las llamadas, los paneles de texto y
+// los motivos de rechazo viven ahí, no acá: dos implementaciones divergen en el primer cambio.
+import { PieceActionsBar, type ActionOutcome } from './pieceActions';
 // Presentación compartida con la bandeja de publicación: la procedencia se cuenta igual
 // en las dos vistas o no sirve para compararlas.
 import {
@@ -204,18 +206,16 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
 }
 
 // ── Card de calibración ──────────────────────────────────────────────────────────
-type Action = 'approve' | 'reject' | 'fix' | 'discard' | 'regen';
-type Outcome = 'approved' | 'rejected' | 'fixable' | 'discarded';
 /**
- * Qué panel de texto está abierto. `fix` es el tercer veredicto; `discard` no es veredicto;
- * `regen` TAMPOCO lo es, y es la diferencia que sostiene BRIEF-N05.
+ * U-5 — LOS BOTONES YA NO VIVEN AQUÍ. Las cinco acciones de esta bandeja, sus paneles de
+ * texto y sus llamadas se fueron a `pieceActions.tsx`, que es el ÚNICO componente de
+ * acciones del sistema. Lo que esta tarjeta conserva es lo suyo: el artefacto, la lectura
+ * en voz alta, la procedencia y la previsión de fecha.
  *
- * `fixable` SELLA la pieza —`status:'rejected'` + `discarded_at`, y la bandeja lista
- * `discarded_at IS NULL`—, así que una corrección que pasara por el veredicto entregaría la
- * imagen nueva sobre una pieza que ya nadie va a publicar. Por eso `regen` corre ANTES de votar:
- * se corrige, se mira, y recién después se elige uno de los tres.
+ * Y una acción más que antes no tenía: `edit_text`. No se añadió aquí — llegó sola, porque
+ * el componente pinta lo que el contrato declara y el contrato la declara disponible.
+ * Ésa es exactamente la propiedad por la que U-4 y U-5 existen.
  */
-type Panel = 'reject' | 'fix' | 'discard' | 'regen';
 
 function CalibrationCard({ piece, token, onResolved, slotsRead }: {
   piece: CalibrationPiece; token: string; onResolved: (id: string) => void;
@@ -228,29 +228,7 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
   const [artHtml, setArtHtml] = useState<string | null>(null);
   const [artUrl, setArtUrl]   = useState<string | null>(null);
   const [artErr, setArtErr]   = useState<string | null>(null);
-
-  // Panel abierto para escribir una nota. Ninguna de las dos es obligatoria.
-  const [panel, setPanel]     = useState<null | Panel>(null);
-  const [note, setNote]       = useState('');
-  // SIGN-01 corte E — el motivo de un toque. OPCIONAL, como el criterio: obligarlo empuja a elegir
-  // cualquier clase para avanzar, y eso envenena la serie igual que un criterio de relleno.
-  const [reason, setReason]   = useState('');
-  const [busy, setBusy]       = useState<null | Action>(null);
-  /**
-   * El error de la tarjeta conserva DOS cosas. La frase redactada es la que se lee; el texto
-   * crudo del server es la mitigación de que esa frase se apoya en una heurística sobre el
-   * cuerpo del error de PostgREST. Guardar sólo `err.message` —como hacía antes— tiraba el
-   * objeto entero: el detalle viajaba hasta el navegador y no era alcanzable ni por consola,
-   * así que la mitigación existía sobre el papel y no en la pantalla.
-   */
-  const [error, setError]     = useState<null | { message: string; detail: string | null }>(null);
-  const [done, setDone]       = useState<null | Outcome>(null);
-  /**
-   * BRIEF-N05 — el resultado de la última regeneración. NO es un veredicto ni un `done`: la
-   * tarjeta sigue viva y la pieza sigue en la bandeja. Se guarda para poder decir qué pasó
-   * exactamente, porque «la imagen cambió» y «el artefacto se rehízo» son dos cosas distintas.
-   */
-  const [regen, setRegen]     = useState<null | { compuesta: boolean; refrescado: boolean; posts: number }>(null);
+  const [done, setDone]       = useState<null | ActionOutcome>(null);
 
   useEffect(() => {
     let alive = true;
@@ -260,89 +238,9 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
     return () => { alive = false; };
   }, [piece.piece_id, token]);
 
-  /** Lo que la tarjeta muestra de un error: la frase, y el crudo del server si lo hay. */
-  const cardError = (err: unknown, caida: string) => {
-    if (!(err instanceof CalibrationError)) return { message: caida, detail: null };
-    const body = err.body as { server_detail?: unknown } | null | undefined;
-    const detail = typeof body?.server_detail === 'string' ? body.server_detail : null;
-    return { message: err.message, detail };
-  };
-
   // El texto de la pieza para el lector en voz alta. Sale del MISMO `html` que ya se recibe
   // de `preview-render`, así que no hay una segunda lectura ni una segunda fuente de texto.
   const readable = useMemo(() => (artHtml ? readableFromArtifactHtml(artHtml) : null), [artHtml]);
-
-  const finish = (outcome: Outcome) => {
-    setDone(outcome);
-    setTimeout(() => onResolved(piece.piece_id), 1500);
-  };
-
-  const submitVerdict = async (verdict: Verdict) => {
-    setBusy(verdict === 'approved' ? 'approve' : verdict === 'fixable' ? 'fix' : 'reject');
-    setError(null);
-    try {
-      // Criterio OPCIONAL en los tres casos: vacío viaja como null, nunca como relleno.
-      // El motivo estructurado + la prosa. `buildCriterion` los une con un prefijo estable para que
-      // una consulta pueda agrupar por motivo sin dejar de aceptar la prosa que ya hay en el corpus.
-      //
-      // En el panel de `fixable` el textarea ES LA PROPUESTA, no el criterio. La clase de defecto la
-      // sigue aportando el chip, que viaja en `criterion` con su prefijo: son dos campos distintos
-      // porque responden dos preguntas distintas — qué falla, y qué hacer con lo que hay.
-      const esFixable = verdict === 'fixable';
-      await saveVerdict(token, {
-        piece_id: piece.piece_id,
-        verdict,
-        criterion: esFixable ? buildCriterion(reason, null) : buildCriterion(reason, note),
-        fix_proposal: esFixable ? note.trim() : null,
-      });
-      finish(verdict);
-    } catch (err) {
-      // El error del server se muestra TAL CUAL. Nunca se degrada un `fixable` a `rejected` en
-      // silencio: guardaría un rechazo donde Sam pidió otra cosa y el corpus quedaría mintiendo
-      // sin que nadie se entere. Mientras la migración del corpus no esté aplicada, un `fixable`
-      // falla acá y se ve — eso es lo correcto, no un fallo de la interfaz.
-      setError(cardError(err, 'No se pudo guardar el veredicto.'));
-      setBusy(null);
-    }
-  };
-
-  /**
-   * BRIEF-N05 — regenerar la escena con una corrección, sin votar.
-   *
-   * El textarea de este panel NO es un criterio ni una propuesta: es la directriz ya redactada
-   * para el generador. Sam la escribe en sus palabras en el chat y lo que se pega aquí es lo que
-   * Claude convierte en directriz — esa traducción es la parte que este PR no automatiza.
-   *
-   * Al volver, el artefacto se reemplaza EN LA TARJETA. Sin eso, la pieza tendría la imagen nueva
-   * en la base y la vieja en pantalla, y quien mira concluiría que la corrección no funcionó.
-   */
-  const submitRegen = async () => {
-    setBusy('regen'); setError(null); setRegen(null);
-    try {
-      const r = await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: note.trim() });
-      if (r.html) { setArtHtml(r.html); setArtErr(null); }
-      if (r.artifact_url) setArtUrl(r.artifact_url);
-      setRegen({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated });
-      // El panel se cierra y la directriz se limpia: dejarla escrita invitaría a pulsar dos veces
-      // y a pagar una segunda generación por la misma corrección.
-      setNote(''); setPanel(null);
-    } catch (err) {
-      setError(cardError(err, 'No se pudo regenerar la imagen.'));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const submitDiscard = async () => {
-    setBusy('discard'); setError(null);
-    try {
-      await discardPiece(token, { piece_id: piece.piece_id, reason: buildCriterion(reason, note) });
-      finish('discarded');
-    } catch (err) {
-      setError(cardError(err, 'No se pudo descartar la pieza.'));
-      setBusy(null);
-    }
-  };
 
   // Estado resuelto → tarjeta de confirmación.
   if (done) {
@@ -369,60 +267,6 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
 
   const rejected = piece.watcher_result === 'REJECT';
 
-  /**
-   * El copy de cada panel, en un solo sitio. El mismo textarea significa una cosa distinta en
-   * cada uno —criterio, motivo, propuesta— y esa diferencia tiene que LEERSE en pantalla, no
-   * deducirse del contexto. `fix` es el único con etiqueta visible y el único obligatorio.
-   */
-  const PANEL_COPY = {
-    reject: {
-      label: null,
-      placeholder: 'Criterio del rechazo (opcional — normalmente lo escribe Claude desde el chat)…',
-      confirm: 'Confirmar rechazo',
-      foot: 'El rechazo entra al corpus con o sin criterio. Mejor vacío que de relleno.',
-      focus: 'focus:border-rose-500/60',
-      button: 'bg-rose-500/90 hover:bg-rose-500',
-      icon: <XCircle size={14} />,
-    },
-    fix: {
-      label: 'Qué propongo para aprovecharla',
-      placeholder: 'Qué se rescata de esta pieza y cómo — con esto se corrige después en el chat…',
-      confirm: 'Confirmar fixable',
-      foot: 'Fixable SELLA la pieza igual que un rechazo: sale de la bandeja. Lo que cambia es la '
-        + 'etiqueta del corpus y la propuesta, que queda guardada. La propuesta es obligatoria.',
-      focus: 'focus:border-sky-500/60',
-      button: 'bg-sky-500/90 hover:bg-sky-500',
-      icon: <Wrench size={14} />,
-    },
-    regen: {
-      label: 'Directriz para el generador',
-      placeholder: 'La directriz ya redactada para el generador — la que Claude escribe a partir de tus palabras…',
-      confirm: 'Regenerar imagen',
-      foot: 'Esto NO es un veredicto: la pieza sigue en la bandeja y no entra al corpus. Cuesta una '
-        + 'generación de imagen, reemplaza la de ESTA pieza (no crea una nueva) y actualiza los posts '
-        + 'que sigan pendientes de publicar. La directriz es obligatoria y queda registrada.',
-      focus: 'focus:border-violet-500/60',
-      button: 'bg-violet-500/90 hover:bg-violet-500',
-      icon: <ImagePlay size={14} />,
-    },
-    discard: {
-      label: null,
-      placeholder: 'Motivo del descarte (opcional)…',
-      confirm: 'Confirmar descarte',
-      foot: 'Descartar no es rechazar: sale de la bandeja y NO entra al corpus.',
-      focus: 'focus:border-zinc-500/60',
-      button: 'bg-zinc-700 hover:bg-zinc-600',
-      icon: <Archive size={14} />,
-    },
-  } as const;
-  const copy = panel ? PANEL_COPY[panel] : null;
-  /**
-   * Los DOS textos obligatorios de la tarjeta, y lo son por el mismo motivo: en los dos casos el
-   * texto ES la operación, no su explicación. Un `fixable` sin propuesta es un rechazo con otro
-   * nombre; una regeneración sin directriz devuelve el mismo defecto cobrando una generación.
-   */
-  const faltaTexto = (panel === 'fix' || panel === 'regen') && !note.trim();
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
@@ -430,9 +274,7 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
       style={{ borderLeftWidth: 3, borderLeftColor: rejected ? '#f43f5e' : '#FFAB00' }}
     >
       <div className="p-4 space-y-4">
-        {/* Cabecera (compartida con la bandeja de publicación) + veredicto + generación.
-            FIX-CARD-06: la identidad y los conteos salen de `PieceHeader`, así las dos
-            bandejas no pueden contar distinto la misma pieza. */}
+        {/* Cabecera (compartida con la bandeja de publicación) + veredicto + generación. */}
         <div className="space-y-1.5">
           <PieceHeader piece={piece} />
           <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono text-zinc-600">
@@ -448,13 +290,9 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
           </div>
         </div>
 
-        {/* DÓNDE CAERÍA SI SE APROBARA AHORA. PREVISIÓN, no compromiso: esta pieza todavía
-            no está aprobada, así que no tiene franja. Se llama «fecha prevista» y no «fecha
-            de publicación» porque otra pieza aprobada antes puede llevarse esa franja — y
-            dos cosas distintas con el mismo nombre ya costaron dos PR correctivos. */}
+        {/* DÓNDE CAERÍA SI SE APROBARA AHORA. PREVISIÓN, no compromiso. */}
         <ForecastLine forecast={piece.forecast_slot} slotsRead={slotsRead} />
 
-        {/* Procedencia */}
         <Provenance piece={piece} />
 
         {/* Artefacto embebido */}
@@ -466,8 +304,6 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
           ) : artHtml === null ? (
             <div className="flex items-center justify-center py-16 text-zinc-700"><Spinner size={18} /></div>
           ) : (
-            // srcdoc (no src): renderiza el HTML directo. El CDN sirve text/plain, así que
-            // embeber por src mostraría el código en vez de la pieza.
             <iframe
               srcDoc={artHtml}
               title={`preview-${piece.piece_id}`}
@@ -479,162 +315,32 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
         </div>
         {artUrl && (
           <a href={artUrl} target="_blank" rel="noopener noreferrer"
-             className="block text-[10px] font-mono text-zinc-600 hover:text-zinc-400 transition-colors truncate">
+            className="block text-[10px] font-mono text-zinc-600 hover:text-zinc-400 transition-colors truncate">
             {artUrl}
           </a>
         )}
 
-        {/* Lectura en voz alta. Va debajo de la vista previa porque se lee lo mismo que se
-            ve, y su propio bloque de texto es donde ocurre la selección: dentro del
-            `<iframe sandbox="">` de arriba, `getSelection()` no alcanza. */}
+        {/* Lectura en voz alta. */}
         {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
 
-        {/* BRIEF-N05 — qué pasó exactamente en la última regeneración. La imagen puede haber
-            cambiado sin que la composición saliera bien, y el artefacto puede no haberse rehecho
-            aunque la imagen sí cambió: un «listo» genérico taparía las tres cosas. */}
-        {regen && (
-          <div className="text-[11px] font-mono leading-snug text-violet-300/80 bg-violet-500/[0.06] border border-violet-500/20 rounded-xl px-3 py-2 space-y-0.5">
-            <p>{regen.compuesta
-              ? 'Imagen regenerada y compuesta.'
-              : 'Escena regenerada, pero la composición falló: la pieza queda con la imagen limpia, sin titular ni franja.'}</p>
-            {!regen.refrescado && <p className="text-amber-300/80">La imagen cambió, pero el artefacto no se pudo rehacer: la vista de arriba puede estar mostrando la anterior.</p>}
-            {regen.posts > 0 && <p className="text-violet-300/60">{regen.posts} post pendiente de publicar actualizado con la imagen nueva.</p>}
-            <p className="text-violet-300/50">Sigue sin veredicto: la pieza no se ha movido de la bandeja.</p>
-          </div>
-        )}
-
-        {error && (
-          <div className="text-xs text-rose-400 font-mono leading-snug space-y-1">
-            <p>{error.message}</p>
-            {/* Plegado, pero ALCANZABLE. La frase de arriba la redacta el endpoint sobre una
-                heurística; esto es lo que respondió la base, sin interpretar. */}
-            {error.detail && (
-              <details className="text-[10px] text-rose-300/70">
-                <summary className="cursor-pointer hover:text-rose-300">Respuesta del servidor</summary>
-                <pre className="mt-1 whitespace-pre-wrap break-all">{error.detail}</pre>
-              </details>
-            )}
-          </div>
-        )}
-
-        {/* Acciones — tres salidas */}
-        <AnimatePresence mode="wait">
-          {panel ? (
-            <motion.div key={panel} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
-              {/* SIGN-01 corte E — MOTIVO DE UN TOQUE, lista cerrada. Hoy Sam escribe a mano y esos
-                  motivos no son agregables: para saber que el 40% de los rechazos son "falta la
-                  firma" hay que leerlos uno por uno — que es exactamente lo que pasó. Son clases de
-                  defecto, nunca marcas. */}
-              {/* Los motivos son clases de defecto de un VEREDICTO. En `regen` no hay veredicto que
-                  clasificar, y ofrecerlos ahí haría creer que la elección viaja a algún sitio. */}
-              <div className={cn('flex items-center gap-1.5 flex-wrap', panel === 'regen' && 'hidden')}>
-                {REJECT_REASONS.map((r) => (
-                  <button
-                    key={r.value}
-                    onClick={() => { setReason(reason === r.value ? '' : r.value); setError(null); }}
-                    className={cn(
-                      'text-[11px] px-2 py-1 rounded-lg border transition-colors',
-                      reason === r.value
-                        ? 'border-accent/50 bg-accent/15 text-accent'
-                        : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700',
-                    )}
-                  >
-                    {r.label}
-                  </button>
-                ))}
-              </div>
-              {copy?.label && (
-                <label className={cn('block text-[11px] font-medium',
-                  panel === 'regen' ? 'text-violet-300/90' : 'text-sky-300/90')}>{copy.label}</label>
-              )}
-              <textarea
-                value={note}
-                onChange={(e) => { setNote(e.target.value); setError(null); }}
-                rows={3}
-                autoFocus
-                placeholder={copy?.placeholder}
-                className={cn(
-                  'w-full bg-[#050508] border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-700 outline-none transition-colors resize-none',
-                  copy?.focus,
-                )}
-              />
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    if (panel === 'reject') return submitVerdict('rejected');
-                    if (panel === 'fix') return submitVerdict('fixable');
-                    if (panel === 'regen') return submitRegen();
-                    return submitDiscard();
-                  }}
-                  disabled={!!busy || faltaTexto}
-                  title={faltaTexto
-                    ? (panel === 'regen' ? 'Escribir la directriz antes de regenerar' : 'Escribir la propuesta antes de confirmar')
-                    : undefined}
-                  className={cn(
-                    'flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
-                    copy?.button,
-                  )}
-                >
-                  {busy ? <Spinner size={14} /> : <>{copy?.icon} {copy?.confirm}</>}
-                </button>
-                <button
-                  onClick={() => { setPanel(null); setError(null); }}
-                  disabled={!!busy}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-zinc-400 hover:bg-zinc-800 transition-colors"
-                >
-                  Cancelar
-                </button>
-              </div>
-              <p className={cn(
-                'text-[10px] font-mono leading-snug',
-                panel === 'fix' ? 'text-sky-300/70' : panel === 'regen' ? 'text-violet-300/70' : 'text-zinc-600',
-              )}>
-                {copy?.foot}
-              </p>
-            </motion.div>
-          ) : (
-            <motion.div key="actions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex gap-2 flex-wrap">
-              <button
-                onClick={() => submitVerdict('approved')}
-                disabled={!!busy}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold bg-accent text-black hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-accent/20 transition-all"
-              >
-                {busy === 'approve' ? <Spinner size={14} /> : <><CheckCircle2 size={14} /> Aprobar</>}
-              </button>
-              <button
-                onClick={() => { setPanel('reject'); setError(null); }}
-                disabled={!!busy}
-                className="px-4 py-2.5 rounded-lg text-sm font-medium border border-rose-500/30 text-rose-300/90 hover:bg-rose-500/10 transition-colors disabled:opacity-50"
-              >
-                <XCircle size={14} className="inline mr-1" /> Rechazar
-              </button>
-              <button
-                onClick={() => { setPanel('fix'); setError(null); }}
-                disabled={!!busy}
-                title="Hay algo que aprovechar. Sella la pieza igual que un rechazo y guarda la propuesta en el corpus."
-                className="px-4 py-2.5 rounded-lg text-sm font-medium border border-sky-500/30 text-sky-300/90 hover:bg-sky-500/10 transition-colors disabled:opacity-50"
-              >
-                <Wrench size={14} className="inline mr-1" /> Fixable
-              </button>
-              <button
-                onClick={() => { setPanel('regen'); setError(null); }}
-                disabled={!!busy}
-                title="Regenerar la escena con una corrección, sin votar. La pieza sigue en la bandeja."
-                className="px-4 py-2.5 rounded-lg text-sm font-medium border border-violet-500/30 text-violet-300/90 hover:bg-violet-500/10 transition-colors disabled:opacity-50"
-              >
-                {busy === 'regen' ? <Spinner size={14} /> : <><ImagePlay size={14} className="inline mr-1" /> Regenerar imagen</>}
-              </button>
-              <button
-                onClick={() => { setPanel('discard'); setError(null); }}
-                disabled={!!busy}
-                title="No voy a juzgar esta pieza: sale de la bandeja y no entra al corpus."
-                className="px-4 py-2.5 rounded-lg text-sm font-medium border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors disabled:opacity-50"
-              >
-                <Archive size={14} className="inline mr-1" /> Descartar
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* U-5 — LAS ACCIONES. El MISMO componente que monta la bandeja de publicación: si
+            dos pantallas pueden divergir, divergirán, y acá no pueden. Esta bandeja no
+            entrega `slot` porque lo suyo es una PREVISIÓN, no un compromiso — y una
+            previsión no se puede prometer liberar. */}
+        <PieceActionsBar
+          piece={{
+            piece_id: piece.piece_id,
+            actions: piece.actions,
+            body: piece.body,
+            title: piece.title,
+          }}
+          token={token}
+          onResolved={(id, outcome) => { setDone(outcome); setTimeout(() => onResolved(id), 1500); }}
+          onRegenerated={(r) => {
+            if (r.html) { setArtHtml(r.html); setArtErr(null); }
+            if (r.artifact_url) setArtUrl(r.artifact_url);
+          }}
+        />
       </div>
     </motion.div>
   );

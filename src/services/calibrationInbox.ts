@@ -145,7 +145,55 @@ export interface ForecastSlot {
   timezone: string | null;
 }
 
+/**
+ * U-4/U-5 — QUÉ SE PUEDE HACER CON UNA PIEZA, Y SI NO SE PUEDE, POR QUÉ NO.
+ *
+ * Es el espejo exacto del contrato del server (`api/_calibrationShared.ts → PieceActions`).
+ * Vive aquí una sola vez y las dos bandejas lo importan: dos declaraciones del mismo
+ * contrato divergen en el primer cambio, que es lo que ya costó dos PR correctivos con
+ * `bodyTextOf` y `channelTextOf`.
+ *
+ * REGLA DURA DE U-5: la pantalla NO evalúa estado para decidir una acción. Ni `status`, ni
+ * `discarded_at`, ni la presencia de una imagen. Lo dice `actions[k].available`, y cuando
+ * es `false` el motivo está en `actions[k].reason`.
+ */
+export type PieceActionKey =
+  | 'approve' | 'reject' | 'fixable' | 'discard' | 'edit_text' | 'recompose_image';
+
+export interface PieceAction {
+  available: boolean;
+  /** Por qué NO está disponible. `null` cuando sí lo está. */
+  reason: string | null;
+}
+
+export type PieceActions = Record<PieceActionKey, PieceAction>;
+
+/**
+ * U-3 — QUÉ PASÓ CON LA FRANJA DE LA PIEZA que acaba de salir de circulación.
+ *
+ * Espejo del contrato de `api/_publishSlots.ts`. `released: 0` NO es un error: una pieza
+ * puede no tener franja. `ok:false` SÍ lo es, y significa que la pieza quedó sellada y su
+ * franja NO se liberó — un hueco atascado que nadie va a reutilizar.
+ *
+ * POR QUÉ LA PANTALLA LO DICE: ese fallo está atrapado a propósito en el endpoint para no
+ * tumbar un veredicto ya aplicado, y un error atrapado sin vía de aparecer es un error
+ * invisible (`DELIVERY_AND_VERIFICATION_RULE` §4.2). La tarjeta es esa vía.
+ */
+export interface SlotRelease {
+  ok: boolean;
+  released: number;
+  slot_ids: string[];
+  error?: string;
+}
+
 export interface CalibrationPiece {
+  /** U-4 — las seis acciones y su disponibilidad, resueltas por el server. */
+  actions: PieceActions;
+  /**
+   * U-5 — el texto efectivo de la pieza (adaptado a su canal, con caída al maestro). Es lo
+   * que el panel de edición carga y modifica. `null` = la pieza no tiene texto.
+   */
+  body: string | null;
   piece_id: string;
   brand_id: string;
   voice: string | null;
@@ -352,7 +400,11 @@ export function recomposeImage(
 export function saveVerdict(
   token: string,
   input: { piece_id: string; verdict: Verdict; criterion?: string | null; fix_proposal?: string | null },
-): Promise<{ ok: true; row: VerdictRow; piece_applied: boolean; piece_status: string | null; note?: string }> {
+): Promise<{
+  ok: true; row: VerdictRow; piece_applied: boolean; piece_status: string | null; note?: string;
+  /** U-3 — qué pasó con la franja. `null` en `approved`, que no libera. */
+  slot_release?: SlotRelease | null;
+}> {
   return req('/api/calibration-verdict', token, {
     method: 'POST',
     body: {
@@ -371,7 +423,11 @@ export function saveVerdict(
 export function discardPiece(
   token: string,
   input: { piece_id: string; reason?: string | null },
-): Promise<{ ok: true; piece_id: string; discarded_at: string | null; discarded_reason: string | null }> {
+): Promise<{
+  ok: true; piece_id: string; discarded_at: string | null; discarded_reason: string | null;
+  /** U-3 — qué pasó con la franja. Descartar libera igual que rechazar. */
+  slot_release?: SlotRelease | null;
+}> {
   return req('/api/calibration-discard', token, {
     method: 'POST',
     body: { piece_id: input.piece_id, reason: input.reason ?? null },
