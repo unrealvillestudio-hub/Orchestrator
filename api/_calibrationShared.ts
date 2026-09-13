@@ -461,19 +461,72 @@ export function esc(s: unknown): string {
 }
 
 /**
- * El texto MAESTRO de la pieza: el filtrado por AIFE, o el crudo si aquél no existe.
- * Exportado y usado por el artefacto Y por la cabecera para que las dos superficies no
- * puedan divergir sobre qué texto es «la pieza».
+ * El texto MAESTRO: el filtrado por AIFE, o el crudo si aquél no existe. Es la etapa
+ * ANTERIOR a la adaptación por canal, y **ya no es «la pieza»** — ver `channelTextOf`.
+ *
+ * Se conserva porque el artefacto lo muestra AL LADO del texto que sale: Sam calibra
+ * contra lo que se publica y necesita ver qué le hizo la adaptación.
  */
-export function bodyTextOf(piece: ContentPiece): string {
+export function masterTextOf(piece: PieceTextInput): string {
   return piece.assets?.copy?.aife_filtered ?? piece.assets?.copy?.raw ?? '';
+}
+
+/** Alias histórico de `masterTextOf`. El nombre decía «body» y no es el cuerpo. */
+export const bodyTextOf = masterTextOf;
+
+/** Qué texto se mostró o se contó. Un texto sin su fuente no es comparable. */
+export type TextSource = 'channel_adapted' | 'master_copy' | 'empty';
+
+/**
+ * La forma mínima que necesitan `masterTextOf` y `channelTextOf`. Estructural a
+ * propósito: la sirven tanto `ContentPiece` (calibración) como `RawPiece` (retenidas),
+ * y así las dos bandejas no pueden divergir sobre qué texto es «la pieza».
+ */
+export interface PieceTextInput {
+  platform?: string | null;
+  assets?: {
+    copy?: { aife_filtered?: string | null; raw?: string | null };
+    social?: { adapted?: Array<{ copy?: string | null; platform?: string | null }> };
+  } | null;
+}
+
+/**
+ * EL TEXTO DE LA PIEZA: el adaptado al canal de ESA pieza. Cae al maestro cuando no hay
+ * adaptación, y SIEMPRE declara cuál devolvió.
+ *
+ * POR QUÉ ÉSTE Y NO EL MAESTRO — y no es opinión de este archivo, es el carril:
+ * `content-run-stage` juzga el adaptado desde P3 (v94, PR #99, 2026-08-26) con
+ * `pickJudgedText` (:4504) y lo reescribe dentro de lo que se publica con
+ * `syncJudgedAdapted`. **La columna que lo prueba en el dato es
+ * `assets.watcher.judged_source`**: 121 piezas con `'social_adapted'` al 2026-09-12.
+ * Mostrar el maestro dejaba a Sam calibrando un texto que el juez no leyó y que el
+ * drenaje no publica — y era la causa del `hashtags: 2` sin hashtags visibles que él
+ * reportó el 2026-09-01: la cabecera ya contaba ESTE texto y el cuerpo mostraba el otro.
+ */
+export function channelTextOf(piece: PieceTextInput): { text: string; source: TextSource } {
+  const platform = (piece.platform ?? '').trim();
+  const adapted = piece.assets?.social?.adapted;
+  if (platform && Array.isArray(adapted)) {
+    for (const a of adapted) {
+      const p = typeof a?.platform === 'string' ? a.platform.trim() : '';
+      const copy = typeof a?.copy === 'string' ? a.copy.trim() : '';
+      if (p === platform && copy) return { text: copy, source: 'channel_adapted' };
+    }
+  }
+  const master = masterTextOf(piece).trim();
+  return master ? { text: master, source: 'master_copy' } : { text: '', source: 'empty' };
 }
 
 /** Construye el artefacto tal como saldría. Regla de veracidad: literal, sin re-escribir. */
 export function buildHtml(piece: ContentPiece): string {
   const assets = piece.assets ?? {};
   const title = assets.copy?.title ?? '';
-  const bodyText = bodyTextOf(piece);
+  // EL CUERPO ES EL TEXTO QUE SALE POR EL CANAL. `master` se muestra al lado, nunca en su
+  // lugar, y `source` se declara: una bandeja que cae al maestro en silencio es el defecto
+  // que este cambio cierra, con el signo invertido.
+  const { text: bodyText, source: textSource } = channelTextOf(piece);
+  const master = masterTextOf(piece).trim();
+  const showMaster = textSource === 'channel_adapted' && master && master !== bodyText;
   const imageUrl = assets.image?.url ?? '';
   const brand = piece.brand_id ?? '';
   const platform = piece.platform ?? '';
@@ -507,6 +560,12 @@ export function buildHtml(piece: ContentPiece): string {
   .body { padding: 18px 18px 22px; }
   .title { font-size: 17px; font-weight: 700; color: #fafafa; margin: 0 0 10px; }
   .text { white-space: pre-wrap; word-break: break-word; font-size: 14px; color: #d4d4d8; }
+  .textsrc { margin-top: 10px; font-size: 11px; line-height: 1.5; }
+  .textsrc--warn { color: #fbbf24; }
+  .master { margin-top: 12px; font-size: 11px; color: #a1a1aa; }
+  .master summary { cursor: pointer; color: #71717a; }
+  .mastertext { white-space: pre-wrap; word-break: break-word; margin-top: 8px; padding: 10px;
+    border-left: 2px solid #26262b; color: #a1a1aa; font-size: 12.5px; }
   .meta { margin-top: 16px; padding-top: 12px; border-top: 1px dashed #26262b; font-size: 10px;
     font-family: ui-monospace, monospace; color: #52525b; display: flex; flex-wrap: wrap; gap: 4px 12px; }
   .meta b { color: #71717a; font-weight: 600; }
@@ -524,6 +583,14 @@ export function buildHtml(piece: ContentPiece): string {
     <div class="body">
       ${title ? `<h1 class="title">${esc(title)}</h1>` : ''}
       <div class="text">${esc(bodyText)}</div>
+      ${textSource === 'channel_adapted'
+        ? ''
+        : `<div class="textsrc textsrc--warn">${textSource === 'empty'
+            ? '\u26a0 SIN TEXTO — la pieza no trae adaptación para este canal ni texto maestro.'
+            : '\u26a0 Sin adaptación para este canal: arriba se muestra el TEXTO MAESTRO, que no es el que saldría.'}</div>`}
+      ${showMaster
+        ? `<details class="master"><summary>Ver el texto maestro (etapa anterior a la adaptación)</summary><div class="mastertext">${esc(master)}</div></details>`
+        : ''}
       <div class="meta">
         <span><b>piece_id</b> ${esc(piece.id)}</span>
         ${piece.voice ? `<span><b>voice</b> ${esc(piece.voice)}</span>` : ''}

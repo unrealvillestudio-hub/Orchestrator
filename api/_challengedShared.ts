@@ -35,7 +35,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { SB_URL, SB_KEY } from './_calibrationShared.js';
+import { SB_URL, SB_KEY, channelTextOf, type PieceTextInput, type TextSource } from './_calibrationShared.js';
 import { readingLanguageOf, type BrandLanguageCatalog } from './_brandLanguage.js';
 
 // ── Tipos del contrato (CALIB-01 §2) ─────────────────────────────────────────────
@@ -185,7 +185,12 @@ export interface RawPiece {
   platform: string | null;
   status: string | null;
   created_at: string | null;
-  assets: { copy?: { title?: string | null; raw?: string | null; aife_filtered?: string | null } } | null;
+  assets: {
+    copy?: { title?: string | null; raw?: string | null; aife_filtered?: string | null };
+    // El adaptado POR CANAL. `PIECE_SELECT` ya traia `assets` entero: el dato llegaba y
+    // nadie lo declaraba, asi que nadie lo leia.
+    social?: { adapted?: Array<{ copy?: string | null; platform?: string | null }> };
+  } | null;
   pass_type?: string | null;
   challenged_at?: string | null;
   edited_at?: string | null;
@@ -193,16 +198,34 @@ export interface RawPiece {
 }
 
 /**
- * El cuerpo EFECTIVO de la pieza: la cara que se publica. Es el mismo criterio que aplica
- * el endpoint de edición del otro lado (`aife_filtered ?? raw`); si acá se mostrara `raw` y
- * allá se escribiera la otra cara, Sam editaría un texto distinto del que ve.
+ * El cuerpo EFECTIVO de la pieza: la cara que se publica, que es **el texto adaptado al
+ * canal** — el mismo que juzga `content-run-stage` desde P3 (v94, PR #99, 2026-08-26,
+ * `pickJudgedText`:4504) y el mismo que el drenaje manda. La columna que lo prueba en el
+ * dato es `assets.watcher.judged_source`.
+ *
+ * Cae al maestro (`aife_filtered ?? raw`) cuando no hay adaptación para el canal, y ese
+ * desenlace se puede consultar con `pieceBodySource`: una bandeja que cae en silencio
+ * enseña un texto que no sale, que es el defecto que este cambio cierra.
+ *
+ * Sale de `channelTextOf`, la MISMA función que usa la bandeja de calibración: dos
+ * bandejas que resuelvan «cuál es el texto» por su cuenta vuelven a divergir.
  */
 export function pieceBody(p: RawPiece | null | undefined): string | null {
   const c = p?.assets?.copy;
   if (!c) return null;
+  const { text, source } = channelTextOf(p as PieceTextInput);
+  if (source === 'channel_adapted') return text;
+  // Sin adaptación: se conserva el criterio anterior AL PIE DE LA LETRA, incluido que un
+  // `aife_filtered` vacío gana al `raw` — es un texto filtrado a cero, no una ausencia.
   if (typeof c.aife_filtered === 'string') return c.aife_filtered;
   if (typeof c.raw === 'string') return c.raw;
   return null;
+}
+
+/** De dónde salió lo que devuelve `pieceBody`. Un texto sin su fuente no es comparable. */
+export function pieceBodySource(p: RawPiece | null | undefined): TextSource | null {
+  if (!p?.assets?.copy) return null;
+  return channelTextOf(p as PieceTextInput).source;
 }
 
 export function pieceTitle(p: RawPiece | null | undefined): string | null {

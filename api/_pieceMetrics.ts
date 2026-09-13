@@ -31,12 +31,18 @@
  * Cero identificadores de marca, de canal o de voz en este archivo: todo es dato.
  */
 
-import { SB_URL, SB_KEY, bodyTextOf, type ContentPiece } from './_calibrationShared.js';
+import {
+  SB_URL, SB_KEY, channelTextOf, type TextSource, type ContentPiece,
+} from './_calibrationShared.js';
+
+// `channelTextOf` y `TextSource` VIVEN AHORA EN `_calibrationShared.ts`, junto a
+// `masterTextOf`: desde que el artefacto muestra el texto del canal, la cabecera y el
+// cuerpo tienen que salir de la MISMA funcion o vuelven a divergir — que es justo el
+// defecto que se acaba de cerrar. Se re-exportan para no romper a quien ya los importaba.
+export { channelTextOf, type TextSource };
 
 // ── Contrato hacia la tarjeta ────────────────────────────────────────────────────
 
-/** Qué texto se contó. Viaja a la UI: un número sin su fuente no se puede comparar. */
-export type TextSource = 'channel_adapted' | 'master_copy' | 'empty';
 
 /**
  * Estado de un conteo contra su tope.
@@ -250,23 +256,6 @@ export function countHashtags(text: string): number {
   return n;
 }
 
-/**
- * El texto que sale por el canal de la pieza. Prefiere la adaptación de ESE canal;
- * cae al maestro cuando no hay, y siempre declara cuál contó.
- */
-export function channelTextOf(piece: ContentPiece): { text: string; source: TextSource } {
-  const platform = (piece.platform ?? '').trim();
-  const adapted = piece.assets?.social?.adapted;
-  if (platform && Array.isArray(adapted)) {
-    for (const a of adapted) {
-      const p = typeof a?.platform === 'string' ? a.platform.trim() : '';
-      const copy = typeof a?.copy === 'string' ? a.copy.trim() : '';
-      if (p === platform && copy) return { text: copy, source: 'channel_adapted' };
-    }
-  }
-  const master = bodyTextOf(piece).trim();
-  return master ? { text: master, source: 'master_copy' } : { text: '', source: 'empty' };
-}
 
 // ── Evaluación contra los topes ──────────────────────────────────────────────────
 
