@@ -5,12 +5,17 @@
  *   GET  /api/publish-queue     → piezas candidatas a salir, con canal y estado del canal
  *   POST /api/preview-render    → artefacto de una pieza (reutilizado de calibración)
  *
- * U-5 — ESTA BANDEJA YA ACTÚA. Hasta este corte no aprobaba «por diseño», y el endpoint
- * devolvía `approval.available:false` con el motivo. Dejó de ser cierto: lo que se puede
- * hacer con una pieza depende de SU ESTADO, no de la bandeja donde se la mire, y viaja por
- * pieza en `actions` desde U-4. Las acciones se ejecutan con las funciones de
- * `calibrationInbox.ts` — se reutilizan, no se duplican: dos clientes del mismo endpoint
- * divergen en el primer cambio.
+ * U-5 — ESTA BANDEJA YA ACTÚA. Hasta ese corte no aprobaba «por diseño», y el endpoint lo
+ * declaraba con un campo de nivel superior. Dejó de ser cierto: lo que se puede hacer con
+ * una pieza depende de SU ESTADO, no de la bandeja donde se la mire, y viaja POR PIEZA en
+ * `actions` desde U-4. Las acciones se ejecutan con las funciones de `calibrationInbox.ts`
+ * — se reutilizan, no se duplican: dos clientes del mismo endpoint divergen en el primer
+ * cambio.
+ *
+ * U-6 — y ese campo de bandeja ya no está en el tipo. Nació en SIGN-01 corte E, quedó
+ * `deprecated` en U-4, perdió su último lector en U-5 y se retiró en U-6. La razón por la
+ * que no vuelve: un booleano de PANTALLA sobre lo que se puede hacer con una PIEZA es la
+ * misma decisión en el sitio equivocado, con otro nombre.
  *
  * PR-C — cada pieza trae además su FRANJA RESERVADA (`slot`): cuándo sale, en la hora de su
  * marca. Es un compromiso, no una previsión; la previsión vive en `calibrationInbox.ts` y
@@ -157,13 +162,6 @@ export interface PublishQueueResult {
   /** U-7 — qué se buscó. `null` = no se buscó nada, que no es «no se encontró nada». */
   search: SearchInfo | null;
   pieces: PublishablePiece[];
-  /**
-   * ⛔ OBSOLETO desde U-5, y por eso `deprecated`. Declaraba si la bandeja entera podía
-   * aprobar; la respuesta vive ahora POR PIEZA en `pieces[].actions`, con su motivo.
-   * **Ninguna pantalla lo lee ya.** Se conserva sin lector para no romper un consumidor
-   * viejo, y se borra en U-6.
-   */
-  approval: { available: boolean; reason: string; deprecated?: boolean };
   cutoffs_source: 'unavailable' | 'empty' | 'seeded';
   /**
    * PR-C — si las franjas se pudieron leer. `unavailable` NO significa que las piezas no

@@ -250,37 +250,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // aviso «Aprobada sin franja asignada» se dispararía en todas las tarjetas aprobadas
       // a la vez. Mismo mecanismo que `cutoffs_source`: la ausencia se declara.
       slots_source: slots === null ? 'unavailable' : 'ok',
-      // El estado de la acción viaja en el contrato, no en una constante de la UI: si algún
-      // día esta bandeja aprueba, se habilita acá y la interfaz lo refleja sin tocar el front.
-      // SIGN-01 corte E — el motivo estaba OBSOLETO: decía que el eje de colocación no existía, y
-      // existe desde PLACE-01 (content-scheduler modo `placement`, cron 66, franjas calculadas contra
-      // cadencia real). Un aviso que describe un sistema que ya cambió es peor que ninguno: enseña a
-      // desconfiar de los avisos.
+      // ── EL CAMPO `approval` SE RETIRÓ ACÁ · U-6, 2026-09-13 ──────────────────────
+      // NACIÓ en SIGN-01 corte E como un booleano DE BANDEJA: decía si esta pantalla entera
+      // podía aprobar. U-4 lo marcó `deprecated:true` al mover la respuesta al nivel de la
+      // PIEZA (`pieces[].actions`, una entrada por acción con su motivo), U-5 le quitó el
+      // último lector, y U-6 lo borra porque ya no lo lee nadie [barrido sobre `src/`].
       //
-      // U-4 — ESTE BLOQUE DEJÓ DE SER LA RESPUESTA, Y NO SE BORRA: SE REDIRIGE.
-      // El motivo viejo decía que esta bandeja no aprueba POR DISEÑO, y eso dejó de ser
-      // cierto por decisión de Sam del 2026-09-13: lo que se puede hacer con una pieza
-      // depende de SU ESTADO, no de la bandeja donde se la mire. Eso viaja ahora en
-      // `pieces[].actions`, una entrada por acción y con su motivo cuando no está disponible.
+      // Lo que queda escrito, que es lo que se pierde al borrar sin nota: la disponibilidad
+      // NUNCA fue una propiedad de la bandeja. Lo que se puede hacer con una pieza depende
+      // de SU ESTADO, no de la pantalla donde se la mire — y un campo de nivel superior que
+      // afirme lo contrario vuelve a meter la decisión en el front por la puerta de atrás.
       //
-      // U-5 — Y ÉSTE ES EL CORTE. El aviso ámbar que este campo encendía se retira con él:
-      // la bandeja aprueba desde ahora, así que decir que no puede sería el tercer texto
-      // caduco en dos días. El campo queda por compatibilidad y sin lector; su borrado es
-      // de U-6, cuando ninguna pantalla lo mire.
-      //
-      // La nota de SIGN-01 corte E que vivía acá queda cumplida por segunda vez: advertía que
-      // un motivo obsoleto enseña a desconfiar de los avisos, y era este motivo el que había
-      // quedado obsoleto. Se reescribe para que diga lo que hoy es cierto — que el botón
-      // todavía no existe — en vez de lo que se creía en su momento.
-      //
-      // `deprecated: true` es la señal de que este campo de nivel superior se retira en
-      // cuanto ningún consumidor lo lea: la respuesta ya vive por pieza, en `actions`.
-      approval: {
-        available: true,
-        deprecated: true,
-        reason: 'Obsoleto desde U-5: la disponibilidad se declara por pieza en `pieces[].actions`, '
-          + 'con su motivo. Este campo se retira cuando ningún consumidor lo lea.',
-      },
+      // Y la lección de método: un campo `deprecated` que nadie retira deja de ser una señal
+      // y pasa a ser decoración. Éste duró dos cortes, que es lo que tenía que durar.
       cutoffs_source: cutoffsRaw === null ? 'unavailable' : (cutoffs.length ? 'seeded' : 'empty'),
       ...(truncated ? { truncated: true } : {}),
     });
