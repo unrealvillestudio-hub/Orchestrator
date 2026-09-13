@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  actionButtons, slotWarning, slotReleaseNotice, ACTION_SPECS, PANEL_COPY,
+  actionButtons, slotWarning, slotReleaseNotice, ACTION_SPECS, PANEL_COPY, OUTCOME_COPY,
 } from './pieceActions';
 import type { PieceActions, PieceActionKey } from '../../services/calibrationInbox';
 
@@ -262,5 +262,53 @@ describe('una sola implementación de las acciones', () => {
     // Antes de U-5 tenía 641 líneas con los botones dentro. Si vuelve a crecer hasta ahí,
     // es que alguien añadió una segunda implementación en vez de usar la compartida.
     expect(CALIB_SRC.split('\n').length).toBeLessThan(500);
+  });
+});
+
+// ── 9 · El acuse — corrección del 2026-09-13 ─────────────────────────────────────
+/**
+ * EL DEFECTO QUE ESTE BLOQUE CIERRA, medido en producción el 2026-09-13: aprobar desde
+ * Publicación no decía nada. `approve` llamaba a `onResolved` directo, así que calibración
+ * mostraba su tarjeta de confirmación y publicación quitaba la pieza EN SECO.
+ *
+ * Un acuse ausente no se distingue de una acción que no ocurrió — que es exactamente lo que
+ * Sam reportó: «al hacer clic aprueba, no dice nada más». Y era la misma divergencia entre
+ * pantallas que este corte vino a cerrar, dejada abierta dentro del propio corte.
+ */
+describe('toda acción que resuelve la pieza lo dice, y lo dice igual en las dos bandejas', () => {
+  it('los cuatro desenlaces tienen acuse, y ninguno vacío', () => {
+    for (const k of ['approved', 'rejected', 'fixable', 'discarded'] as const) {
+      expect(OUTCOME_COPY[k].text.trim().length).toBeGreaterThan(20);
+    }
+  });
+
+  it('aprobar acusa que HABILITA, y que no publica', () => {
+    // La confusión que este corte no puede reintroducir: habilitar no es publicar. La franja
+    // la calcula content-scheduler, no el clic.
+    expect(OUTCOME_COPY.approved.text).toMatch(/habilitada/i);
+    expect(OUTCOME_COPY.approved.text).toMatch(/content-scheduler/);
+  });
+
+  it('descartar acusa que NO entra al corpus — un descarte no es un rechazo', () => {
+    expect(OUTCOME_COPY.discarded.text).toMatch(/no entra al corpus/i);
+    expect(OUTCOME_COPY.rejected.text).toMatch(/corpus/i);
+  });
+
+  it('fixable acusa que SELLA igual que un rechazo', () => {
+    expect(OUTCOME_COPY.fixable.text).toMatch(/sella/i);
+  });
+
+  it('`approve` pasa por el mismo acuse que los demás: ningún camino corto', () => {
+    // El defecto era exactamente este atajo. Si `approve` vuelve a llamar a `onResolved`
+    // directo, la prueba falla.
+    expect(ACTIONS_CODE).not.toMatch(/verdict === 'approved'.{0,80}onResolved\(/s);
+    expect(ACTIONS_CODE).toContain("finish(verdict === 'approved'");
+  });
+
+  it('ninguna bandeja pinta su propio acuse: uno solo, en el sitio de la acción', () => {
+    // Si una bandeja vuelve a tener el suyo, las dos pueden decir cosas distintas de la
+    // misma acción — que es el defecto de origen, un piso más arriba.
+    expect(CALIB_CODE).not.toMatch(/guardada en el corpus/);
+    expect(PUBLISH_CODE).not.toMatch(/guardada en el corpus/);
   });
 });

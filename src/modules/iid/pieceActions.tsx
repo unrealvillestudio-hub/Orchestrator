@@ -169,6 +169,23 @@ export function slotReleaseNotice(
   };
 }
 
+/**
+ * QUÉ SE LE DICE A SAM CUANDO UNA ACCIÓN RESUELVE LA PIEZA.
+ *
+ * Un acuse ausente no se distingue de una acción que no ocurrió. La tarjeta va a
+ * desaparecer de la lista en cuanto la bandeja la retire, así que la única ventana para
+ * decir qué pasó es ésta — y tiene que existir en las DOS bandejas por igual.
+ *
+ * Cada línea dice el efecto REAL, no el clic: aprobar habilita pero no publica, y fixable
+ * sella igual que un rechazo. Nombrarlo mal acá enseñaría el sistema al revés.
+ */
+export const OUTCOME_COPY: Record<ActionOutcome, { tone: 'ok' | 'sealed'; text: string }> = {
+  approved: { tone: 'ok', text: 'Aprobada y guardada en el corpus. Habilitada para salir: la franja la calcula content-scheduler, no este clic.' },
+  rejected: { tone: 'sealed', text: 'Rechazada y guardada en el corpus. La pieza queda sellada y sale de la bandeja.' },
+  fixable: { tone: 'sealed', text: 'Marcada como fixable. Sella la pieza igual que un rechazo; la propuesta queda en el corpus.' },
+  discarded: { tone: 'sealed', text: 'Descartada. Sale de la bandeja y NO entra al corpus: un descarte no es un rechazo.' },
+};
+
 /** El copy de cada panel. Un solo sitio, porque el mismo textarea significa cosas distintas. */
 export const PANEL_COPY: Record<PanelKey, {
   label: string | null; placeholder: string; confirm: string; foot: string;
@@ -261,6 +278,7 @@ export function PieceActionsBar({
   const [busy, setBusy] = useState<PieceActionKey | null>(null);
   const [error, setError] = useState<null | { message: string; detail: string | null }>(null);
   const [slotNote, setSlotNote] = useState<null | { tone: 'ok' | 'alert'; text: string }>(null);
+  const [doneNote, setDoneNote] = useState<null | { tone: 'ok' | 'sealed'; text: string }>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [regenNote, setRegenNote] = useState<null | { compuesta: boolean; refrescado: boolean; posts: number }>(null);
 
@@ -278,12 +296,26 @@ export function PieceActionsBar({
   };
 
   /** Tras una acción que sella: se dice qué pasó con la franja y se saca la pieza. */
-  const sealed = (outcome: ActionOutcome, release: SlotRelease | null | undefined) => {
-    const notice = slotReleaseNotice(release);
-    setSlotNote(notice);
+  /**
+   * EL ACUSE LO DA EL COMPONENTE, NO CADA BANDEJA. Toda acción que resuelve una pieza dice
+   * qué pasó ANTES de que la tarjeta desaparezca, y lo dice igual en las dos pantallas.
+   *
+   * POR QUÉ ESTÁ ACÁ Y NO EN CADA BANDEJA, medido el 2026-09-13: en la primera versión de
+   * U-5, `approve` llamaba a `onResolved` directo. Calibración mostraba su tarjeta de
+   * confirmación y Publicación quitaba la pieza EN SECO — aprobar desde ahí no decía nada,
+   * y un acuse ausente no se distingue de una acción que no ocurrió. Es la misma divergencia
+   * entre pantallas que este corte vino a cerrar, dejada abierta en el propio corte.
+   *
+   * El acuse vive donde vive la acción. Una bandeja puede añadir lo suyo después —
+   * calibración conserva su tarjeta final— pero ninguna puede quedarse muda.
+   */
+  const finish = (outcome: ActionOutcome, release: SlotRelease | null | undefined) => {
+    const slot = slotReleaseNotice(release);
+    setSlotNote(slot);
+    setDoneNote(OUTCOME_COPY[outcome]);
     // Un fallo de liberación se queda en pantalla más tiempo: es lo único que Sam tiene
     // que leer antes de que la tarjeta desaparezca.
-    setTimeout(() => onResolved(piece.piece_id, outcome), notice?.tone === 'alert' ? 6000 : 1600);
+    setTimeout(() => onResolved(piece.piece_id, outcome), slot?.tone === 'alert' ? 6000 : 1800);
   };
 
   const submitVerdict = async (verdict: Verdict, key: PieceActionKey) => {
@@ -296,8 +328,10 @@ export function PieceActionsBar({
         criterion: esFixable ? buildCriterion(reason, null) : buildCriterion(reason, note),
         fix_proposal: esFixable ? note.trim() : null,
       });
-      if (verdict === 'approved') { onResolved(piece.piece_id, 'approved'); return; }
-      sealed(verdict === 'fixable' ? 'fixable' : 'rejected', r.slot_release);
+      // `approved` pasa por el MISMO acuse que los demás. Que no libere franja no es motivo
+      // para que no diga nada: `slot_release` viene null y el acuse lo omite, pero el
+      // «Aprobada» se lee igual que el «Rechazada».
+      finish(verdict === 'approved' ? 'approved' : verdict === 'fixable' ? 'fixable' : 'rejected', r.slot_release);
     } catch (err) {
       setError(cardError(err, 'No se pudo guardar el veredicto.'));
       setBusy(null);
@@ -308,7 +342,7 @@ export function PieceActionsBar({
     setBusy('discard'); setError(null);
     try {
       const r = await discardPiece(token, { piece_id: piece.piece_id, reason: buildCriterion(reason, note) });
-      sealed('discarded', r.slot_release);
+      finish('discarded', r.slot_release);
     } catch (err) {
       setError(cardError(err, 'No se pudo descartar la pieza.'));
       setBusy(null);
@@ -362,6 +396,34 @@ export function PieceActionsBar({
     if (panel === 'edit') return submitEdit(false);
     return submitDiscard();
   };
+
+  // Resuelta: lo único que queda en la tarjeta es el acuse. Los botones se retiran para que
+  // nadie vuelva a pulsar sobre una pieza que ya se movió.
+  if (doneNote) {
+    return (
+      <div className="space-y-2">
+        <div className={cn(
+          'flex items-center gap-2 text-sm font-medium rounded-xl px-3 py-2.5 border',
+          doneNote.tone === 'ok'
+            ? 'bg-emerald-500/[0.07] border-emerald-500/30 text-emerald-300'
+            : 'bg-zinc-800/40 border-zinc-700/60 text-zinc-300',
+        )}>
+          {doneNote.tone === 'ok' ? <CheckCircle2 size={16} className="shrink-0" /> : <Archive size={16} className="shrink-0" />}
+          <span>{doneNote.text}</span>
+        </div>
+        {slotNote && (
+          <div className={cn(
+            'text-[11px] font-mono leading-snug rounded-xl px-3 py-2 border',
+            slotNote.tone === 'alert'
+              ? 'bg-amber-500/[0.08] border-amber-500/40 text-amber-200'
+              : 'bg-emerald-500/[0.06] border-emerald-500/25 text-emerald-300/80',
+          )}>
+            {slotNote.text}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">
