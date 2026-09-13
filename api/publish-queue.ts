@@ -40,7 +40,8 @@ import {
   applyCors, extractToken, requireAdmin,
   fetchLivePieces, fetchPipelineCutoffs, fetchWatcherTraces, fetchAttemptsByQueue,
   latestPerQueue, generationOf, toContext, PIECES_CAP,
-  type ContentPiece, type PipelineCutoff, type GenerationInfo,
+  parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
+  type ContentPiece, type PipelineCutoff, type GenerationInfo, type PieceSearch,
 } from './_calibrationShared.js';
 import {
   RESOLVED_STATUSES, fetchPublishChannels, channelOf, channelBlocks,
@@ -53,6 +54,18 @@ import { fetchBrandLanguages, readingLanguageOf } from './_brandLanguage.js';
 // PR-C — la franja RESERVADA de cada pieza y el huso de su marca, resueltos EN EL SERVER
 // junto al resto de la fila. Nunca una llamada extra desde el navegador por cada tarjeta.
 import { fetchBrandTimezones, fetchSlotsByPiece, slotOf } from './_publishSlots.js';
+
+/**
+ * U-7 — LOS ESTADOS PRESENTES EN UN LOTE, ordenados. Sale del dato, nunca de una lista en el
+ * código: `RESOLVED_STATUSES` dice cuáles se EXCLUYEN —los que ya salieron del circuito—, y
+ * cuáles quedan es una consecuencia del carril, no una decisión de este archivo. Si mañana
+ * el carril produce un estado nuevo, aparece en el selector solo.
+ */
+function statusesOf(pieces: ContentPiece[]): string[] {
+  const set = new Set<string>();
+  for (const p of pieces) { const v = (p.status ?? '').trim(); if (v) set.add(v); }
+  return [...set].sort();
+}
 
 const CHANNEL_STATUS_FILTERS = ['all', 'operational', 'blocked'] as const;
 type ChannelStatusFilter = (typeof CHANNEL_STATUS_FILTERS)[number];
@@ -94,6 +107,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const channelKey    = strParam(req.query.channel);
   const channelStatus = enumParam<ChannelStatusFilter>(req.query.channel_status, CHANNEL_STATUS_FILTERS, 'all');
   const generation    = enumParam<GenerationFilter>(req.query.generation, GENERATION_FILTERS, 'all');
+  // U-7 — EL ESTADO DE LA PIEZA. Va acá y no en calibración, y no es indiferente: la bandeja
+  // de calibración lista UN SOLO estado por contrato (`CALIBRATION_STATUSES`), así que darle
+  // un filtro de estado exigiría ampliar lo que esa bandeja ES — y entonces duplicaría a
+  // ésta, que ya lista cinco y desde U-5 tiene todos los botones. El filtro se pone donde
+  // hay estados que filtrar.
+  const status        = strParam(req.query.status);
+
+  // U-7 — buscar por id. Un `q` inválido es 400, no una lista vacía: «no existe» y «no supe
+  // buscar eso» no se pueden leer igual.
+  let search: PieceSearch | null;
+  try {
+    search = parsePieceSearch(req.query.q);
+  } catch (err) {
+    if (err instanceof SearchTooShort) {
+      return res.status(400).json({
+        error: 'search_too_short',
+        detail: `Para buscar por id hacen falta al menos ${SEARCH_MIN_PREFIX} caracteres. `
+          + 'Un prefijo más corto devolvería medio catálogo.',
+      });
+    }
+    if (err instanceof SearchNotAnId) {
+      return res.status(400).json({
+        error: 'search_not_an_id',
+        detail: 'La búsqueda es por id de pieza (o por su prefijo), no por texto libre.',
+      });
+    }
+    throw err;
+  }
 
   try {
     // Sin filtro de marca en la lectura: by_brand tiene que ser global y estable aunque
@@ -135,6 +176,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (generation === 'current') {
       scoped = scoped.filter((p) => genById.get(p.id)?.generation === 'current');
     }
+    // U-7 — buscar y filtrar por estado son transversales igual que los de arriba, así que
+    // van en el mismo sitio: ANTES de `by_brand`, para que las pastillas digan la verdad, y
+    // antes de paginar, porque buscar después de paginar haría que el resultado dependiera
+    // de en qué página estabas.
+    if (search) scoped = scoped.filter((p) => idMatchesSearch(p.id, search));
+    if (status) scoped = scoped.filter((p) => (p.status ?? '') === status);
 
     const by_brand: Record<string, number> = {};
     const by_channel: Record<string, number> = {};
@@ -185,6 +232,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       channel: channelKey ?? '',
       channel_status: channelStatus,
       generation,
+      status: status ?? '',
+      // U-7 — los estados PRESENTES EN EL LOTE. Sale del dato, como `by_brand`: si el carril
+      // empieza a producir un estado nuevo, aparece en el selector solo. Se calcula sobre el
+      // lote COMPLETO, no sobre el filtrado — si no, elegir un estado dejaría el selector con
+      // una sola opción y sin forma de volver.
+      statuses: statusesOf(perPiece),
+      /**
+       * U-7 — qué se buscó y si el lote se cortó. `truncated:true` significa que una pieza
+       * que existe pudo quedarse fuera, y entonces una lista vacía NO es «no existe».
+       * Un uuid completo nunca se trunca: va como filtro directo.
+       */
+      search: search ? { q: search.q, mode: search.mode, truncated: search.mode === 'prefix' && truncated } : null,
       pieces,
       // PR-C — si las franjas no se pudieron leer, la pantalla tiene que decir que las
       // fechas FALTAN, no que estén vacías: `slot: null` significaría «sin franja» y el

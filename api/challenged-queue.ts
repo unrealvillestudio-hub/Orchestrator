@@ -22,7 +22,11 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, extractToken, requireAdmin } from './_calibrationShared.js';
+import {
+  applyCors, extractToken, requireAdmin,
+  parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
+  type PieceSearch,
+} from './_calibrationShared.js';
 import { fetchBrandLanguages } from './_brandLanguage.js';
 import {
   fetchPendingChallenges, fetchPiecesByIds, fetchRuleStatements, toChallengedRow,
@@ -53,6 +57,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const brand  = strParam(req.query.brand);
   const rule   = strParam(req.query.rule);
 
+  // U-7 — buscar por id. Acá el id que se busca es el de la PIEZA retenida (`piece_id`), no
+  // el de la fila de arbitraje: lo que Sam tiene delante y copia es el de la pieza.
+  let search: PieceSearch | null;
+  try {
+    search = parsePieceSearch(req.query.q);
+  } catch (err) {
+    if (err instanceof SearchTooShort) {
+      return res.status(400).json({
+        error: 'search_too_short',
+        detail: `Para buscar por id hacen falta al menos ${SEARCH_MIN_PREFIX} caracteres. `
+          + 'Un prefijo más corto devolvería medio catálogo.',
+      });
+    }
+    if (err instanceof SearchNotAnId) {
+      return res.status(400).json({
+        error: 'search_not_an_id',
+        detail: 'La búsqueda es por id de pieza (o por su prefijo), no por texto libre.',
+      });
+    }
+    throw err;
+  }
+
   try {
     // Se lee SIN filtro de marca para que los contadores sean estables aunque haya filtro
     // puesto — mismo criterio que calibration-queue con `by_brand`.
@@ -77,6 +103,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let scoped = all;
     if (brand) scoped = scoped.filter((r) => r.brand_id === brand);
     if (rule)  scoped = scoped.filter((r) => r.rule_code === rule);
+    // U-7 — buscar antes de paginar. Una fila sin `piece_id` nunca cae en una búsqueda por
+    // id: no es que no coincida, es que no hay id contra el que comparar.
+    if (search) scoped = scoped.filter((r) => !!r.piece_id && idMatchesSearch(r.piece_id, search));
 
     const page = scoped.slice(offset, offset + limit);
 
@@ -96,6 +125,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       total: scoped.length,
       by_brand, by_rule, limit, offset, rows,
+      /**
+       * U-7 — qué se buscó y si el lote se cortó. Si `truncated`, una lista vacía NO es «no
+       * existe»: es «puede que no lo haya traído». Un uuid completo no se trunca.
+       */
+      search: search ? { q: search.q, mode: search.mode, truncated: search.mode === 'prefix' && truncated } : null,
       contract: { available: true, reason: null },
       ...(truncated ? { truncated: true } : {}),
     });

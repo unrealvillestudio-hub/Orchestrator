@@ -24,6 +24,7 @@ import {
   type FlowGeneration,
   type PieceMetrics,
   type PieceActions,
+  type SearchInfo,
 } from './calibrationInbox';
 
 // El error tipado es el mismo mecanismo; se reexporta para no obligar a importar de dos lados.
@@ -35,7 +36,7 @@ export type { FlowGeneration, PieceMetrics } from './calibrationInbox';
  * para las FUNCIONES que las ejecutan: viven en `calibrationInbox.ts` y esta bandeja las
  * importa de ahí, igual que ya hacía con `renderArtifact`.
  */
-export type { PieceActionKey, PieceAction, PieceActions, SlotRelease } from './calibrationInbox';
+export type { PieceActionKey, PieceAction, PieceActions, SlotRelease, SearchInfo } from './calibrationInbox';
 export { saveVerdict, discardPiece, recomposeImage, renderArtifact } from './calibrationInbox';
 export { savePieceEdit } from './challengedInbox';
 
@@ -149,6 +150,12 @@ export interface PublishQueueResult {
   channel: string;
   channel_status: ChannelStatusFilter;
   generation: GenerationFilter;
+  /** U-7 — el estado elegido. `''` = todos. */
+  status: string;
+  /** U-7 — los estados presentes en el lote. Del dato, nunca de una lista en el código. */
+  statuses: string[];
+  /** U-7 — qué se buscó. `null` = no se buscó nada, que no es «no se encontró nada». */
+  search: SearchInfo | null;
   pieces: PublishablePiece[];
   /**
    * ⛔ OBSOLETO desde U-5, y por eso `deprecated`. Declaraba si la bandeja entera podía
@@ -194,6 +201,10 @@ export function fetchPublishQueue(
   opts: {
     limit?: number; offset?: number; brand?: string;
     channel?: string; channelStatus?: ChannelStatusFilter; generation?: GenerationFilter;
+    /** U-7 — estado de la pieza. Esta bandeja lista varios; calibración lista uno solo. */
+    status?: string;
+    /** U-7 — id de pieza o prefijo suyo. */
+    q?: string;
   } = {},
 ): Promise<PublishQueueResult> {
   const q = new URLSearchParams();
@@ -203,6 +214,8 @@ export function fetchPublishQueue(
   if (opts.channel) q.set('channel', opts.channel);
   if (opts.channelStatus) q.set('channel_status', opts.channelStatus);
   if (opts.generation) q.set('generation', opts.generation);
+  if (opts.status) q.set('status', opts.status);
+  if (opts.q) q.set('q', opts.q);
   const qs = q.toString();
   return req<PublishQueueResult>(`/api/publish-queue${qs ? `?${qs}` : ''}`, token);
 }
