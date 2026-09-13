@@ -26,6 +26,7 @@ import {
   applyCors, extractToken, requireAdmin,
   discardPiece, PieceNotFound, AlreadyDiscarded,
 } from './_calibrationShared.js';
+import { releaseSlotsForPiece } from './_publishSlots.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res, 'POST, OPTIONS');
@@ -46,11 +47,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const piece = await discardPiece(pieceId, reason);
+
+    // U-3 — DESCARTAR TAMBIÉN LIBERA (decisión de Sam, 2026-09-13). Descartar y rechazar son
+    // veredictos distintos a efectos del corpus —uno entra y el otro no—, pero para la franja
+    // son lo mismo: la pieza no va a salir. Este camino quedaba fuera del brief original y
+    // habría dejado la mitad de la fuga abierta.
+    const slot_release = await releaseSlotsForPiece(pieceId);
+    if (!slot_release.ok) {
+      console.error(`[calibration-discard] ${pieceId}: pieza sellada, FRANJA NO LIBERADA — ${slot_release.error ?? ''}`);
+    }
+
     return res.status(200).json({
       ok: true,
       piece_id: piece.id,
       discarded_at: piece.discarded_at ?? null,
       discarded_reason: piece.discarded_reason ?? null,
+      slot_release,
     });
   } catch (err) {
     if (err instanceof PieceNotFound) return res.status(404).json({ error: 'piece_not_found', piece_id: pieceId });

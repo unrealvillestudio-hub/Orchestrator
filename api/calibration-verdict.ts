@@ -51,6 +51,7 @@ import {
   ensureArtifact, toContext, watcherRulesForCorpus, upsertVerdict, applyVerdictToPiece, PieceNotFound,
   CorpusColumnMissing, type CalibrationVerdict,
 } from './_calibrationShared.js';
+import { releaseSlotsForPiece, type SlotRelease } from './_publishSlots.js';
 
 const VERDICTS: readonly CalibrationVerdict[] = ['approved', 'rejected', 'fixable'];
 
@@ -133,17 +134,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // archiva; `content_pieces` no. Sin esto, una fila `fixable` archivada dejaría la pieza
     // indistinguible de un rechazo para siempre.
     const piece_effect = await applyVerdictToPiece(pieceId, verdict, evaluated_by, criterion || null, fix_proposal);
+
+    // U-3 — LA FRANJA SE LIBERA DESPUÉS DE SELLAR LA PIEZA, NUNCA ANTES (decisión de Sam,
+    // 2026-09-13). Un veredicto que saca la pieza de circulación deja su franja reservada a
+    // algo que no va a salir: sin esto, el hueco se pierde y el pozo se vacía solo.
+    //
+    // Se libera TAMBIÉN cuando `piece_effect` es null: ese null significa que la pieza YA
+    // tenía `discarded_at` —otra mano la selló primero—, así que está igual de fuera de
+    // circulación y su franja sobra igual. No liberar ahí sería dejar la fuga abierta en el
+    // único caso en que ya sabemos con certeza que la pieza no sale.
+    //
+    // `approved` NO libera: aprobar es lo contrario, la pieza se queda con su franja.
+    const slot_release: SlotRelease | null = verdict === 'approved'
+      ? null
+      : await releaseSlotsForPiece(pieceId);
+
+    if (slot_release && !slot_release.ok) {
+      // El veredicto YA está aplicado y no se revierte: la pieza está sellada y no publica.
+      // Lo que queda es una franja atascada, y se dice en la respuesta en vez de devolver un
+      // 200 limpio que afirmaría algo que no se hizo. La segunda vía de verificación es la
+      // consulta cruzada slots × content_pieces del brief, no esta tabla.
+      console.error(`[calibration-verdict] ${pieceId}: pieza sellada, FRANJA NO LIBERADA — ${slot_release.error ?? ''}`);
+    }
+
     if (!piece_effect) {
       // Otro operador la movió primero. El corpus ya quedó escrito —la opinión de Sam vale igual— y
       // se dice que la pieza no se tocó, en vez de fingir que sí.
       console.warn(`[calibration-verdict] ${pieceId}: corpus escrito, pieza NO movida (ya descartada por otra mano)`);
-      return res.status(200).json({ ok: true, row, piece_applied: false, piece_status: null });
+      return res.status(200).json({ ok: true, row, piece_applied: false, piece_status: null, slot_release });
     }
 
     return res.status(200).json({
       ok: true, row,
       piece_applied: true,
       piece_status: piece_effect.status ?? null,
+      slot_release,
       // Se dice explícito porque es la confusión que este corte cierra: habilitar no es publicar.
       published: false,
       note: verdict === 'approved'

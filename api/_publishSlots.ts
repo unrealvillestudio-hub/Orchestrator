@@ -29,9 +29,16 @@
  * noviembre y luego mentiría en silencio — y el `CHECK` de producción ya rechaza los
  * desfases en la base por ese mismo motivo. Una marca nueva entra sembrando su fila.
  *
- * ── ESTE MÓDULO NO ESCRIBE ───────────────────────────────────────────────────────
- * Ni en `brand_publish_slots`, ni en `content_pieces`, ni en ninguna otra tabla. Calcular
- * una previsión NO reserva nada: `forecastFor()` es una función pura sobre filas ya leídas.
+ * ── QUÉ ESCRIBE ESTE MÓDULO, Y QUÉ NO (actualizado en U-3, 2026-09-13) ───────────
+ * Hasta U-3 no escribía nada, y la cabecera lo declaraba así. Dejarla intacta con la
+ * liberación de franja dentro sería una afirmación falsa en el sitio donde primero se
+ * lee el estado del módulo, así que se corrige acá en vez de sólo junto a la función.
+ *
+ *   · ESCRIBE, y sólo esto: `releaseSlotsForPiece()` devuelve al pozo la franja de una
+ *     pieza que ya no va a salir — un único PATCH sobre `intel.brand_publish_slots`.
+ *   · NO ESCRIBE nada más: ni en `content_pieces`, ni en ninguna otra tabla, ni reserva
+ *     franjas. Calcular una previsión NO reserva nada: `forecastFor()` sigue siendo una
+ *     función pura sobre filas ya leídas.
  */
 
 import { SB_URL, SB_KEY, type ContentPiece } from './_calibrationShared.js';
@@ -302,4 +309,70 @@ export function forecastFor(
   const slot_at = row ? clean(row.slot_at) : null;
   if (!slot_at) return null;
   return { slot_at, timezone: timezoneOf(piece.brand_id, timezones) };
+}
+
+// ── ESCRITURA · liberación de franja ────────────────────────────────────────────
+/**
+ * LIBERA LA FRANJA DE UNA PIEZA QUE YA NO VA A SALIR. Es la ÚNICA escritura de este
+ * módulo: hasta U-3 sólo leía, y por eso se declara acá arriba en vez de dejarlo a que
+ * alguien lo descubra en el diff.
+ *
+ * Se llama SIEMPRE DESPUÉS de sellar la pieza, nunca antes (decisión de Sam, 2026-09-13):
+ * si esto falla, la pieza ya está fuera de circulación y lo único que queda es una franja
+ * atascada, que la consulta de verificación detecta. Al revés, un fallo dejaría viva una
+ * pieza que Sam rechazó, y el reservador le daría franja nueva.
+ *
+ * Atomicidad: la da la base. `brand_publish_slots_ocupacion_coherente` exige que
+ * `status='free'` venga con `piece_id IS NULL`, así que los tres campos viajan en un solo
+ * PATCH o la fila se rechaza entera.
+ *
+ * `released: 0` NO es un error: una pieza puede no tener franja. Se informa, no se asume.
+ * `ok: false` sí lo es: la escritura no se pudo intentar o la rechazó PostgREST.
+ */
+export interface SlotRelease {
+  ok: boolean;
+  released: number;
+  slot_ids: string[];
+  error?: string;
+}
+
+export async function releaseSlotsForPiece(pieceId: string): Promise<SlotRelease> {
+  const id = typeof pieceId === 'string' ? pieceId.trim() : '';
+  if (!id) return { ok: false, released: 0, slot_ids: [], error: 'piece_id vacío' };
+
+  const url = `${SB_URL()}/rest/v1/brand_publish_slots`
+    + `?piece_id=eq.${encodeURIComponent(id)}&status=eq.reserved&select=id`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        ...intelHeaders(),
+        'Content-Profile': 'intel',
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify({ status: 'free', piece_id: null, reserved_at: null }),
+    });
+  } catch (err) {
+    const error = `red: ${String(err)}`;
+    console.error(`[slot-release] SLOT_RELEASE_FAILED piece=${id} ${error}`);
+    return { ok: false, released: 0, slot_ids: [], error };
+  }
+
+  if (!res.ok) {
+    const error = `${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`;
+    console.error(`[slot-release] SLOT_RELEASE_FAILED piece=${id} ${error}`);
+    return { ok: false, released: 0, slot_ids: [], error };
+  }
+
+  const rows = (await res.json().catch(() => [])) as Array<{ id?: string }>;
+  const slot_ids = (Array.isArray(rows) ? rows : [])
+    .map((r) => r?.id).filter((v): v is string => typeof v === 'string' && !!v);
+
+  if (!slot_ids.length) {
+    console.warn(`[slot-release] SLOT_RELEASE_NONE piece=${id} — no tenía franja reservada`);
+  }
+  return { ok: true, released: slot_ids.length, slot_ids };
 }
