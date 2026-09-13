@@ -8,7 +8,7 @@ import {
   fetchEvaluatedHistory,
   type EvaluatedRow, type EvaluatedHistoryResult, type HistorySourceFilter,
 } from '../../services/evaluatedHistory';
-import { CountPill, Selector, Pager, CopyableId, fmtDate } from './pieceUi';
+import { CountPill, Selector, Pager, CopyableId, fmtDate, PieceSearchBox, SearchNotice } from './pieceUi';
 // Lectura en voz alta. Mismo componente y mismo adaptador que las otras tres bandejas.
 import { SpeechReader } from '../../ui/SpeechReader';
 import { readableFromArtifactHtml } from './readablePiece';
@@ -52,11 +52,17 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
   const [offset, setOffset]   = useState(0);
   const [open, setOpen]       = useState<string | null>(null);
 
+  // U-7 — buscar por id. Acá es donde MÁS falta hacía: una pieza sellada ya no está en
+  // ninguna de las otras tres bandejas, así que éste es el único sitio donde volver a
+  // encontrarla. Medido el 2026-09-13 con `5b14caa7`: sellada, en el corpus, invisible en
+  // las tres bandejas vivas.
+  const [q, setQ] = useState('');
+
   type Query = {
     offset: number; from: string; to: string;
-    brand: string; channel: string; verdict: string; source: HistorySourceFilter;
+    brand: string; channel: string; verdict: string; source: HistorySourceFilter; q: string;
   };
-  const current = (): Query => ({ offset, from, to, brand, channel, verdict, source });
+  const current = (): Query => ({ offset, from, to, brand, channel, verdict, source, q });
 
   /**
    * Los `<input type="date">` dan un día suelto, y el corpus guarda un instante. Se abre el
@@ -78,6 +84,7 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
         channel: q.channel || undefined,
         verdict: q.verdict || undefined,
         source: q.source,
+        q: q.q || undefined,
       }));
     } catch (err) {
       setError(err instanceof CalibrationError ? err.message : 'No se pudo cargar el historial.');
@@ -95,6 +102,7 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
     const q = { ...current(), offset: 0, ...patch };
     setOffset(q.offset); setFrom(q.from); setTo(q.to);
     setBrand(q.brand); setChannel(q.channel); setVerdict(q.verdict); setSource(q.source);
+    setQ(q.q);
     setOpen(null);
     load(q);
   };
@@ -110,8 +118,10 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
   const channels = useMemo(() => Object.keys(byChannel).sort(), [byChannel]);
   const verdicts = useMemo(() => Object.keys(byVerdict).sort(), [byVerdict]);
 
-  const limpiar = () => apply({ from: '', to: '', brand: '', channel: '', verdict: '', source: 'all' });
-  const hayFiltro = Boolean(from || to || brand || channel || verdict || source !== 'all');
+  const limpiar = () => apply({ from: '', to: '', brand: '', channel: '', verdict: '', source: 'all', q: '' });
+  // U-7 — la búsqueda cuenta como filtro: «Limpiar filtros» tiene que limpiarla también, o
+  // dejaría una lista acotada con todos los controles en su valor por defecto.
+  const hayFiltro = Boolean(from || to || brand || channel || verdict || source !== 'all' || q);
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-2">
@@ -174,6 +184,16 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
             Limpiar filtros
           </button>
         )}
+        {/* U-7 — el MISMO campo de las otras tres bandejas. Acá cierra el círculo: una pieza
+            sellada sale de las tres y sólo se la puede volver a encontrar aquí. */}
+        <div className="ml-auto pb-1">
+          <PieceSearchBox value={q} onSearch={(v) => apply({ q: v })} />
+        </div>
+      </div>
+
+      {/* U-7 — «no hay» y «no lo pude mirar todo» son dos ceros distintos. */}
+      <div className="mb-3">
+        <SearchNotice search={data?.search ?? null} vacia={rows.length === 0} />
       </div>
 
       {/* Facetas — las tres se descubren del dato */}

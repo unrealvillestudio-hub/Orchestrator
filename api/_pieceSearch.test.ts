@@ -110,29 +110,48 @@ const leer = (f: string) => soloCodigo(readFileSync(new URL(f, import.meta.url),
 const CALIB = leer('./calibration-queue.ts');
 const PUBLISH = leer('./publish-queue.ts');
 const CHALLENGED = leer('./challenged-queue.ts');
+const HISTORY = leer('./evaluated-history.ts');
 const SHARED = leer('./_calibrationShared.ts');
 
+/** Las CUATRO bandejas. Historial entró a petición de Sam el 2026-09-13, ver más abajo. */
+const BANDEJAS = [
+  ['calibración', CALIB], ['publicación', PUBLISH],
+  ['retenidas', CHALLENGED], ['historial', HISTORY],
+] as const;
+
+/**
+ * DÓNDE SE USA EL FILTRO, NO DÓNDE SE IMPORTA — y la distinción no es un detalle.
+ *
+ * `idMatchesSearch` aparece primero en la línea de `import`, que está al principio de todo
+ * archivo. Comparar contra ESA posición hace que cualquier aserción de orden pase siempre,
+ * mida lo que mida: una prueba verde que no verifica nada, que es peor que una roja.
+ *
+ * Se cazó el 2026-09-13 porque en `evaluated-history` la comparación falló por el motivo
+ * contrario — y al mirarla se vio que en las otras tres pasaba por el import.
+ */
+const usoDelFiltro = (src: string) => src.search(/\.filter\([\s\S]{0,80}?idMatchesSearch/);
+
 describe('el lote cortado se declara — la única forma en que este camino puede mentir', () => {
-  it('las tres bandejas devuelven `search` con su `truncated`', () => {
-    for (const [n, src] of [['calibración', CALIB], ['publicación', PUBLISH], ['retenidas', CHALLENGED]] as const) {
+  it('las cuatro bandejas devuelven `search` con su `truncated`', () => {
+    for (const [n, src] of BANDEJAS) {
       expect(src, `${n} no declara la búsqueda`).toMatch(/search:\s*search\s*\?/);
       expect(src, `${n} no declara si el lote se cortó`).toContain('truncated');
     }
   });
 
   it('un uuid completo NUNCA se marca truncado: va como filtro directo', () => {
-    for (const src of [CALIB, PUBLISH, CHALLENGED]) {
-      expect(src).toContain("search.mode === 'prefix' && truncated");
+    for (const [n, src] of BANDEJAS) {
+      expect(src, `${n} marca truncado un uuid completo`).toContain("search.mode === 'prefix' && truncated");
     }
   });
 });
 
 describe('buscar y filtrar van ANTES de paginar', () => {
-  it('en las tres bandejas, el filtro precede al slice de la página', () => {
+  it('en las cuatro bandejas, el filtro precede al slice de la página', () => {
     // Buscar después de paginar haría que el resultado dependiera de en qué página estabas,
     // que es la forma más silenciosa de que una búsqueda mienta.
-    for (const [n, src] of [['calibración', CALIB], ['publicación', PUBLISH], ['retenidas', CHALLENGED]] as const) {
-      const filtro = src.indexOf('idMatchesSearch');
+    for (const [n, src] of BANDEJAS) {
+      const filtro = usoDelFiltro(src);
       const pagina = src.indexOf('.slice(offset, offset + limit)');
       expect(filtro, `${n}: no filtra por búsqueda`).toBeGreaterThan(-1);
       expect(pagina, `${n}: no pagina`).toBeGreaterThan(-1);
@@ -143,7 +162,7 @@ describe('buscar y filtrar van ANTES de paginar', () => {
   it('en las dos bandejas de piezas, el filtro precede a los contadores', () => {
     // Si no, las pastillas de marca contarían lo que ya no se está mirando.
     for (const [n, src] of [['calibración', CALIB], ['publicación', PUBLISH]] as const) {
-      expect(src.indexOf('idMatchesSearch'), `${n}: contadores desincronizados`)
+      expect(usoDelFiltro(src), `${n}: contadores desincronizados`)
         .toBeLessThan(src.indexOf('by_brand: Record<string, number>'));
     }
   });
@@ -156,6 +175,7 @@ describe('un filtro que no se usa no cambia nada', () => {
     expect(CALIB).toMatch(/if \(platform\) scoped = scoped\.filter/);
     expect(PUBLISH).toMatch(/if \(status\) scoped = scoped\.filter/);
     expect(CHALLENGED).toMatch(/if \(search\) scoped = scoped\.filter/);
+    expect(HISTORY).toMatch(/if \(search\) filtradas = filtradas\.filter/);
   });
 });
 
@@ -178,7 +198,7 @@ describe('multimarca — cero plataformas, canales, marcas o estados escritos a 
   const PLATAFORMAS = /['"](meta_ig|meta_fb|tiktok|instagram|facebook|linkedin|blog)['"]/i;
 
   it('ninguna marca en los archivos del diff', () => {
-    for (const [n, src] of [['calibración', CALIB], ['publicación', PUBLISH], ['retenidas', CHALLENGED], ['shared', SHARED]] as const) {
+    for (const [n, src] of [...BANDEJAS, ['shared', SHARED] as const]) {
       expect(src, `${n} nombra una marca`).not.toMatch(MARCAS);
     }
   });
@@ -186,7 +206,7 @@ describe('multimarca — cero plataformas, canales, marcas o estados escritos a 
   it('ninguna plataforma ni canal enumerado: el selector sale del lote', () => {
     // Si aparece un array con 'meta_ig' o 'tiktok' dentro, el eje se habrá cerrado a los
     // valores de hoy y una marca nueva exigiría editar código.
-    for (const [n, src] of [['calibración', CALIB], ['publicación', PUBLISH], ['retenidas', CHALLENGED]] as const) {
+    for (const [n, src] of BANDEJAS) {
       expect(src, `${n} enumera plataformas`).not.toMatch(PLATAFORMAS);
     }
   });
@@ -194,5 +214,33 @@ describe('multimarca — cero plataformas, canales, marcas o estados escritos a 
   it('el resolvedor no sabe de bandejas: se llama por lo que hace', () => {
     expect(SHARED).toContain('parsePieceSearch');
     expect(SHARED).not.toMatch(/parseCalibrationSearch|parsePublishSearch|searchInInbox/);
+  });
+});
+
+// ── 9 · Historial — el círculo que cierra, a petición de Sam el 2026-09-13 ───────
+/**
+ * POR QUÉ ESTA BANDEJA ES LA IMPORTANTE, medido: `5b14caa7` está `rejected`, SELLADA y con
+ * fila en el corpus. Una pieza así ya NO está en calibración (lista sólo `awaiting_approval`
+ * sin fila en el corpus), ni en publicación (excluye `rejected`), ni en retenidas. Buscarla
+ * en las tres funcionaba y no la encontraba — porque vive aquí.
+ *
+ * Y buscar aquí NO exige leer `content_pieces`: cada fila del corpus ya trae su `piece_id`.
+ * Eso separa BUSCAR de dar ACCIONES; lo segundo sí lo exigiría y sigue fuera de alcance.
+ */
+describe('el historial también busca, y es donde más falta hacía', () => {
+  it('filtra por el `piece_id` de la fila del corpus', () => {
+    expect(HISTORY).toMatch(/idMatchesSearch\(r\.piece_id, search\)/);
+  });
+
+  it('no necesita leer content_pieces para buscar', () => {
+    // Si apareciera, buscar habría arrastrado el coste que U-4 §2.b reservó para las acciones.
+    expect(HISTORY).not.toMatch(/fetchLivePieces|fetchPiecesByIds|fetchCalibrationPieces/);
+  });
+
+  it('busca DESPUÉS de contar las facetas: una faceta que refleja el filtro es un eco', () => {
+    // `by_brand` cuenta el ÁMBITO (fecha + origen). Si contara después de buscar, mostraría
+    // una sola marca con el total de la página y dejaría de servir para navegar.
+    expect(HISTORY.indexOf('const by_brand'))
+      .toBeLessThan(usoDelFiltro(HISTORY));
   });
 });

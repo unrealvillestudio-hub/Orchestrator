@@ -12,7 +12,7 @@
  * contrato obligarían a cada consumidor a atrapar las dos.
  */
 
-import { CalibrationError } from './calibrationInbox';
+import { CalibrationError, type SearchInfo } from './calibrationInbox';
 
 export { CalibrationError } from './calibrationInbox';
 
@@ -68,6 +68,8 @@ export interface EvaluatedHistoryResult {
   limit: number;
   offset: number;
   rows: EvaluatedRow[];
+  /** U-7 — qué se buscó. `null` = no se buscó nada, que no es «no se encontró nada». */
+  search: SearchInfo | null;
   /** La lectura topó el límite del server: el historial mostrado puede no estar completo. */
   truncated?: boolean;
 }
@@ -107,6 +109,8 @@ export function fetchEvaluatedHistory(
     from?: string; to?: string;
     brand?: string; channel?: string;
     verdict?: string; source?: HistorySourceFilter;
+    /** U-7 — id de pieza o prefijo suyo. Acá es donde vive una pieza ya sellada. */
+    q?: string;
   } = {},
 ): Promise<EvaluatedHistoryResult> {
   const q = new URLSearchParams();
@@ -118,6 +122,7 @@ export function fetchEvaluatedHistory(
   if (opts.channel) q.set('channel', opts.channel);
   if (opts.verdict) q.set('verdict', opts.verdict);
   if (opts.source) q.set('source', opts.source);
+  if (opts.q) q.set('q', opts.q);
   const qs = q.toString();
   return req<EvaluatedHistoryResult>(`/api/evaluated-history${qs ? `?${qs}` : ''}`, token);
 }
