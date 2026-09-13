@@ -6,7 +6,11 @@
       "includeFiles": "node_modules/ffmpeg-static/**"
     },
     "api/calibrate.ts": {
+      "maxDuration": 60,
       "includeFiles": "api/craft-modules/**"
+    },
+    "api/interpret-intent.ts": {
+      "maxDuration": 60
     },
     "api/sign-upload.ts": {
       "maxDuration": 15

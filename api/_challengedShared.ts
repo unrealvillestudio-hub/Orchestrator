@@ -40,6 +40,7 @@ import {
   type PieceTextInput, type TextSource, type PieceActions,
 } from './_calibrationShared.js';
 import { readingLanguageOf, type BrandLanguageCatalog } from './_brandLanguage.js';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 
 // ── Tipos del contrato (CALIB-01 §2) ─────────────────────────────────────────────
 
@@ -141,7 +142,7 @@ export async function fetchPendingChallenges(brand?: string): Promise<JudgeCalib
     + `&select=${CAL_SELECT}&order=created_at.desc&limit=${CHALLENGED_CAP}`;
   let res: Response;
   try {
-    res = await fetch(url, { headers: sbHeaders('intel') });
+    res = await fetchWithTimeout('db', url, { headers: sbHeaders('intel') });
   } catch {
     return null;
   }
@@ -154,7 +155,7 @@ export async function fetchPendingChallenges(brand?: string): Promise<JudgeCalib
 /** Un arbitraje por id (para el `undo` y para responder el estado vigente). */
 export async function fetchChallenge(id: string): Promise<JudgeCalibrationRow | null> {
   const url = `${SB_URL()}/rest/v1/judge_calibration?id=eq.${encodeURIComponent(id)}&select=${CAL_SELECT}&limit=1`;
-  const res = await fetch(url, { headers: sbHeaders('intel') });
+  const res = await fetchWithTimeout('db', url, { headers: sbHeaders('intel') });
   if (!res.ok) return null;
   const rows = (await res.json().catch(() => [])) as JudgeCalibrationRow[];
   return Array.isArray(rows) && rows.length ? rows[0] : null;
@@ -174,7 +175,7 @@ export async function fetchRuleStatements(codes: string[]): Promise<Map<string, 
   const list = uniq.map((c) => `"${c}"`).join(',');
   const url = `${SB_URL()}/rest/v1/watcher_rules?code=in.(${encodeURIComponent(list)})&select=code,statement&limit=1000`;
   try {
-    const res = await fetch(url, { headers: sbHeaders('intel') });
+    const res = await fetchWithTimeout('db', url, { headers: sbHeaders('intel') });
     if (!res.ok) return new Map();
     const rows = (await res.json().catch(() => [])) as Array<{ code: string; statement: string | null }>;
     const m = new Map<string, string>();
@@ -258,7 +259,7 @@ export async function fetchPiecesByIds(ids: string[]): Promise<Map<string, RawPi
   if (!uniq.length) return new Map();
   const list = uniq.map((i) => `"${i}"`).join(',');
   const url = `${SB_URL()}/rest/v1/content_pieces?id=in.(${encodeURIComponent(list)})&select=${PIECE_SELECT}&limit=1000`;
-  const res = await fetch(url, { headers: sbHeaders('content') });
+  const res = await fetchWithTimeout('db', url, { headers: sbHeaders('content') });
   if (!res.ok) throw new Error(`content_pieces read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
   const rows = (await res.json().catch(() => [])) as RawPiece[];
   const m = new Map<string, RawPiece>();
@@ -323,7 +324,7 @@ export async function callEdgeFunction(
   const url = `${SB_URL()}/functions/v1/${name}`;
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetchWithTimeout('edge', url, {
       method: 'POST',
       headers: {
         apikey: SB_KEY(),

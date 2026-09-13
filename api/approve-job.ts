@@ -45,6 +45,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 
 // Normalize SUPABASE_URL — tolerates bare project ref, bare hostname, or
 // full URL. See trigger-job.ts for the full explanation.
@@ -126,7 +127,7 @@ async function handleLegacyGet(req: VercelRequest, res: VercelResponse) {
     // efRes, no res: `res` ya es el VercelResponse del handler. El fetch saliente
     // sí usa Web fetch — eso existe en Node 18+; lo que no existe es que Vercel
     // te pase un Request al handler.
-    const efRes = await fetch(efUrl, {
+    const efRes = await fetchWithTimeout('edge', efUrl, {
       headers: { Authorization: `Bearer ${SB_KEY()}`, 'Content-Type': 'application/json' },
     });
     result = await efRes.json();
@@ -185,15 +186,17 @@ function checkEnv(): { ok: boolean; missing: string[]; reason?: string } {
   return { ok: true, missing: [] };
 }
 
-// Timeout defensivo para fetches a Supabase — si la URL es malformada o hay
-// problema de red, evita que la function de Vercel se cuelgue hasta el 504.
-const SB_FETCH_TIMEOUT_MS = 8000;
-
-function sbFetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
-  const ctrl = new AbortController();
-  const id = setTimeout(() => ctrl.abort(), SB_FETCH_TIMEOUT_MS);
-  return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(id));
-}
+// U-8 — EL ENVOLTORIO PROPIO DE ESTE ARCHIVO SE RETIRÓ, Y NO PORQUE ESTUVIERA MAL.
+//
+// Era el ÚNICO `fetch` del repo con aborto, y es el patrón que U-8 generalizó a los
+// treinta y ocho. Al existir el común, mantener éste dejaba dos envoltorios con el mismo
+// propósito — y dos implementaciones de lo mismo divergen en el primer ajuste que toque
+// una sola, que es la lección que ya dejaron `bodyTextOf` y `channelTextOf`.
+//
+// Su plazo de 8 s NO se reestrenó: es el que `TIMEOUT_MS.db` lleva ahora, para las tres
+// llamadas de este archivo y para las otras treinta y una del repo. Lo que este archivo
+// gana es lo que no tenía: la llamada a la Edge Function, que antes iba sin red, ahora
+// va con `TIMEOUT_MS.edge` — 25 s, por debajo de los 30 s de su `maxDuration`.
 
 async function sbFetchJob(jobId: string): Promise<SbResult<Record<string, unknown>>> {
   const env = checkEnv();
@@ -203,7 +206,7 @@ async function sbFetchJob(jobId: string): Promise<SbResult<Record<string, unknow
   const url = `${SB_URL()}/rest/v1/lab_jobs?id=eq.${encodeURIComponent(jobId)}&limit=1`;
   let res: Response;
   try {
-    res = await sbFetchWithTimeout(url, {
+    res = await fetchWithTimeout('db', url, {
       headers: {
         apikey:        SB_KEY(),
         Authorization: `Bearer ${SB_KEY()}`,
@@ -236,7 +239,7 @@ async function sbPatchJob(jobId: string, body: Record<string, unknown>): Promise
   }
   let res: Response;
   try {
-    res = await sbFetchWithTimeout(`${SB_URL()}/rest/v1/lab_jobs?id=eq.${encodeURIComponent(jobId)}`, {
+    res = await fetchWithTimeout('db', `${SB_URL()}/rest/v1/lab_jobs?id=eq.${encodeURIComponent(jobId)}`, {
       method: 'PATCH',
       headers: {
         apikey:         SB_KEY(),
@@ -265,7 +268,7 @@ async function sbInsertPublishChild(payload: Record<string, unknown>): Promise<S
   }
   let res: Response;
   try {
-    res = await sbFetchWithTimeout(`${SB_URL()}/rest/v1/lab_jobs`, {
+    res = await fetchWithTimeout('db', `${SB_URL()}/rest/v1/lab_jobs`, {
       method: 'POST',
       headers: {
         apikey:         SB_KEY(),

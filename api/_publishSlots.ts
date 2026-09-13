@@ -42,6 +42,7 @@
  */
 
 import { SB_URL, SB_KEY, type ContentPiece } from './_calibrationShared.js';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 
 /** Tope de lectura de franjas. Franjas de un horizonte de semanas: el orden es de cientos. */
 export const SLOTS_CAP = 5000;
@@ -141,7 +142,7 @@ export async function fetchBrandTimezones(): Promise<BrandTimezoneCatalog> {
   const url = `${SB_URL()}/rest/v1/brands?select=id,publish_timezone&limit=${BRAND_TZ_CAP}`;
   let res: Response;
   try {
-    res = await fetch(url, { headers: publicHeaders() });
+    res = await fetchWithTimeout('db', url, { headers: publicHeaders() });
   } catch {
     console.warn('[publish-slots] brands no disponible (red) — sin huso de publicación');
     return null;
@@ -189,7 +190,7 @@ export async function fetchSlotsByPiece(pieceIds: string[]): Promise<SlotIndex> 
     + `?select=${SLOT_SELECT}&piece_id=in.(${encodeURIComponent(list)})&limit=${SLOTS_CAP}`;
   let res: Response;
   try {
-    res = await fetch(url, { headers: intelHeaders() });
+    res = await fetchWithTimeout('db', url, { headers: intelHeaders() });
   } catch {
     console.warn('[publish-slots] brand_publish_slots no disponible (red) — franjas SIN LEER');
     return null;
@@ -229,7 +230,7 @@ export async function fetchNextFreeSlots(now: Date = new Date()): Promise<SlotIn
     + `&order=slot_at.asc&limit=${SLOTS_CAP}`;
   let res: Response;
   try {
-    res = await fetch(url, { headers: intelHeaders() });
+    res = await fetchWithTimeout('db', url, { headers: intelHeaders() });
   } catch {
     console.warn('[publish-slots] franjas libres no disponibles (red) — previsión SIN LEER');
     return null;
@@ -345,7 +346,7 @@ export async function releaseSlotsForPiece(pieceId: string): Promise<SlotRelease
 
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetchWithTimeout('db', url, {
       method: 'PATCH',
       headers: {
         ...intelHeaders(),

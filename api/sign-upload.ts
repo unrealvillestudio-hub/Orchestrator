@@ -31,6 +31,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 
 const BUCKET = 'iid-expert-uploads';
 const ALLOWED_ROLES = ['seeder', 'admin'];
@@ -128,7 +129,7 @@ async function createSignedUpload(
   // Content-Type: application/json sin body, Storage responde 400
   // ("Body cannot be empty when content-type is set to 'application/json'").
   // Mismo patrón que extract-frames.ts (downloadVideo/deleteVideo): solo apikey + Bearer.
-  const res = await fetch(
+  const res = await fetchWithTimeout('db',
     `${SB_URL()}/storage/v1/object/upload/sign/${BUCKET}/${encodePath(path)}`,
     {
       method: 'POST',

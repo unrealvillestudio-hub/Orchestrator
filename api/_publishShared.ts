@@ -34,6 +34,7 @@ import {
   type ContentPiece, type PieceContext,
 } from './_calibrationShared.js';
 import type { PieceSlot } from './_publishSlots.js';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 
 // ── Qué pieza es candidata a publicarse ──────────────────────────────────────────
 /**
@@ -116,7 +117,7 @@ export const CHANNELS_CAP = 1000;
 export async function fetchPublishChannels(): Promise<Map<string, PublishChannel>> {
   const url = `${SB_URL()}/rest/v1/brand_publish_channels`
     + `?select=brand_id,platform_key,provider,active,config&limit=${CHANNELS_CAP}`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout('db', url, {
     headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': 'intel' },
   });
   if (!res.ok) {

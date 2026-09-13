@@ -34,6 +34,7 @@
 import {
   SB_URL, SB_KEY, channelTextOf, type TextSource, type ContentPiece,
 } from './_calibrationShared.js';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 
 // `channelTextOf` y `TextSource` VIVEN AHORA EN `_calibrationShared.ts`, junto a
 // `masterTextOf`: desde que el artefacto muestra el texto del canal, la cabecera y el
@@ -166,7 +167,7 @@ export async function fetchPlatformLimits(): Promise<PlatformCatalog> {
     + `?select=id,char_limit,char_target,hashtag_limit&limit=${PLATFORMS_CAP}`;
   let res: Response;
   try {
-    res = await fetch(url, { headers: publicHeaders() });
+    res = await fetchWithTimeout('db', url, { headers: publicHeaders() });
   } catch {
     return null;
   }
@@ -229,7 +230,7 @@ export async function fetchSignatureClosers(): Promise<SignatureCatalog> {
     + `?active=is.true&select=brand_id,voice_id,application_constraints&limit=${GENOMES_CAP}`;
   let res: Response;
   try {
-    res = await fetch(url, { headers: publicHeaders() });
+    res = await fetchWithTimeout('db', url, { headers: publicHeaders() });
   } catch {
     return null;
   }

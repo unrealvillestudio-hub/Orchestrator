@@ -47,6 +47,7 @@ import {
 // El lector en voz alta necesita saber en qué idioma leer. Mismo catálogo y misma resolución
 // que las otras tres bandejas: una marca nueva entra sembrando su fila, no editando código.
 import { fetchBrandLanguages, readingLanguageOf } from './_brandLanguage.js';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 
 /** Tope de lectura por tabla. El corpus crece por veredicto humano: decenas al mes. */
 export const HISTORY_CAP = 5000;
@@ -150,7 +151,7 @@ async function fetchCorpusRows(
   const url = `${SB_URL()}/rest/v1/${table}?select=${select}${rango}`
     + `&order=created_at.desc&limit=${HISTORY_CAP}`;
 
-  const res = await fetch(url, { headers: intelHeaders() });
+  const res = await fetchWithTimeout('db', url, { headers: intelHeaders() });
   if (!res.ok) {
     const detail = (await res.text().catch(() => '')).slice(0, 300);
     throw new Error(`${table} read failed: ${res.status} ${detail}`);

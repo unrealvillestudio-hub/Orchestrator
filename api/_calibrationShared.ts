@@ -32,6 +32,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { PieceMetrics } from './_pieceMetrics.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 
 export const BUCKET = 'unrlvl-media';
 // Calibración = gate admin (igual que las aprobaciones legacy).
@@ -708,7 +709,7 @@ function sbHeaders(profile: 'content' | 'intel', extra: Record<string, string> =
 /** Lee UNA pieza. null si no existe. Lanza en error de red/HTTP. */
 export async function fetchPiece(pieceId: string): Promise<ContentPiece | null> {
   const url = `${SB_URL()}/rest/v1/content_pieces?id=eq.${encodeURIComponent(pieceId)}&select=${PIECE_SELECT}&limit=1`;
-  const res = await fetch(url, { headers: sbHeaders('content') });
+  const res = await fetchWithTimeout('db', url, { headers: sbHeaders('content') });
   if (!res.ok) throw new Error(`content_pieces read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
   const rows = (await res.json().catch(() => [])) as ContentPiece[];
   return Array.isArray(rows) && rows.length ? rows[0] : null;
@@ -742,7 +743,7 @@ export async function fetchLivePieces(
     : '';
   const url = `${SB_URL()}/rest/v1/content_pieces?discarded_at=is.null${brandFilter}${statusFilter}`
     + `&select=${PIECE_SELECT}&order=created_at.desc&limit=${PIECES_CAP}`;
-  const res = await fetch(url, { headers: sbHeaders('content') });
+  const res = await fetchWithTimeout('db', url, { headers: sbHeaders('content') });
   if (!res.ok) throw new Error(`content_pieces read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
   const rows = (await res.json().catch(() => [])) as ContentPiece[];
   return Array.isArray(rows) ? rows : [];
@@ -874,13 +875,40 @@ export function latestPerQueue(pieces: ContentPiece[]): ContentPiece[] {
   return Array.from(best.values());
 }
 
-/** IDs de piezas ya evaluadas (existe fila en el corpus). Set para diff O(1). */
-export async function fetchEvaluatedIds(): Promise<Set<string>> {
-  const url = `${SB_URL()}/rest/v1/approval_calibration?select=piece_id&limit=100000`;
-  const res = await fetch(url, { headers: sbHeaders('intel') });
+/**
+ * Cap del corpus. U-8 — antes iba con un tope de cinco cifras escrito a mano, y era el
+ * ÚNICO lote del repo sin cap declarado ni aviso: los otros cuatro (`PIECES_CAP`,
+ * `CHALLENGED_CAP`, `ATTEMPTS_CAP`, `CHANNELS_CAP`) avisan cuando se llenan. No se inventa
+ * un patrón nuevo: se copia el que ya funciona.
+ *
+ * El número exacto que había NO se cita acá a propósito: hay un barrido que comprueba que
+ * ya no existe en el archivo, y citarlo lo haría fallar por su propia explicación — que es
+ * cómo se termina borrando la explicación en vez del defecto.
+ *
+ * Y acá cortar el lote miente al revés que en los otros. En una lista de piezas, un lote
+ * corto hace que falte una pieza. Acá el lote es el conjunto de las YA JUZGADAS, que sirve
+ * para EXCLUIR: si se corta, una pieza ya juzgada reaparece en calibración como si nadie
+ * la hubiera mirado, y se la vuelve a juzgar. Por eso el aviso importa más, no menos.
+ */
+export const EVALUATED_CAP = 20000;
+
+/**
+ * IDs de piezas ya evaluadas (existe fila en el corpus). Set para diff O(1).
+ *
+ * Devuelve además si el lote se cortó. El llamante lo declara: un dato que sólo el server
+ * conoce y no pasa al contrato es un dato que nadie va a mirar.
+ */
+export async function fetchEvaluatedIds(): Promise<{ ids: Set<string>; truncated: boolean }> {
+  const url = `${SB_URL()}/rest/v1/approval_calibration?select=piece_id&limit=${EVALUATED_CAP}`;
+  const res = await fetchWithTimeout('db', url, { headers: sbHeaders('intel') });
   if (!res.ok) throw new Error(`corpus read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
   const rows = (await res.json().catch(() => [])) as Array<{ piece_id: string }>;
-  return new Set((Array.isArray(rows) ? rows : []).map((r) => r.piece_id));
+  const lista = Array.isArray(rows) ? rows : [];
+  const truncated = lista.length >= EVALUATED_CAP;
+  if (truncated) {
+    console.warn(`[calibration] approval_calibration hit cap ${EVALUATED_CAP} — piezas ya juzgadas pueden reaparecer en la cola`);
+  }
+  return { ids: new Set(lista.map((r) => r.piece_id)), truncated };
 }
 
 /**
@@ -892,7 +920,7 @@ export async function fetchPipelineCutoffs(): Promise<PipelineCutoff[] | null> {
   const url = `${SB_URL()}/rest/v1/pipeline_cutoffs?select=id,label,effective_at,scope,notes&order=effective_at.desc&limit=1000`;
   let res: Response;
   try {
-    res = await fetch(url, { headers: sbHeaders('intel') });
+    res = await fetchWithTimeout('db', url, { headers: sbHeaders('intel') });
   } catch {
     return null;
   }
@@ -919,7 +947,7 @@ export async function fetchWatcherTraces(jobIds: string[]): Promise<Map<string, 
   const list = ids.map((id) => `"${id}"`).join(',');
   const url = `${SB_URL()}/rest/v1/watcher_log?job_id=in.(${encodeURIComponent(list)})`
     + `&select=job_id,result,gate_detail,created_at&order=created_at.desc&limit=${ids.length * 20}`;
-  const res = await fetch(url, { headers: sbHeaders('intel') });
+  const res = await fetchWithTimeout('db', url, { headers: sbHeaders('intel') });
   if (!res.ok) {
     console.warn(`[calibration] watcher_log read failed: ${res.status} — procedencia parcial`);
     return out;
@@ -960,7 +988,7 @@ export async function fetchAttemptsByQueue(queueIds: string[]): Promise<Map<stri
   const list = ids.map((id) => `"${id}"`).join(',');
   const url = `${SB_URL()}/rest/v1/orchestrator_jobs?queue_id=in.(${encodeURIComponent(list)})`
     + `&select=queue_id&limit=${ATTEMPTS_CAP}`;
-  const res = await fetch(url, { headers: sbHeaders('content') });
+  const res = await fetchWithTimeout('db', url, { headers: sbHeaders('content') });
   if (!res.ok) {
     console.warn(`[calibration] orchestrator_jobs count failed: ${res.status} — intentos sin dato`);
     return out;
@@ -981,7 +1009,7 @@ export async function fetchAttemptsByQueue(queueIds: string[]): Promise<Map<stri
  */
 export async function uploadArtifact(brandId: string, pieceId: string, html: string): Promise<void> {
   const path = encodePath(artifactPath(brandId, pieceId));
-  const res = await fetch(`${SB_URL()}/storage/v1/object/${BUCKET}/${path}`, {
+  const res = await fetchWithTimeout('db', `${SB_URL()}/storage/v1/object/${BUCKET}/${path}`, {
     method: 'POST',
     headers: {
       apikey: SB_KEY(),
@@ -1083,7 +1111,7 @@ export async function upsertVerdict(row: {
   watcher_rules: string[] | null; watcher_rules_evaluated: number | null;
 }): Promise<Record<string, unknown>> {
   const url = `${SB_URL()}/rest/v1/approval_calibration?on_conflict=piece_id`;
-  const post = (payload: Record<string, unknown>) => fetch(url, {
+  const post = (payload: Record<string, unknown>) => fetchWithTimeout('db', url, {
     method: 'POST',
     headers: {
       apikey: SB_KEY(),
@@ -1172,7 +1200,7 @@ export async function applyVerdictToPiece(
   fixProposal: string | null = null,
 ): Promise<ContentPiece | null> {
   const url = `${SB_URL()}/rest/v1/content_pieces?id=eq.${encodeURIComponent(pieceId)}&discarded_at=is.null`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout('db', url, {
     method: 'PATCH',
     headers: {
       apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`,
@@ -1207,7 +1235,7 @@ export async function discardPiece(pieceId: string, reason: string | null): Prom
   if (piece.discarded_at) throw new AlreadyDiscarded(pieceId, piece.discarded_at);
 
   const url = `${SB_URL()}/rest/v1/content_pieces?id=eq.${encodeURIComponent(pieceId)}&discarded_at=is.null`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout('db', url, {
     method: 'PATCH',
     headers: {
       apikey: SB_KEY(),
