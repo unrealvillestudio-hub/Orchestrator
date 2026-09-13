@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  CHALLENGE_VERDICTS, retentionReason, pieceBody, pieceTitle, toChallengedRow,
+  CHALLENGE_VERDICTS, retentionReason, pieceBody, pieceBodySource, pieceTitle, toChallengedRow,
   type JudgeCalibrationRow, type RawPiece,
 } from './_challengedShared.js';
 
@@ -71,11 +71,37 @@ describe('retentionReason', () => {
 
 // ── El cuerpo efectivo de la pieza ───────────────────────────────────────────────
 describe('pieceBody', () => {
-  it('prefiere la cara que se publica (aife_filtered)', () => {
-    // Es el MISMO criterio que aplica el endpoint de edición del otro lado. Si acá se
-    // mostrara `raw` y allá se escribiera la otra cara, Sam editaría un texto distinto del
-    // que ve — y no se enteraría hasta ver lo publicado.
+  it('EL ADAPTADO AL CANAL GANA: es el texto que el juez juzga y el drenaje publica', () => {
+    // P3 (content-run-stage v94, PR #99, 2026-08-26): el juez recibe social.adapted, no
+    // aife_filtered. Mostrar el maestro dejaba a Sam calibrando un texto que nadie publica.
+    const p = piece({
+      platform: 'surface_one',
+      assets: {
+        copy: { raw: 'cuerpo crudo', aife_filtered: 'el maestro' },
+        social: { adapted: [{ platform: 'otro_canal', copy: 'no' }, { platform: 'surface_one', copy: 'el que sale' }] },
+      },
+    });
+    expect(pieceBody(p)).toBe('el que sale');
+    expect(pieceBodySource(p)).toBe('channel_adapted');
+  });
+
+  it('sin adaptación PARA ESE canal cae al maestro, y lo DECLARA', () => {
+    // El desenlace se puede consultar: una bandeja que cae en silencio enseña un texto
+    // que no sale, que es exactamente el defecto que este cambio cierra.
+    const p = piece({
+      platform: 'surface_one',
+      assets: {
+        copy: { raw: 'cuerpo crudo', aife_filtered: 'el maestro' },
+        social: { adapted: [{ platform: 'otro_canal', copy: 'no es de esta pieza' }] },
+      },
+    });
+    expect(pieceBody(p)).toBe('el maestro');
+    expect(pieceBodySource(p)).toBe('master_copy');
+  });
+
+  it('sin adaptación ninguna, el criterio anterior se conserva al pie de la letra', () => {
     expect(pieceBody(piece())).toBe('cuerpo filtrado');
+    expect(pieceBodySource(piece())).toBe('master_copy');
   });
 
   it('cae a raw cuando no hay cara filtrada', () => {
