@@ -154,7 +154,9 @@ export default function HubModule({ onPlanReady }: HubModuleProps) {
               value={selectedBrand}
               onChange={e => setSelectedBrand(e.target.value)}
               disabled={isInterpreting}
-              className="w-full appearance-none bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm font-medium text-zinc-200 outline-none hover:border-zinc-700 focus:border-accent/50 transition-all disabled:opacity-50 cursor-pointer pr-10"
+              // `pl-8` deja sitio al punto de color, que va absoluto en `left-3` y con
+              // `px-4` se montaba encima de la primera letra del nombre de la marca.
+              className="w-full appearance-none bg-zinc-900 border border-zinc-800 rounded-xl pl-8 pr-10 py-3 text-sm font-medium text-zinc-200 outline-none hover:border-zinc-700 focus:border-accent/50 transition-all disabled:opacity-50 cursor-pointer"
               style={{ color: activeBrand?.color ?? '#e4e4e7' }}
             >
               {/* Mientras cargan no hay opciones que pintar, y decirlo es mejor que un
@@ -175,9 +177,6 @@ export default function HubModule({ onPlanReady }: HubModuleProps) {
               className="absolute left-3 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full pointer-events-none"
               style={{ backgroundColor: activeBrand?.color ?? '#888' }}
             />
-            <div className="absolute left-8 top-1/2 -translate-y-1/2 pointer-events-none">
-              {/* spacer */}
-            </div>
           </div>
         </div>
 

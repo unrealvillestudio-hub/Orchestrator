@@ -55,7 +55,10 @@ El Orchestrator es el cerebro del pipeline de contenido UNRLVL. Recibe un `brand
 **URL producción:** https://orchestrator-unrlvl.vercel.app  
 **Vercel project:** prj_93AJfDiY1pcktG7b7fDStBqONYWy  
 **Framework:** Vite + React (UI) + Vercel Edge Functions (API)  
-**Versión actual:** v4.1
+**Versión:** la declara `package.json` y la pinta el pie de la UI con el commit desplegado
+al lado. **No se escribe otro número acá** — hasta el 2026-09-13 convivían tres distintos (el
+del pie, el de `package.json` y el de esta línea, que decía `v4.1`) y ninguno coincidía con
+otro. Un valor escrito a mano sólo se actualiza cuando alguien se acuerda.
 
 ---
 
