@@ -14,7 +14,7 @@
  * con el mismo contrato obligarían a cada consumidor a atrapar las dos.
  */
 
-import { CalibrationError } from './calibrationInbox';
+import { CalibrationError, type SearchInfo } from './calibrationInbox';
 
 // ── Tipos (contrato de CALIB-01 §2) ──────────────────────────────────────────
 export type ChallengeVerdict = 'judge_was_right' | 'rule_failed';
@@ -60,6 +60,8 @@ export interface ChallengedResult {
   limit: number;
   offset: number;
   rows: ChallengedRow[];
+  /** U-7 — qué se buscó. `null` = no se buscó nada, que no es «no se encontró nada». */
+  search: SearchInfo | null;
   /**
    * Si la tabla de arbitrajes existe todavía. `available:false` es un estado ESPERADO
    * mientras CALIB-01 (cortes A–D) no esté desplegado: la bandeja lo dice en pantalla en
@@ -135,13 +137,18 @@ async function req<T>(
 
 export function fetchChallengedQueue(
   token: string,
-  opts: { limit?: number; offset?: number; brand?: string; rule?: string } = {},
+  opts: {
+    limit?: number; offset?: number; brand?: string; rule?: string;
+    /** U-7 — id de la PIEZA retenida, o prefijo suyo. No el id de la fila de arbitraje. */
+    q?: string;
+  } = {},
 ): Promise<ChallengedResult> {
   const q = new URLSearchParams();
   if (opts.limit != null) q.set('limit', String(opts.limit));
   if (opts.offset != null) q.set('offset', String(opts.offset));
   if (opts.brand) q.set('brand', opts.brand);
   if (opts.rule) q.set('rule', opts.rule);
+  if (opts.q) q.set('q', opts.q);
   const qs = q.toString();
   return req<ChallengedResult>(`/api/challenged-queue${qs ? `?${qs}` : ''}`, token);
 }

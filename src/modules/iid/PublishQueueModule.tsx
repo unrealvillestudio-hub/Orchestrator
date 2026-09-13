@@ -11,7 +11,7 @@ import {
 } from '../../services/publishInbox';
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader,
-  SlotLine, SlotsNotice,
+  SlotLine, SlotsNotice, PieceSearchBox, SearchNotice,
 } from './pieceUi';
 // U-5 — el ÚNICO componente de acciones del sistema, el mismo que monta calibración.
 import { PieceActionsBar } from './pieceActions';
@@ -52,10 +52,16 @@ export default function PublishQueueModule({ session }: { session: IidSession })
   const [channel, setChannel] = useState('');
   const [chStatus, setChStatus] = useState<ChannelStatusFilter>('all');
   const [gen, setGen]         = useState<GenerationFilter>('all');
+  // U-7 — el estado de la pieza y la búsqueda por id.
+  const [status, setStatus]   = useState('');
+  const [q, setQ]             = useState('');
   const [offset, setOffset]   = useState(0);
 
-  type Query = { offset: number; brand: string; channel: string; chStatus: ChannelStatusFilter; gen: GenerationFilter };
-  const current = (): Query => ({ offset, brand, channel, chStatus, gen });
+  type Query = {
+    offset: number; brand: string; channel: string; chStatus: ChannelStatusFilter;
+    gen: GenerationFilter; status: string; q: string;
+  };
+  const current = (): Query => ({ offset, brand, channel, chStatus, gen, status, q });
 
   const load = async (q: Query) => {
     setLoading(true); setError(null);
@@ -67,6 +73,8 @@ export default function PublishQueueModule({ session }: { session: IidSession })
         channel: q.channel || undefined,
         channelStatus: q.chStatus,
         generation: q.gen,
+        status: q.status || undefined,
+        q: q.q || undefined,
       });
       setData(r);
     } catch (err) {
@@ -84,6 +92,7 @@ export default function PublishQueueModule({ session }: { session: IidSession })
   const apply = (patch: Partial<Query>) => {
     const q = { ...current(), offset: 0, ...patch };
     setOffset(q.offset); setBrand(q.brand); setChannel(q.channel); setChStatus(q.chStatus); setGen(q.gen);
+    setStatus(q.status); setQ(q.q);
     load(q);
   };
   const goPage = (o: number) => { setOffset(o); load({ ...current(), offset: o }); };
@@ -173,6 +182,25 @@ export default function PublishQueueModule({ session }: { session: IidSession })
           onChange={(v) => apply({ gen: v as GenerationFilter })}
           options={[['all', 'Todas'], ['current', 'Solo corregido']]}
         />
+        {/* U-7 — EL ESTADO DE LA PIEZA, y va acá y no en calibración: esa bandeja lista un
+            solo estado por contrato, así que un filtro de estado allí no filtraría nada.
+            Las opciones salen del LOTE, nunca de una lista escrita acá: si el carril empieza
+            a producir un estado nuevo, aparece solo. */}
+        <Selector
+          label="Estado"
+          value={status}
+          onChange={(v) => apply({ status: v })}
+          options={[['', 'Todos'], ...(data?.statuses ?? []).map((s) => [s, s] as [string, string])]}
+        />
+        {/* U-7 — el sitio donde pegar los 8 caracteres que pinta la tarjeta. */}
+        <div className="ml-auto">
+          <PieceSearchBox value={q} onSearch={(v) => apply({ q: v })} />
+        </div>
+      </div>
+
+      {/* U-7 — «no hay» y «no lo pude mirar todo» son dos ceros distintos. */}
+      <div className="mb-4">
+        <SearchNotice search={data?.search ?? null} vacia={pieces.length === 0} />
       </div>
 
       {data && <SlotsNotice source={data.slots_source} />}

@@ -761,6 +761,97 @@ export async function fetchLivePieces(
  * juzga lo que de verdad está esperando.
  */
 export const CALIBRATION_STATUSES = ['awaiting_approval'];
+
+// ── BUSCAR UNA PIEZA POR SU ID · U-7 ────────────────────────────────────────────
+/**
+ * ENCONTRAR LA PIEZA QUE SAM TIENE DELANTE.
+ *
+ * La tarjeta pinta los 8 primeros caracteres del uuid (`pieceUi.shortId`), y hasta U-7 no
+ * había ningún sitio donde pegarlos. Esto resuelve eso, y la parte interesante es POR QUÉ
+ * hace falta código en vez de un filtro:
+ *
+ * ── POR QUÉ EL PREFIJO NO SE PUEDE PEDIR A PostgREST ─────────────────────────────
+ * `content_pieces.id` es `uuid`. Un `id=like.5b14caa7*` genera `uuid LIKE unknown`, que
+ * **Postgres rechaza**; sólo funciona `id::text LIKE`, y ese cast no se puede expresar desde
+ * la API REST. De ahí las tres salidas, y la elegida:
+ *
+ *   A (ésta) → leer el lote con su cap y resolver el prefijo EN MEMORIA. Sin DDL.
+ *   B        → columna generada `id_text` + índice. Escala sin límite, cuesta una migración
+ *              que hay que mantener. Se reserva para cuando el volumen lo pida.
+ *   C        → filtrar en el front sobre la página cargada. INÚTIL: con páginas de 20 sobre
+ *              58 piezas, buscar sólo encontraría lo que ya se ve.
+ *
+ * Decisión de Sam del 2026-09-13, con la medición delante: **175 piezas en total** contra un
+ * cap de 2000 — sobra un orden de magnitud.
+ *
+ * ── LA ÚNICA FORMA EN QUE ESTE CAMINO PUEDE MENTIR, Y SU ANTÍDOTO ────────────────
+ * Si el lote se corta por el cap, una pieza que existe puede no aparecer. Por eso la
+ * respuesta declara `truncated`, y **la UI nunca dice «no encontrado» cuando lo que pasó es
+ * que el lote se cortó**. Son dos ceros distintos y el dato tiene que distinguirlos — el
+ * mismo criterio que `slots_source` y `cutoffs_source` en estas mismas respuestas.
+ */
+export type SearchMode = 'uuid' | 'prefix';
+
+export interface PieceSearch {
+  /** Lo que se buscó, ya normalizado. Viaja a la respuesta para que la UI lo pueda repetir. */
+  q: string;
+  mode: SearchMode;
+  /** uuid completo: filtro directo, sin lote y sin truncamiento posible. */
+  exact: string | null;
+  /** Prefijo en minúsculas, para comparar contra el id también en minúsculas. */
+  prefix: string | null;
+}
+
+/** Mínimo de caracteres de un prefijo. Menos devuelve medio catálogo y parece una búsqueda rota. */
+export const SEARCH_MIN_PREFIX = 4;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Un prefijo puede traer guiones si Sam pegó parte de un uuid con formato. */
+const PREFIX_RE = /^[0-9a-f-]+$/;
+
+/** Error tipado para «el prefijo es demasiado corto». El endpoint lo traduce a 400. */
+export class SearchTooShort extends Error {
+  constructor(public q: string) {
+    super(`search prefix too short: need at least ${SEARCH_MIN_PREFIX} characters`);
+    this.name = 'SearchTooShort';
+  }
+}
+
+/** Error tipado para «esto no se parece a un id». También 400: buscar texto libre no existe. */
+export class SearchNotAnId extends Error {
+  constructor(public q: string) {
+    super('search must be a piece id or a prefix of one');
+    this.name = 'SearchNotAnId';
+  }
+}
+
+/**
+ * QUÉ SE BUSCA Y CÓMO. Pura: no lee la red y no sabe de qué bandeja viene.
+ *
+ * `null` = no se buscó nada (parámetro ausente o vacío), que NO es lo mismo que buscar y no
+ * encontrar. Lanza cuando lo que llegó no se puede resolver, en vez de devolver una lista
+ * vacía que se leería como «no existe».
+ */
+export function parsePieceSearch(raw: unknown): PieceSearch | null {
+  const q = (typeof raw === 'string' ? raw : '').trim().toLowerCase();
+  if (!q) return null;
+  if (UUID_RE.test(q)) return { q, mode: 'uuid', exact: q, prefix: null };
+  if (!PREFIX_RE.test(q)) throw new SearchNotAnId(q);
+  // Los guiones no cuentan como longitud: `5b14-caa` son 7 caracteres de id, no 8.
+  if (q.replace(/-/g, '').length < SEARCH_MIN_PREFIX) throw new SearchTooShort(q);
+  return { q, mode: 'prefix', exact: null, prefix: q };
+}
+
+/**
+ * ¿Este id cae en la búsqueda? En minúsculas los dos lados: un uuid de Postgres llega en
+ * minúsculas, pero lo que Sam pega puede venir de cualquier sitio.
+ */
+export function idMatchesSearch(id: string | null | undefined, search: PieceSearch | null): boolean {
+  if (!search) return true; // sin búsqueda, no se filtra nada.
+  const v = (id ?? '').toLowerCase();
+  if (search.exact) return v === search.exact;
+  return !!search.prefix && v.startsWith(search.prefix);
+}
 export function fetchCalibrationPieces(brand?: string): Promise<ContentPiece[]> {
   return fetchLivePieces({ brand, onlyStatuses: CALIBRATION_STATUSES });
 }

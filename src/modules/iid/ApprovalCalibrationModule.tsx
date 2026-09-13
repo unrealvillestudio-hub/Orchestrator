@@ -15,7 +15,7 @@ import { PieceActionsBar, type ActionOutcome } from './pieceActions';
 // en las dos vistas o no sirve para compararlas.
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader, shortId,
-  ForecastLine, SlotsNotice,
+  ForecastLine, SlotsNotice, PieceSearchBox, SearchNotice,
 } from './pieceUi';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
 import { SpeechReader } from '../../ui/SpeechReader';
@@ -57,10 +57,16 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
   const [order, setOrder]     = useState<QueueOrder>('recent');
   const [verdict, setVerdict] = useState<VerdictFilter>('all');
   const [gen, setGen]         = useState<GenerationFilter>('all');
+  // U-7 — la plataforma de la pieza y la búsqueda por id.
+  const [platform, setPlatform] = useState('');
+  const [q, setQ]               = useState('');
   const [offset, setOffset]   = useState(0);
 
-  type Query = { offset: number; brand: string; order: QueueOrder; verdict: VerdictFilter; gen: GenerationFilter };
-  const current = (): Query => ({ offset, brand, order, verdict, gen });
+  type Query = {
+    offset: number; brand: string; order: QueueOrder; verdict: VerdictFilter; gen: GenerationFilter;
+    platform: string; q: string;
+  };
+  const current = (): Query => ({ offset, brand, order, verdict, gen, platform, q });
 
   const load = async (q: Query) => {
     setLoading(true); setError(null);
@@ -72,6 +78,8 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
         order: q.order,
         verdict: q.verdict,
         generation: q.gen,
+        platform: q.platform || undefined,
+        q: q.q || undefined,
       });
       setData(r);
     } catch (err) {
@@ -89,6 +97,7 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
   const apply = (patch: Partial<Query>) => {
     const q = { ...current(), offset: 0, ...patch };
     setOffset(q.offset); setBrand(q.brand); setOrder(q.order); setVerdict(q.verdict); setGen(q.gen);
+    setPlatform(q.platform); setQ(q.q);
     load(q);
   };
   const goPage = (o: number) => { setOffset(o); load({ ...current(), offset: o }); };
@@ -167,6 +176,25 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
           onChange={(v) => apply({ gen: v as GenerationFilter })}
           options={[['all', 'Todas'], ['current', 'Solo corregido']]}
         />
+        {/* U-7 — LA PLATAFORMA DE LA PIEZA. Sus opciones salen del LOTE (`data.platforms`),
+            nunca de una lista escrita acá: una marca nueva con una plataforma nueva aparece
+            sola. Ojo con el nombre: la bandeja de publicación llama `channel` a lo suyo y
+            filtra el CANAL OPERATIVO de la marca — son dos ejes distintos. */}
+        <Selector
+          label="Plataforma"
+          value={platform}
+          onChange={(v) => apply({ platform: v })}
+          options={[['', 'Todas'], ...(data?.platforms ?? []).map((p) => [p, p] as [string, string])]}
+        />
+        {/* U-7 — el sitio donde pegar los 8 caracteres que pinta la tarjeta. */}
+        <div className="ml-auto">
+          <PieceSearchBox value={q} onSearch={(v) => apply({ q: v })} />
+        </div>
+      </div>
+
+      {/* U-7 — «no hay» y «no lo pude mirar todo» son dos ceros distintos. */}
+      <div className="mb-4">
+        <SearchNotice search={data?.search ?? null} vacia={pieces.length === 0} />
       </div>
 
       {/* Por qué la generación puede venir sin dato — se dice, no se disimula. */}

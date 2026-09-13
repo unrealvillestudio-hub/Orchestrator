@@ -39,7 +39,11 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, extractToken, requireAdmin, SB_URL, SB_KEY } from './_calibrationShared.js';
+import {
+  applyCors, extractToken, requireAdmin, SB_URL, SB_KEY,
+  parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
+  type PieceSearch,
+} from './_calibrationShared.js';
 // El lector en voz alta necesita saber en qué idioma leer. Mismo catálogo y misma resolución
 // que las otras tres bandejas: una marca nueva entra sembrando su fila, no editando código.
 import { fetchBrandLanguages, readingLanguageOf } from './_brandLanguage.js';
@@ -207,6 +211,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const verdict = strParam(req.query.verdict);
   const source  = enumParam<HistorySourceFilter>(req.query.source, HISTORY_SOURCES, 'all');
 
+  // U-7 — buscar por id de pieza, el MISMO resolvedor que las otras tres bandejas.
+  //
+  // Y acá es donde más falta hacía: una pieza sellada ya no está en ninguna de las otras
+  // tres, así que Historial es el único sitio donde se la puede volver a encontrar. Medido
+  // el 2026-09-13 con `5b14caa7`: la búsqueda funcionaba en las tres bandejas y no la
+  // encontraba en ninguna, porque estaba acá.
+  //
+  // Buscar aquí NO necesita leer `content_pieces`: cada fila del corpus ya trae su
+  // `piece_id`. Eso distingue BUSCAR de dar ACCIONES — lo segundo sí exigiría esa lectura,
+  // y por eso sigue fuera de alcance.
+  let search: PieceSearch | null;
+  try {
+    search = parsePieceSearch(req.query.q);
+  } catch (err) {
+    if (err instanceof SearchTooShort) {
+      return res.status(400).json({
+        error: 'search_too_short',
+        detail: `Para buscar por id hacen falta al menos ${SEARCH_MIN_PREFIX} caracteres. `
+          + 'Un prefijo más corto devolvería medio catálogo.',
+      });
+    }
+    if (err instanceof SearchNotAnId) {
+      return res.status(400).json({
+        error: 'search_not_an_id',
+        detail: 'La búsqueda es por id de pieza (o por su prefijo), no por texto libre.',
+      });
+    }
+    throw err;
+  }
+
   try {
     const [live, archived, brandLangs] = await Promise.all([
       source === 'archived' ? Promise.resolve([]) : fetchCorpusRows('approval_calibration', 'live', { from, to }),
@@ -228,6 +262,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const by_verdict = tally(enScope, (r) => r.verdict);
 
     let filtradas = enScope;
+    // U-7 — la búsqueda va con los otros tres filtros: DESPUÉS de las facetas —que cuentan
+    // el ámbito, no el filtro— y ANTES de paginar.
+    if (search) filtradas = filtradas.filter((r) => idMatchesSearch(r.piece_id, search));
     if (brand)   filtradas = filtradas.filter((r) => r.brand_id === brand);
     if (channel) filtradas = filtradas.filter((r) => r.platform === channel);
     if (verdict && verdict !== 'all') filtradas = filtradas.filter((r) => r.verdict === verdict);
@@ -250,6 +287,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       limit,
       offset,
       rows: page,
+      /**
+       * U-7 — qué se buscó y si alguna de las dos lecturas topó su cap. Si se truncó, una
+       * lista vacía NO es «no existe»: es «puede que no lo haya traído».
+       */
+      search: search ? { q: search.q, mode: search.mode, truncated: search.mode === 'prefix' && truncated } : null,
       ...(truncated ? { truncated } : {}),
     });
   } catch (err) {

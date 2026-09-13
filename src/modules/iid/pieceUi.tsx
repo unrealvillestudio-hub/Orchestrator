@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   ChevronLeft, ChevronRight, ShieldCheck, ShieldAlert, ShieldQuestion, Copy, Check, Clock, GitBranch, History,
-  CalendarCheck, CalendarClock, CalendarOff, CalendarX,
+  CalendarCheck, CalendarClock, CalendarOff, CalendarX, Search, X, AlertTriangle,
 } from 'lucide-react';
 import { cn } from '../../ui/components';
 import type {
@@ -296,6 +296,109 @@ export function Selector({ label, value, onChange, options }: {
         {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
     </label>
+  );
+}
+
+// ── U-7 · BUSCAR UNA PIEZA POR SU ID ─────────────────────────────────────────────
+/**
+ * EL SITIO DONDE PEGAR LO QUE LA TARJETA PINTA.
+ *
+ * `shortId` muestra los 8 primeros caracteres del uuid, y hasta U-7 no había dónde pegarlos:
+ * para encontrar una pieza había que ir a Historial y mirar a mano. Este campo es ese sitio,
+ * y es el MISMO en las tres bandejas — si cada una tuviera el suyo, divergirían.
+ *
+ * NO busca mientras se escribe. Se busca al confirmar (Enter o el botón), y es deliberado:
+ * un prefijo de 2 caracteres tecleado de camino a uno de 8 dispara una consulta que el
+ * server rechaza con 400, y el operador vería un error por escribir.
+ */
+export function PieceSearchBox({ value, onSearch, placeholder = 'Pegar id de pieza…' }: {
+  /** Lo que está buscándose AHORA (viene del estado de la bandeja, no de este campo). */
+  value: string;
+  /** Confirmar. Cadena vacía = limpiar la búsqueda. */
+  onSearch: (q: string) => void;
+  placeholder?: string;
+}) {
+  const [draft, setDraft] = React.useState(value);
+  // Si la bandeja limpia la búsqueda desde fuera, el campo la sigue.
+  React.useEffect(() => { setDraft(value); }, [value]);
+
+  const buscando = !!value;
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="relative">
+        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') onSearch(draft.trim()); }}
+          placeholder={placeholder}
+          spellCheck={false}
+          className={cn(
+            'w-[190px] bg-zinc-900 border rounded-lg pl-7 pr-2 py-1 text-zinc-300 font-mono',
+            'outline-none transition-colors placeholder:text-zinc-700 placeholder:font-sans',
+            buscando ? 'border-accent/50' : 'border-zinc-800 focus:border-accent/50',
+          )}
+        />
+      </div>
+      {buscando ? (
+        <button
+          onClick={() => { setDraft(''); onSearch(''); }}
+          title="Quitar la búsqueda"
+          className="px-2 py-1 rounded-lg border border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+        >
+          <X size={13} />
+        </button>
+      ) : (
+        <button
+          onClick={() => onSearch(draft.trim())}
+          disabled={!draft.trim()}
+          title="Buscar por id"
+          className="px-2 py-1 rounded-lg border border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Search size={13} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * QUÉ DECIR CUANDO UNA BÚSQUEDA NO ENCUENTRA NADA — y es lo único que hace falta explicar
+ * de todo U-7.
+ *
+ * El endpoint resuelve el prefijo en memoria sobre un lote con tope. Si ese lote se cortó,
+ * una pieza que existe puede no aparecer, y decir «no existe» sería mentir. Son dos ceros
+ * distintos y la pantalla los nombra distinto.
+ */
+export function SearchNotice({ search, vacia }: {
+  search: { q: string; mode: 'uuid' | 'prefix'; truncated: boolean } | null;
+  /** ¿La lista salió vacía? */
+  vacia: boolean;
+}) {
+  if (!search) return null;
+  if (search.truncated) {
+    return (
+      <div className={cn(DATE_ROW, 'bg-amber-500/[0.08] border-amber-500/40 text-amber-200')}>
+        <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+        <span>
+          <span className="font-semibold">La búsqueda no pudo mirarlo todo.</span>{' '}
+          <span className="text-amber-300/80">
+            El lote llegó a su tope, así que {vacia ? 'que no aparezca NO significa que no exista' : 'puede faltar alguna coincidencia'}.
+            Con el id completo la búsqueda es exacta y no depende del lote.
+          </span>
+        </span>
+      </div>
+    );
+  }
+  if (!vacia) return null;
+  return (
+    <div className={cn(DATE_ROW, 'bg-zinc-800/40 border-zinc-700/60 border-dashed text-zinc-400')}>
+      <Search size={13} className="shrink-0 mt-0.5" />
+      <span>
+        Ninguna pieza de esta bandeja empieza por <span className="font-mono text-zinc-300">{search.q}</span>.
+        Puede estar en otra bandeja, o ya haber salido del circuito.
+      </span>
+    </div>
   );
 }
 

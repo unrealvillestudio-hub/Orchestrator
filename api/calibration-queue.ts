@@ -37,8 +37,21 @@ import {
   fetchCalibrationPieces, fetchEvaluatedIds, fetchPipelineCutoffs,
   fetchWatcherTraces, fetchAttemptsByQueue,
   latestPerQueue, generationOf, watcherOf, toContext, PIECES_CAP,
+  parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
   type ContentPiece, type PieceContext, type PipelineCutoff, type GenerationInfo,
+  type PieceSearch,
 } from './_calibrationShared.js';
+
+/**
+ * U-7 — LAS PLATAFORMAS PRESENTES EN UN LOTE, ordenadas. Sale del dato, nunca de una lista
+ * en el código: es lo mismo que ya hace `by_brand` con las marcas, y es lo que permite que
+ * una marca nueva de otro rubro traiga su plataforma sin que nadie edite este archivo.
+ */
+function platformsOf(pieces: ContentPiece[]): string[] {
+  const set = new Set<string>();
+  for (const p of pieces) { const v = (p.platform ?? '').trim(); if (v) set.add(v); }
+  return [...set].sort();
+}
 // FIX-CARD-06 — los topes del canal y la firma esperada son DATO: se leen acá, una vez
 // por request, y viajan resueltos en cada pieza. La UI no conoce ni un tope.
 import { fetchPlatformLimits, fetchSignatureClosers, metricsOf } from './_pieceMetrics.js';
@@ -128,6 +141,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const order      = enumParam<Order>(req.query.order, ORDERS, 'recent');
   const verdict    = enumParam<VerdictFilter>(req.query.verdict, VERDICT_FILTERS, 'all');
   const generation = enumParam<GenerationFilter>(req.query.generation, GENERATION_FILTERS, 'all');
+  // U-7 — la PLATAFORMA DE LA PIEZA. No confundir con el `channel` de `publish-queue`, que
+  // filtra el CANAL OPERATIVO de la marca: son dos ejes distintos y por eso llevan nombres
+  // distintos. Unificarlos a la fuerza haría que un filtro dijera lo que el otro hace.
+  const platform   = strParam(req.query.platform);
+
+  // U-7 — buscar por id. Se resuelve ANTES de nada porque un `q` inválido es un 400, no una
+  // lista vacía: «no existe» y «no supe buscar eso» no se pueden leer igual.
+  let search: PieceSearch | null;
+  try {
+    search = parsePieceSearch(req.query.q);
+  } catch (err) {
+    if (err instanceof SearchTooShort) {
+      return res.status(400).json({
+        error: 'search_too_short',
+        detail: `Para buscar por id hacen falta al menos ${SEARCH_MIN_PREFIX} caracteres. `
+          + 'Un prefijo más corto devolvería medio catálogo.',
+      });
+    }
+    if (err instanceof SearchNotAnId) {
+      return res.status(400).json({
+        error: 'search_not_an_id',
+        detail: 'La búsqueda es por id de pieza (o por su prefijo), no por texto libre.',
+      });
+    }
+    throw err;
+  }
 
   try {
     // Se lee sin filtro de marca para que by_brand sea global y estable aunque venga
@@ -158,6 +197,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let scoped = perPiece;
     if (verdict !== 'all') scoped = scoped.filter((p) => watcherOf(p).result === verdict);
     if (generation === 'current') scoped = scoped.filter((p) => genById.get(p.id)?.generation === 'current');
+    // U-7 — buscar y filtrar por plataforma van ACÁ, antes de `by_brand` y antes de paginar.
+    // El orden importa: buscar después de paginar haría que el resultado dependiera de en qué
+    // página estabas, que es la forma más silenciosa de que una búsqueda mienta.
+    if (search) scoped = scoped.filter((p) => idMatchesSearch(p.id, search));
+    if (platform) scoped = scoped.filter((p) => (p.platform ?? '') === platform);
 
     const by_brand: Record<string, number> = {};
     for (const p of scoped) by_brand[p.brand_id] = (by_brand[p.brand_id] ?? 0) + 1;
@@ -200,6 +244,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       order,
       verdict,
       generation,
+      platform: platform ?? '',
+      // U-7 — las plataformas PRESENTES EN EL LOTE, para que el selector salga del dato.
+      // Nunca una lista escrita en el código: una marca nueva con una plataforma nueva
+      // aparece sola, sin tocar una línea.
+      platforms: platformsOf(perPiece),
+      /**
+       * U-7 — qué se buscó y si el lote se cortó. `truncated:true` significa que una pieza
+       * que existe pudo quedarse fuera, y entonces una lista vacía NO es «no existe».
+       * Un uuid completo nunca se trunca: va como filtro directo.
+       */
+      search: search ? { q: search.q, mode: search.mode, truncated: search.mode === 'prefix' && truncated } : null,
       pieces,
       // Por qué la generación puede venir 'unknown': tabla ausente vs tabla vacía.
       cutoffs_source: cutoffsRaw === null ? 'unavailable' : (cutoffs.length ? 'seeded' : 'empty'),

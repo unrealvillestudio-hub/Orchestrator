@@ -11,7 +11,7 @@ import {
   fetchChallengedQueue, saveChallengeVerdict, savePieceEdit, EDIT_REASONS,
   type ChallengedResult, type ChallengedRow, type ChallengeVerdict, type GuardHit,
 } from '../../services/challengedInbox';
-import { CountPill, Pager, CopyableId, fmtDate } from './pieceUi';
+import { CountPill, Pager, CopyableId, fmtDate, PieceSearchBox, SearchNotice } from './pieceUi';
 // Lectura en voz alta. Aquí el texto YA llega plano: el adaptador sólo normaliza la forma.
 import { SpeechReader } from '../../ui/SpeechReader';
 import { readableFromChallengedPiece } from './readablePiece';
@@ -60,14 +60,19 @@ export default function ChallengedInboxModule({ session }: { session: IidSession
   const [busy, setBusy]       = useState<Record<string, boolean>>({});
   const [rowError, setRowError] = useState<Record<string, string>>({});
 
-  type Query = { offset: number; brand: string; rule: string };
-  const current = (): Query => ({ offset, brand, rule });
+  // U-7 — buscar por el id de la PIEZA retenida, no por el de la fila de arbitraje: lo que
+  // Sam tiene delante y copia es el de la pieza.
+  const [q, setQ] = useState('');
+
+  type Query = { offset: number; brand: string; rule: string; q: string };
+  const current = (): Query => ({ offset, brand, rule, q });
 
   const load = async (q: Query) => {
     setLoading(true); setError(null);
     try {
       setData(await fetchChallengedQueue(token, {
         limit: PAGE, offset: q.offset, brand: q.brand || undefined, rule: q.rule || undefined,
+        q: q.q || undefined,
       }));
     } catch (err) {
       setError(err instanceof CalibrationError ? err.message : 'No se pudo cargar la bandeja.');
@@ -84,7 +89,7 @@ export default function ChallengedInboxModule({ session }: { session: IidSession
   // que se está mirando, no a la siguiente.
   const apply = (patch: Partial<Query>) => {
     const q = { ...current(), offset: 0, ...patch };
-    setOffset(q.offset); setBrand(q.brand); setRule(q.rule);
+    setOffset(q.offset); setBrand(q.brand); setRule(q.rule); setQ(q.q);
     setDecided({}); setRowError({});
     load(q);
   };
@@ -186,6 +191,20 @@ export default function ChallengedInboxModule({ session }: { session: IidSession
           )}
         </div>
       )}
+
+      {/* U-7 — el mismo campo de las otras dos bandejas. Acá busca por el id de la PIEZA
+          retenida: una fila de arbitraje sin pieza nunca cae en una búsqueda por id, porque
+          no hay id contra el que comparar. */}
+      {available && (
+        <div className="flex items-center justify-end mb-4 text-[11px] font-mono">
+          <PieceSearchBox value={q} onSearch={(v) => apply({ q: v })} />
+        </div>
+      )}
+
+      {/* U-7 — «no hay» y «no lo pude mirar todo» son dos ceros distintos. */}
+      <div className="mb-4">
+        <SearchNotice search={data?.search ?? null} vacia={rows.length === 0} />
+      </div>
 
       {error && (
         <div className="flex items-start gap-2 text-[12px] text-red-300 bg-red-500/[0.07] border border-red-500/25 rounded-xl px-3.5 py-3 mb-5">

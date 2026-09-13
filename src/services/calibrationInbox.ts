@@ -169,6 +169,22 @@ export interface PieceAction {
 export type PieceActions = Record<PieceActionKey, PieceAction>;
 
 /**
+ * U-7 — QUÉ SE BUSCÓ, Y SI EL LOTE SE CORTÓ.
+ *
+ * `truncated:true` significa que el endpoint no pudo mirar todas las piezas, así que una
+ * lista vacía **no es «no existe»**: es «puede que no lo haya traído». La pantalla tiene que
+ * decir cosas distintas en cada caso — son dos ceros que no significan lo mismo, igual que
+ * `slots_source` y `cutoffs_source`.
+ *
+ * Un uuid completo nunca se trunca: va como filtro directo contra la base.
+ */
+export interface SearchInfo {
+  q: string;
+  mode: 'uuid' | 'prefix';
+  truncated: boolean;
+}
+
+/**
  * U-3 — QUÉ PASÓ CON LA FRANJA DE LA PIEZA que acaba de salir de circulación.
  *
  * Espejo del contrato de `api/_publishSlots.ts`. `released: 0` NO es un error: una pieza
@@ -254,6 +270,12 @@ export interface QueueResult {
   order: QueueOrder;
   verdict: VerdictFilter;
   generation: GenerationFilter;
+  /** U-7 — la plataforma elegida. `''` = todas. */
+  platform: string;
+  /** U-7 — las plataformas presentes en el lote. Del dato, nunca de una lista en el código. */
+  platforms: string[];
+  /** U-7 — qué se buscó. `null` = no se buscó nada, que no es «no se encontró nada». */
+  search: SearchInfo | null;
   pieces: CalibrationPiece[];
   /** Por qué la generación puede venir 'unknown': tabla ausente vs vacía vs sembrada. */
   cutoffs_source: 'unavailable' | 'empty' | 'seeded';
@@ -331,6 +353,10 @@ export function fetchQueue(
   opts: {
     limit?: number; offset?: number; brand?: string;
     order?: QueueOrder; verdict?: VerdictFilter; generation?: GenerationFilter;
+    /** U-7 — plataforma de la pieza. No es el `channel` de publicación: ver su docstring. */
+    platform?: string;
+    /** U-7 — id de pieza o prefijo suyo. Menos de 4 caracteres lo rechaza el server. */
+    q?: string;
   } = {},
 ): Promise<QueueResult> {
   const q = new URLSearchParams();
@@ -340,6 +366,8 @@ export function fetchQueue(
   if (opts.order) q.set('order', opts.order);
   if (opts.verdict) q.set('verdict', opts.verdict);
   if (opts.generation) q.set('generation', opts.generation);
+  if (opts.platform) q.set('platform', opts.platform);
+  if (opts.q) q.set('q', opts.q);
   const qs = q.toString();
   return req<QueueResult>(`/api/calibration-queue${qs ? `?${qs}` : ''}`, token);
 }
