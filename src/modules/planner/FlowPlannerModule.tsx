@@ -5,9 +5,11 @@ import {
   AlertTriangle, Play, ArrowLeft, Zap
 } from 'lucide-react';
 import { useFlowStore } from '../../store/useFlowStore';
-import { getBrandById, BRANDS } from '../../config/brands';
+// U-9 — las marcas salen del dato, no de una lista en el código.
+import { useBrands } from '../../services/useBrands';
+import { getBrandById } from '../../services/brandsLoader';
 import { getLabById } from '../../config/labs';
-import { cn, GlowDot } from '../../ui/components';
+import { cn, GlowDot, BrandsFallbackNotice } from '../../ui/components';
 import { FlowStage } from '../../core/types';
 
 const PLATFORM_ICONS: Record<string, string> = {
@@ -23,10 +25,11 @@ interface PlannerProps {
 export default function FlowPlannerModule({ onApprove, onBack }: PlannerProps) {
   const { activePlan, setActivePlan } = useFlowStore();
   const [editingBrand, setEditingBrand] = useState(false);
+  const { brands, source, reason } = useBrands();
 
   if (!activePlan) return null;
 
-  const brand = getBrandById(activePlan.brandId);
+  const brand = getBrandById(brands, activePlan.brandId);
   const totalEstimate = activePlan.estimatedTotalSeconds;
   const checkpointCount = activePlan.stages.filter(s => s.requiresApproval).length;
 
@@ -90,7 +93,14 @@ export default function FlowPlannerModule({ onApprove, onBack }: PlannerProps) {
                 animate={{ opacity: 1, y: 0 }}
                 className="absolute top-full mt-1 left-0 z-20 bg-zinc-900 border border-zinc-700 rounded-xl p-1.5 min-w-[200px] shadow-2xl"
               >
-                {BRANDS.map(b => (
+                <BrandsFallbackNotice source={source} reason={reason} />
+                {source === 'loading' && (
+                  <p className="px-3 py-2 text-xs text-zinc-600">Cargando marcas…</p>
+                )}
+                {source !== 'loading' && !brands.length && (
+                  <p className="px-3 py-2 text-xs text-zinc-600">Sin marcas disponibles.</p>
+                )}
+                {brands.map((b) => (
                   <button
                     key={b.id}
                     onClick={() => handleBrandChange(b.id)}

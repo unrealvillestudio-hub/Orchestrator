@@ -1,17 +1,29 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowRight, Sparkles, AlertCircle, RotateCcw, ChevronDown } from 'lucide-react';
-import { BRANDS } from '../../config/brands';
+// U-9 — las marcas salen del dato. Ver `src/config/brands.ts`, vaciado en este mismo corte.
+import { useBrands } from '../../services/useBrands';
+import { getBrandById } from '../../services/brandsLoader';
 import { useFlowStore } from '../../store/useFlowStore';
 import { interpretPrompt } from '../../services/orchestratorEngine';
 import { FlowPlan, FlowStage, InterpretResult } from '../../core/types';
-import { cn, Spinner, GlowDot } from '../../ui/components';
+import { cn, Spinner, GlowDot, BrandsFallbackNotice } from '../../ui/components';
 
-const EXAMPLE_PROMPTS = [
-  "Quiero lanzar el nuevo gel de D7Herbal en Instagram y TikTok para la próxima semana",
-  "Crea contenido de marca personal para Patricia Osorio en todas las plataformas",
-  "Prepara un post de Diamond Details mostrando antes y después de recubrimiento cerámico",
-  "Lanza una campaña de Vivosé Mask con video y copy para Facebook e Instagram",
+/**
+ * U-9 — LOS EJEMPLOS SE ESCRIBEN CON LA MARCA ELEGIDA, NO CON MARCAS ESCRITAS A MANO.
+ *
+ * Antes eran cuatro frases con cuatro marcas dentro: vocabulario de cliente en una capa
+ * compartida, y desactualizado por el mismo motivo que la lista de marcas — dos de las que
+ * nombraba ya no eran las de la base.
+ *
+ * Ahora son PLANTILLAS. La marca entra como dato y los ejemplos hablan siempre de la que
+ * está seleccionada, que además los hace más útiles que antes.
+ */
+const EXAMPLE_TEMPLATES = [
+  (marca: string) => `Quiero lanzar el nuevo producto de ${marca} en redes para la próxima semana`,
+  (marca: string) => `Crea contenido de marca para ${marca} en todas sus plataformas activas`,
+  (marca: string) => `Prepara un post de ${marca} mostrando el antes y el después`,
+  (marca: string) => `Lanza una campaña de ${marca} con video y copy`,
 ];
 
 interface HubModuleProps {
@@ -21,10 +33,23 @@ interface HubModuleProps {
 export default function HubModule({ onPlanReady }: HubModuleProps) {
   const [prompt, setPrompt]           = useState('');
   const [error, setError]             = useState('');
-  // FIX 1: brand selector — default UNREALville (o el primero disponible)
-  const [selectedBrand, setSelectedBrand] = useState<string>(
-    BRANDS.find(b => b.id === 'UnrealvilleStudio')?.id ?? BRANDS[0].id
-  );
+  const { brands, source, reason } = useBrands();
+  /**
+   * U-9 — LA MARCA POR DEFECTO ES LA PRIMERA DEL DATO, NO UNA ESCRITA.
+   *
+   * Antes este selector arrancaba en una marca concreta nombrada en el código: una marca
+   * gobernando una rama de la aplicación. Ahora arranca en la primera que devuelve la
+   * consulta, ordenada por nombre. Cuál sea es una consecuencia del dato, no una decisión
+   * de este archivo.
+   *
+   * Empieza vacío a propósito: mientras las marcas cargan todavía no hay ninguna, y elegir
+   * una antes de saber cuáles hay sería inventarla.
+   */
+  const [selectedBrand, setSelectedBrand] = useState<string>('');
+
+  useEffect(() => {
+    if (!selectedBrand && brands.length) setSelectedBrand(brands[0].id);
+  }, [brands, selectedBrand]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { isInterpreting, setInterpreting, setActivePlan } = useFlowStore();
 
@@ -78,7 +103,13 @@ export default function HubModule({ onPlanReady }: HubModuleProps) {
     textareaRef.current?.focus();
   };
 
-  const activeBrand = BRANDS.find(b => b.id === selectedBrand);
+  const activeBrand = getBrandById(brands, selectedBrand);
+  /**
+   * Los ejemplos hablan de la marca elegida. Si todavía no hay ninguna —cargando, o la
+   * lectura falló y el respaldo tampoco trajo nada—, no se pinta ninguno: un ejemplo con
+   * un hueco donde debería ir el nombre enseña a desconfiar de la pantalla.
+   */
+  const ejemplos = activeBrand ? EXAMPLE_TEMPLATES.map((t) => t(activeBrand.name)) : [];
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[calc(100vh-56px)] px-6 pb-16">
@@ -109,7 +140,14 @@ export default function HubModule({ onPlanReady }: HubModuleProps) {
         transition={{ duration: 0.6, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
         className="w-full max-w-2xl"
       >
-        {/* FIX 1: Brand selector */}
+        {/* U-9 — si las marcas vienen del respaldo, la pantalla lo dice. */}
+        {source === 'fallback' && (
+          <div className="mb-3">
+            <BrandsFallbackNotice source={source} reason={reason} />
+          </div>
+        )}
+
+        {/* Brand selector */}
         <div className="mb-3">
           <div className="relative">
             <select
@@ -119,7 +157,11 @@ export default function HubModule({ onPlanReady }: HubModuleProps) {
               className="w-full appearance-none bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm font-medium text-zinc-200 outline-none hover:border-zinc-700 focus:border-accent/50 transition-all disabled:opacity-50 cursor-pointer pr-10"
               style={{ color: activeBrand?.color ?? '#e4e4e7' }}
             >
-              {BRANDS.map(b => (
+              {/* Mientras cargan no hay opciones que pintar, y decirlo es mejor que un
+                  selector vacío que parece roto. */}
+              {source === 'loading' && <option value="">Cargando marcas…</option>}
+              {source !== 'loading' && !brands.length && <option value="">Sin marcas disponibles</option>}
+              {brands.map(b => (
                 <option key={b.id} value={b.id} style={{ color: b.color, background: '#18181b' }}>
                   {b.name}
                 </option>
@@ -160,7 +202,9 @@ export default function HubModule({ onPlanReady }: HubModuleProps) {
             value={prompt}
             onChange={e => setPrompt(e.target.value)}
             onKeyDown={handleKey}
-            placeholder="Ej: Quiero lanzar el nuevo producto de D7Herbal en Instagram y TikTok..."
+            placeholder={activeBrand
+              ? `Ej: Quiero lanzar el nuevo producto de ${activeBrand.name} en redes esta semana...`
+              : 'Describe tu objetivo en lenguaje natural...'}
             rows={4}
             disabled={isInterpreting}
             className="w-full bg-transparent px-5 pt-5 pb-3 text-base text-zinc-200 placeholder:text-zinc-700 resize-none outline-none leading-relaxed font-body disabled:opacity-50"
@@ -210,7 +254,7 @@ export default function HubModule({ onPlanReady }: HubModuleProps) {
         <div className="mt-6 space-y-2">
           <p className="text-[11px] font-mono uppercase tracking-widest text-zinc-700 text-center mb-3">Ejemplos</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {EXAMPLE_PROMPTS.map((ex, i) => (
+            {ejemplos.map((ex, i) => (
               <motion.button
                 key={i}
                 initial={{ opacity: 0, y: 8 }}

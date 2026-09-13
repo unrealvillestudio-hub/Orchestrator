@@ -70,8 +70,8 @@ REGLAS:
 
 FORMATO DE RESPUESTA (JSON puro, sin markdown):
 {
-  "brandId": "NeuroneSCF" | null,
-  "platforms": ["EMAIL"] | ["INSTAGRAM", "FACEBOOK"] | etc,
+  "brandId": "<uno de los IDs de la lista de marcas válidas>" | null,
+  "platforms": ["<PLATAFORMA>", ...]  (array de strings en MAYÚSCULAS; deduce cuáles del prompt),
   "objective": "email_sequence" | "social_post" | etc,
   "sequence_type": "abandoned_cart" | "welcome" | "post_purchase" | "review_request" | null,
   "sequence_context": {
@@ -145,6 +145,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
   // Cargar brand IDs válidos desde Supabase
   let brandList = '';
+  /** U-9 — el ejemplo de marca del prompt, tomado del dato. Vacío = no se pone ejemplo. */
+  let ejemploMarca = '';
   try {
     const sbRes = await fetchWithTimeout('db',
       `${SB_URL()}/rest/v1/brands?select=id,display_name&status=eq.active`,
@@ -153,6 +155,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if (sbRes.ok) {
       const brands = await sbRes.json() as Array<{id: string; display_name: string}>;
       brandList = brands.map(b => `${b.id} (${b.display_name})`).join(', ');
+      // La PRIMERA de la lista, no una elegida: en cuanto se elige, se vuelve a nombrar
+      // una marca en el código y el problema regresa por la puerta de atrás.
+      ejemploMarca = brands[0]?.id ?? '';
     } else {
       // Una respuesta que llega y no sirve es tan «contexto ausente» como una que no llega.
       contextoFallo('brand_catalog', `HTTP ${sbRes.status}`);
@@ -203,8 +208,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       body: JSON.stringify({
         model: 'claude-sonnet-5',
         max_tokens: 1024,
+        /**
+         * U-9 — EL VOCABULARIO DE MARCA SALE DE LA LISTA QUE ESTE ENDPOINT YA CARGA.
+         *
+         * El literal del prompt traía un id de marca real como ejemplo y dos plataformas
+         * concretas como valor canónico: vocabulario de un cliente dentro de un prompt de
+         * capa compartida, que es el caso que la regla multimarca nombra explícitamente.
+         *
+         * Ahora el ejemplo se toma de `brandList`, que viene de la base. Si la lista no se
+         * pudo cargar, el prompt OMITE el ejemplo en vez de inventarlo: un ejemplo con una
+         * marca que ya no existe enseña al modelo a responder con una marca que ya no
+         * existe. `ejemploMarca` es la primera de la lista, no una elegida.
+         */
         system: INTERPRET_SYSTEM_PROMPT
           + (brandList ? `\n\nBRANDS VÁLIDAS — ÚNICOS IDs permitidos para brandId: ${brandList}. Si el prompt no menciona ninguna explícitamente, usa brandId: null. NUNCA inventes un brand_id que no esté en esta lista.` : '')
+          + (ejemploMarca ? `\n\nEjemplo de brandId bien formado: "${ejemploMarca}".` : '')
           + brandContextHint,
         messages: [{ role: 'user', content: userPrompt }],
       }),

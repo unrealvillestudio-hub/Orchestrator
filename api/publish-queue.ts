@@ -2,8 +2,20 @@
  * UNRLVL Orchestrator — api/publish-queue.ts  (PUBLISH-UI-01 · parcial de SOLO LECTURA)
  *
  * Lista las piezas candidatas a salir, con su canal de destino, el estado operativo de ese
- * canal y —desde PR-C— la FRANJA RESERVADA de cada una. NO aprueba, NO programa, NO
- * publica y NO escribe nada: aprobar es del carril de calibración (ver `approval.reason`).
+ * canal y —desde PR-C— la FRANJA RESERVADA de cada una. **Este endpoint es de SOLO
+ * LECTURA**: no programa, no publica y no escribe. Las acciones sobre una pieza —aprobar
+ * incluida— las ejecutan sus propios endpoints, y qué acciones admite cada pieza viaja en
+ * `pieces[].actions` desde U-4.
+ *
+ * U-9 — LO QUE ESTA LÍNEA DECÍA ANTES, Y LA REGLA QUE DEJA ESCRITA. Decía que «aprobar es
+ * del carril de calibración (ver `approval.reason`)», y las dos mitades llevaban días
+ * siendo falsas: esta bandeja aprueba desde U-5, y el campo `approval` se retiró en U-6.
+ * Fue la tercera aparición en tres días de la misma clase de defecto.
+ *
+ * La regla, para que no haya una cuarta: **un docstring que describe OTRA pantalla o un
+ * campo AJENO caduca sin que nadie lo note**, porque quien cambia ese campo no viene a
+ * leer este archivo. Si un texto afirma algo sobre disponibilidad, sale del contrato o no
+ * se escribe.
  *
  * Fuente y filtros:
  *   1. `content.content_pieces` con `discarded_at IS NULL`     (base común con calibración)

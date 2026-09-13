@@ -2,12 +2,15 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { CheckCircle2, XCircle, Clock, ChevronRight, Inbox } from 'lucide-react';
 import { useFlowStore } from '../../store/useFlowStore';
-import { getBrandById } from '../../config/brands';
+// U-9 — las marcas salen del dato. Acá sólo se resuelve una por su id.
+import { useBrands } from '../../services/useBrands';
+import { getBrandById } from '../../services/brandsLoader';
 import { getLabById } from '../../config/labs';
 import { cn } from '../../ui/components';
 
 export default function JobMonitorModule() {
   const { completedFlows } = useFlowStore();
+  const { brands } = useBrands();
 
   if (completedFlows.length === 0) {
     return (
@@ -35,7 +38,7 @@ export default function JobMonitorModule() {
 
       <div className="space-y-3">
         {completedFlows.map((flow, i) => {
-          const brand = getBrandById(flow.brandId);
+          const brand = getBrandById(brands, flow.brandId);
           const completedStages = flow.stages.filter(s => ['completed', 'approved'].includes(s.status)).length;
           const failedStages = flow.stages.filter(s => s.status === 'error').length;
 
