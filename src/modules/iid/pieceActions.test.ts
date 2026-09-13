@@ -77,6 +77,20 @@ describe('pieza sin imagen', () => {
   });
 });
 
+// ── 3 bis · Pieza sellada — U-6 §5.3 ─────────────────────────────────────────────
+describe('pieza ya sellada', () => {
+  it('las seis apagadas CON su motivo, ninguna oculta', () => {
+    // Es el caso que más se ve en Retenidas: una pieza descartada o ya juzgada sigue
+    // listada por su arbitraje pendiente. Seis botones apagados y explicados dicen qué
+    // pasa; seis botones ausentes obligan a preguntarse si la pantalla se rompió.
+    const SELLADA = 'Esta pieza ya está sellada: no admite más acciones.';
+    const bs = actionButtons(Object.fromEntries(KEYS.map((k) => [k, NO(SELLADA)])) as PieceActions);
+    expect(bs).toHaveLength(6);
+    expect(activos(bs)).toEqual([]);
+    for (const b of bs) expect(b.reason).toBe(SELLADA);
+  });
+});
+
 // ── Fail-loud sobre un contrato incompleto ───────────────────────────────────────
 describe('contrato que no declara una acción', () => {
   it('se apaga y lo dice — nunca se asume disponible', () => {
@@ -240,8 +254,22 @@ describe('los dos textos caducos se retiraron', () => {
   });
 
   it('la bandeja de publicación ya no lee `approval`', () => {
-    // El campo sigue en el contrato, marcado `deprecated`, pero sin lector: su borrado es U-6.
+    // U-5 le quitó el lector; U-6 borró el campo. Esta prueba cuida el lado del front: si
+    // alguien vuelve a leerlo, leería `undefined` y pintaría un aviso permanente.
     expect(PUBLISH_CODE).not.toMatch(/data\.approval/);
+  });
+
+  it('el campo `approval` se retiró del contrato — U-6', () => {
+    // Se comprueba en los DOS lados, porque un campo retirado a medias es peor que uno
+    // vigente: el tipo promete algo que la respuesta ya no trae.
+    const ENDPOINT = soloCodigo(readFileSync(new URL('../../../api/publish-queue.ts', import.meta.url), 'utf8'));
+    const CLIENTE = soloCodigo(readFileSync(new URL('../../services/publishInbox.ts', import.meta.url), 'utf8'));
+    expect(ENDPOINT).not.toMatch(/^\s*approval:/m);
+    expect(CLIENTE).not.toMatch(/^\s*approval:/m);
+    // Y la bandeja sigue entregando lo que sí se usa: el retiro no se llevó nada por delante.
+    expect(ENDPOINT).toContain('cutoffs_source:');
+    expect(ENDPOINT).toContain('slots_source:');
+    expect(CLIENTE).toContain('pieces: PublishablePiece[];');
   });
 });
 
@@ -324,12 +352,19 @@ describe('toda acción que resuelve la pieza lo dice, y lo dice igual en las dos
 describe('el apagado se distingue por su forma, no por su transparencia', () => {
   it('un botón no disponible NO lleva su estilo de acción, lleva el neutro', () => {
     expect(ACTIONS_CODE).toContain('b.available ? BUTTON_STYLE[b.key] : DISABLED_STYLE');
-    // El barrido se acota a la FILA DE ACCIONES, que es donde vivía el defecto: seis botones
-    // compitiendo entre sí. El botón de confirmar de un panel sí puede atenuarse — está solo
-    // y no compite con nada, así que ahí `disabled:opacity` es correcto y se deja.
-    const i = ACTIONS_CODE.indexOf('buttons.map');
-    const fila = ACTIONS_CODE.slice(i);
-    expect(fila).not.toMatch(/disabled:opacity-\d+/);
+    // El barrido se acota a DONDE SE PINTA UN BOTÓN DE ACCIÓN, que es donde vivía el
+    // defecto: seis botones compitiendo entre sí. El botón de confirmar de un panel sí
+    // puede atenuarse — está solo y no compite con nada, así que ahí `disabled:opacity` es
+    // correcto y se deja.
+    //
+    // El ancla se movió en U-6: `buttons.map` desapareció al partirse la fila en dos
+    // niveles, y un `indexOf` que devuelve -1 hace pasar la prueba sin medir nada. Ahora
+    // apunta al pintor único, y se comprueba que existe antes de barrer.
+    const i = ACTIONS_CODE.indexOf('const pintar =');
+    const j = ACTIONS_CODE.indexOf('if (doneNote)', i);
+    expect(i, 'no se encontró el pintor de botones: el barrido no mediría nada').toBeGreaterThan(-1);
+    expect(j, 'no se encontró el final del pintor: el barrido leería el panel').toBeGreaterThan(i);
+    expect(ACTIONS_CODE.slice(i, j)).not.toMatch(/disabled:opacity-\d+/);
   });
 
   it('el estilo neutro no tiene relleno ni sombra: nada que compita con los activos', () => {
@@ -346,5 +381,60 @@ describe('el apagado se distingue por su forma, no por su transparencia', () => 
     const i = ACTIONS_CODE.indexOf('const BUTTON_STYLE');
     const tabla = ACTIONS_CODE.slice(i, ACTIONS_CODE.indexOf('};', i));
     expect(tabla).not.toContain('flex-1');
+  });
+});
+
+// ── 11 · Los niveles por aprendizaje — U-6 §2 bis ────────────────────────────────
+/**
+ * LA JERARQUÍA SE PRUEBA SOBRE EL ORDEN QUE DEVUELVE LA LÓGICA PURA, NO SOBRE CSS.
+ *
+ * Una prueba de estilos se rompe al cambiar un color —y entonces se «arregla» cambiando la
+ * prueba—. Una de orden se rompe sólo cuando cambia la doctrina, que es exactamente cuando
+ * tiene que romperse y mirarse.
+ *
+ * La doctrina, de Sam el 2026-09-13: el carril es CALIBRACIÓN y existe para que haya
+ * aprendizaje. Pesa más lo que escribe el corpus. Un arreglo no compite con un juicio.
+ */
+describe('el nivel de una acción lo decide qué deja aprendizaje', () => {
+  const NIVEL = (k: PieceActionKey) => ACTION_SPECS.find((s) => s.key === k)!.weight;
+
+  it('las tres que escriben el corpus son primarias; el descarte, secundario', () => {
+    expect([NIVEL('approve'), NIVEL('reject'), NIVEL('fixable')])
+      .toEqual(['primary', 'primary', 'primary']);
+    // Descartar SELLA, pero no entra al corpus: sella y no enseña. Por eso no es primaria.
+    expect(NIVEL('discard')).toBe('secondary');
+  });
+
+  it('editar y regenerar son TERCIARIAS: corrigen el artefacto y no dejan aprendizaje', () => {
+    expect(NIVEL('edit_text')).toBe('tertiary');
+    expect(NIVEL('recompose_image')).toBe('tertiary');
+  });
+
+  it('las tres primarias se pintan PRIMERO Y JUNTAS, sin nada intercalado', () => {
+    const orden = actionButtons(conTodo).map((b) => b.key);
+    expect(orden.slice(0, 3)).toEqual(['approve', 'reject', 'fixable']);
+  });
+
+  it('ningún arreglo va antes de un juicio, en ninguna bandeja', () => {
+    // Es la prueba que protege §2 bis de un reordenamiento bienintencionado: no mira dónde
+    // está cada botón, mira que ningún terciario adelante a un primario.
+    const bs = actionButtons(conTodo);
+    const ultimoJuicio = bs.map((b) => b.weight).lastIndexOf('primary');
+    const primerArreglo = bs.map((b) => b.weight).indexOf('tertiary');
+    expect(primerArreglo).toBeGreaterThan(ultimoJuicio);
+  });
+
+  it('el nivel NO toca la disponibilidad: se degrada el peso, nunca el permiso', () => {
+    // La forma exacta de hacerlo mal: subordinar un arreglo apagándolo. Las seis siguen
+    // disponibles cuando el contrato las declara disponibles, sea cual sea su nivel.
+    const bs = actionButtons(conTodo);
+    for (const b of bs) expect(b.available, `${b.key} perdió disponibilidad por su nivel`).toBe(true);
+  });
+
+  it('cada acción declara su nivel: ninguna se queda sin doctrina', () => {
+    // Si entra una acción nueva sin `weight`, TypeScript la caza; si entra con un nivel
+    // inventado, la caza esto.
+    for (const s of ACTION_SPECS)
+      expect(['primary', 'secondary', 'tertiary'], `${s.key} sin nivel válido`).toContain(s.weight);
   });
 });

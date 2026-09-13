@@ -53,10 +53,75 @@ describe('la decisión binaria es la acción primaria', () => {
   it('editar es TERCIARIO: sin color propio y empujado al margen', () => {
     // `ml-auto` + gris es lo que lo manda al costado. Un botón de edición con el mismo peso
     // visual que los veredictos convertiría la salida en el camino.
-    const editBtn = ACTION_ROW.slice(ACTION_ROW.indexOf('{piece && editing === null && ('));
+    //
+    // U-6 movió el ancla: el enlace dejó de abrir sólo el título y pasó a desplegar las
+    // acciones de pieza, así que su condición ya no es `editing === null`. Se comprueba que
+    // el ancla EXISTE antes de medir: un `indexOf` que devuelve -1 deja `slice(-1)` —un solo
+    // carácter— y la prueba pasaría sin verificar nada.
+    const i = ACTION_ROW.indexOf('{piece && !resolved && (');
+    expect(i, 'no se encontró el enlace terciario de la fila de acción').toBeGreaterThan(-1);
+    const editBtn = ACTION_ROW.slice(i);
     expect(editBtn).toContain('ml-auto');
     expect(editBtn).toContain('text-zinc-600');
     expect(editBtn).not.toMatch(/bg-(accent|amber|emerald)/);
+  });
+});
+
+/**
+ * U-6 · PARIDAD EN LAS BANDEJAS — y la forma exacta de hacerla mal.
+ *
+ * Paridad de CAPACIDADES no es paridad de JERARQUÍA: que una acción esté disponible en las
+ * cuatro bandejas no significa que pese lo mismo en todas. Acá el arbitraje manda, y las
+ * acciones de pieza entran al nivel del enlace terciario.
+ */
+describe('las acciones de pieza entran al nivel de «Editar», no al de los veredictos', () => {
+  it('monta el componente compartido en vez de reimplementar los botones', () => {
+    expect(CODE).toContain('PieceActionsBar');
+    // Si estas llamadas aparecieran acá, habría una segunda implementación que divergiría.
+    expect(CODE).not.toContain('saveVerdict');
+    expect(CODE).not.toContain('discardPiece');
+    expect(CODE).not.toContain('recomposeImage');
+  });
+
+  it('los dos veredictos van ANTES del enlace, y el enlace antes de las acciones', () => {
+    const juez = ACTION_ROW.indexOf("onDecide('judge_was_right')");
+    const regla = ACTION_ROW.indexOf("onDecide('rule_failed')");
+    const enlace = ACTION_ROW.indexOf('{piece && !resolved && (');
+    const barra = ACTION_ROW.indexOf('<PieceActionsBar');
+    expect(regla).toBeGreaterThan(juez);
+    expect(enlace).toBeGreaterThan(regla);
+    expect(barra, 'las acciones de pieza no se montan después del enlace').toBeGreaterThan(enlace);
+  });
+
+  it('llegan PLEGADAS: hasta que alguien las pide, la fila de acción es la de antes', () => {
+    // Es lo que impide que seis botones —uno de ellos con relleno sólido— compitan con los
+    // dos del arbitraje. Desplegado por defecto, el corte fallaría aunque todo funcionara.
+    expect(CODE).toMatch(/useState\(false\);?\s*$/m);
+    expect(CODE).toContain('showActions');
+    expect(CODE).toContain('(showActions || resolved)');
+  });
+
+  it('una fila SIN pieza no pinta acciones, y no inventa un contrato vacío', () => {
+    // El arbitraje se puede decidir igual —es sobre la regla—, pero no hay pieza sobre la
+    // que actuar. Un `?? {}` acá encendería seis botones que fallarían al pulsarse.
+    const barra = CODE.indexOf('<PieceActionsBar');
+    expect(barra).toBeGreaterThan(-1);
+    expect(CODE.slice(0, barra)).toMatch(/\{piece && \(showActions \|\| resolved\) && \(/);
+    expect(CODE).not.toMatch(/actions:\s*(piece\.actions\s*\?\?|\{\})/);
+  });
+
+  it('la disponibilidad viene del contrato: cero condicionales de estado en la pantalla', () => {
+    // La regla dura de U-4 y U-5, que este corte extiende a la tercera bandeja.
+    expect(CODE).not.toMatch(/status\s*===\s*'(scheduled|published|awaiting_approval|rejected|draft|deferred|challenged)'/);
+    expect(CODE).not.toMatch(/discarded_at/);
+    expect(CODE).toContain('actions: piece.actions');
+  });
+
+  it('el panel de edición abre con el texto que se ve, no con el que llegó', () => {
+    // Si se pasara `row.piece.body`, una corrección hecha arriba se perdería al abrir el
+    // panel y se re-guardaría la versión vieja encima.
+    expect(CODE).toContain('body: local.body');
+    expect(CODE).toContain('setLocal((l) => ({ ...l, body: after }))');
   });
 });
 

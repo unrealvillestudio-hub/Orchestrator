@@ -14,7 +14,7 @@
  * con el mismo contrato obligarían a cada consumidor a atrapar las dos.
  */
 
-import { CalibrationError, type SearchInfo } from './calibrationInbox';
+import { CalibrationError, type SearchInfo, type PieceActions } from './calibrationInbox';
 
 // ── Tipos (contrato de CALIB-01 §2) ──────────────────────────────────────────
 export type ChallengeVerdict = 'judge_was_right' | 'rule_failed';
@@ -31,6 +31,13 @@ export interface ChallengedPiece {
   edited_at: string | null;
   edited_by: string | null;
   created_at: string | null;
+  /**
+   * U-4 lo puso en la respuesta; U-6 lo declara acá y la bandeja lo usa. QUÉ SE PUEDE HACER
+   * CON ESTA PIEZA LO DICE EL SERVER, igual que en las otras dos bandejas: el front no
+   * vuelve a mirar `status` para decidirlo. Si el contrato no lo trae, `actionButtons` apaga
+   * las seis con su motivo — fail-loud, nunca un botón activo que fallaría al pulsarse.
+   */
+  actions: PieceActions;
 }
 
 /** Una fila de la bandeja ES UN ARBITRAJE, no una pieza: el grano es (pieza, regla). */

@@ -12,6 +12,9 @@ import {
   type ChallengedResult, type ChallengedRow, type ChallengeVerdict, type GuardHit,
 } from '../../services/challengedInbox';
 import { CountPill, Pager, CopyableId, fmtDate, PieceSearchBox, SearchNotice } from './pieceUi';
+// U-6 — las acciones de pieza son el MISMO componente que montan Calibración y Publicación.
+// Una segunda implementación acá divergiría en el primer arreglo que tocara sólo una.
+import { PieceActionsBar } from './pieceActions';
 // Lectura en voz alta. Aquí el texto YA llega plano: el adaptador sólo normaliza la forma.
 import { SpeechReader } from '../../ui/SpeechReader';
 import { readableFromChallengedPiece } from './readablePiece';
@@ -30,6 +33,17 @@ const PAGE = 20;
  *   · los botones ocupan la fila de acción, con peso visual y color propio;
  *   · «Editar» es un enlace terciario, en gris, al costado;
  *   · UN TOQUE = UNA DECISIÓN: sin diálogo de confirmación, sin segundo paso.
+ *
+ * ── U-6 · PARIDAD DE CAPACIDADES NO ES PARIDAD DE JERARQUÍA ──────────────────
+ * Esta bandeja monta ahora el mismo `pieceActions` que Calibración y Publicación, así que
+ * lo que se puede hacer con una pieza depende de SU ESTADO y no de la pantalla en la que
+ * se la mire. Pero entra AL NIVEL DE «EDITAR», no al de los dos botones: el enlace
+ * terciario deja de abrir sólo el título y pasa a desplegar las seis acciones.
+ *
+ * Que una acción esté disponible en las cuatro bandejas no significa que pese lo mismo en
+ * todas. Si el arbitraje deja de ser lo primero que se ve acá, el corte falló aunque las
+ * seis funcionen — y por eso las acciones llegan PLEGADAS: hasta que alguien las pide, la
+ * fila de acción sigue siendo exactamente la de antes.
  *
  * El `undo` es lo que hace seguro no confirmar. La fila se marca decidida en el acto y
  * queda en pantalla con «Deshacer» mientras dura la sesión de trabajo; sólo desaparece al
@@ -268,6 +282,10 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
   const [local, setLocal] = useState<{ title: string | null; body: string | null }>({
     title: row.piece?.title ?? null, body: row.piece?.body ?? null,
   });
+  /** U-6 — las acciones de pieza llegan plegadas: se piden, no se imponen. */
+  const [showActions, setShowActions] = useState(false);
+  /** La pieza salió de circulación por una acción tomada acá. El acuse se queda a la vista. */
+  const [resolved, setResolved] = useState(false);
 
   const piece = row.piece;
   // El texto de la pieza para el lector en voz alta. Aquí no hay artefacto HTML: la bandeja
@@ -363,31 +381,58 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
           </button>
         </div>
       ) : (
-        <div className="flex items-center gap-2 flex-wrap">
-          <VerdictButton
-            onClick={() => onDecide('judge_was_right')}
-            disabled={busy}
-            icon={<Gavel size={14} />}
-            label={VERDICT_LABEL.judge_was_right}
-            hint="el patrón es incompleto · la pieza se descarta"
-            tone="amber"
-          />
-          <VerdictButton
-            onClick={() => onDecide('rule_failed')}
-            disabled={busy}
-            icon={<ShieldQuestion size={14} />}
-            label={VERDICT_LABEL.rule_failed}
-            hint="falso positivo · la pieza sigue a aprobación"
-            tone="emerald"
-          />
-          {/* Terciario a propósito: editar es la SALIDA, no el camino. */}
-          {piece && editing === null && (
-            <button
-              onClick={() => setEditing('title')}
-              className="ml-auto flex items-center gap-1.5 text-[12px] text-zinc-600 hover:text-zinc-400 transition-colors"
-            >
-              <Pencil size={12} /> Editar
-            </button>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <VerdictButton
+              onClick={() => onDecide('judge_was_right')}
+              disabled={busy}
+              icon={<Gavel size={14} />}
+              label={VERDICT_LABEL.judge_was_right}
+              hint="el patrón es incompleto · la pieza se descarta"
+              tone="amber"
+            />
+            <VerdictButton
+              onClick={() => onDecide('rule_failed')}
+              disabled={busy}
+              icon={<ShieldQuestion size={14} />}
+              label={VERDICT_LABEL.rule_failed}
+              hint="falso positivo · la pieza sigue a aprobación"
+              tone="emerald"
+            />
+            {/* Terciario a propósito: editar la pieza es la SALIDA, no el camino. Gris, al
+                margen y PLEGADO — el arbitraje sigue siendo lo primero que se ve. */}
+            {piece && !resolved && (
+              <button
+                onClick={() => setShowActions((v) => !v)}
+                title="Las mismas acciones que ofrecen Calibración y Publicación para esta pieza"
+                className="ml-auto flex items-center gap-1.5 text-[12px] text-zinc-600 hover:text-zinc-400 transition-colors"
+              >
+                <Pencil size={12} /> {showActions ? 'Ocultar acciones' : 'Editar la pieza'}
+              </button>
+            )}
+          </div>
+
+          {/* Las acciones de pieza, desplegadas. Mismo componente, mismo contrato, mismos
+              motivos: la paridad es montar lo que ya existe, no reimplementarlo. */}
+          {piece && (showActions || resolved) && (
+            <div className="pt-2 border-t border-zinc-800/60">
+              <PieceActionsBar
+                piece={{
+                  piece_id: piece.id,
+                  actions: piece.actions,
+                  // El texto EDITADO en esta pantalla, no el que llegó: si Sam acaba de
+                  // corregirlo arriba, el panel de edición tiene que abrir con eso.
+                  title: local.title,
+                  body: local.body,
+                }}
+                token={token}
+                // La pieza se resolvió: el propio componente pinta el acuse y retira sus
+                // botones. Acá sólo se impide volver a plegarlo, porque plegar el acuse
+                // sería tragarse la única señal de que la acción ocurrió.
+                onResolved={() => setResolved(true)}
+                onEdited={(after) => setLocal((l) => ({ ...l, body: after }))}
+              />
+            </div>
           )}
         </div>
       )}

@@ -34,6 +34,29 @@ import { fmtInZone } from './pieceUi';
  * ── UN BOTÓN NO DISPONIBLE SE APAGA, NUNCA SE OCULTA ─────────────────────────────
  * Un botón que desaparece obliga a preguntarse si existe; uno apagado con su motivo dice
  * qué pasa y qué hacer. El motivo viaja en el `title`, que es donde el operador ya mira.
+ *
+ * ── LA JERARQUÍA NO ES ESTÉTICA: LA DECIDE QUÉ DEJA APRENDIZAJE ──────────────────
+ * Principio de Sam, 2026-09-13 · U-6 §2 bis. El carril es CALIBRACIÓN y existe para que
+ * haya aprendizaje. Editar el texto no deja aprendizaje por sí mismo: es un complemento
+ * «good to have», no el camino correcto para el objetivo de la calibración.
+ *
+ * De ahí salen los tres niveles, y no son una opinión de estilo — las seis acciones no
+ * pesan lo mismo porque no producen lo mismo:
+ *
+ *   · PRIMARIO — juicio: `approve`, `reject`, `fixable`. **Escriben el corpus.** Son las
+ *     que enseñan, y se pintan PRIMERO Y JUNTAS, sin nada intercalado entre las tres.
+ *   · SECUNDARIO — sello sin juicio: `discard`. Saca la pieza de la bandeja y NO entra al
+ *     corpus. Sella, pero no enseña.
+ *   · TERCIARIO — arreglo: `edit_text`, `recompose_image`. Corrigen el artefacto y no
+ *     dejan aprendizaje. Van después de las demás y visualmente subordinadas.
+ *
+ * Lo que se degrada es el PESO, nunca la DISPONIBILIDAD: las seis siguen ahí y siguen
+ * funcionando. Quién puede hacer qué lo sigue diciendo el contrato, no este orden.
+ *
+ * Y el corolario que evita la discusión de la próxima vez: cuando entre una acción nueva,
+ * lo primero que se pregunta no es dónde ponerla, sino SI ESCRIBE EN EL CORPUS — la
+ * respuesta decide el nivel. Un orden de botones sin el motivo escrito se reordena en el
+ * siguiente PR que toque el archivo, y vuelve.
  */
 
 // ── El contrato de entrada ───────────────────────────────────────────────────────
@@ -57,34 +80,47 @@ export type ActionOutcome = 'approved' | 'rejected' | 'fixable' | 'discarded';
 
 // ── La tabla de acciones: eje del sistema, no de una bandeja ─────────────────────
 /**
- * Las seis, en el orden en que se pintan. Cada una declara su etiqueta y su forma, y NADA
- * sobre cuándo está disponible — eso es del contrato.
+ * Las seis, EN EL ORDEN EN QUE SE PINTAN — y ese orden es el de la doctrina de arriba:
+ * primero las tres que escriben el corpus, después la que sella sin juicio, al final las
+ * dos que sólo arreglan. Cada una declara su etiqueta, su forma y su NIVEL, y nada sobre
+ * cuándo está disponible — eso es del contrato.
+ *
+ * `weight` es el nivel, y es lógica pura a propósito: así el orden se puede probar sin
+ * mirar una clase de CSS. Una prueba de estilos se rompe al cambiar un color; una de orden
+ * se rompe sólo cuando cambia la doctrina, que es cuando tiene que romperse.
  *
  * `panel` dice qué panel de texto abre. `null` = se ejecuta de un clic, sin panel: aprobar
  * es la única que no pide nada escrito, porque no hay nada que explicar en un visto bueno.
  *
  * `seals` marca las tres que SACAN LA PIEZA DE CIRCULACIÓN. Es lo que decide si el texto de
- * confirmación habla de la franja: son exactamente las que la liberan (U-3).
+ * confirmación habla de la franja: son exactamente las que la liberan (U-3). No coincide
+ * con `weight`: `discard` sella y no enseña, y por eso no está en el nivel primario.
  */
+export type ActionWeight = 'primary' | 'secondary' | 'tertiary';
+
 export const ACTION_SPECS: ReadonlyArray<{
   key: PieceActionKey;
   label: string;
   panel: PanelKey | null;
   seals: boolean;
+  weight: ActionWeight;
   hint: string;
 }> = [
-  { key: 'approve', label: 'Aprobar', panel: null, seals: false,
+  // Nivel primario — juicio: escriben el corpus. Van primero y juntas.
+  { key: 'approve', label: 'Aprobar', panel: null, seals: false, weight: 'primary',
     hint: 'Habilita la pieza. La franja la calcula content-scheduler.' },
-  { key: 'reject', label: 'Rechazar', panel: 'reject', seals: true,
+  { key: 'reject', label: 'Rechazar', panel: 'reject', seals: true, weight: 'primary',
     hint: 'Entra al corpus como rechazo y sella la pieza.' },
-  { key: 'fixable', label: 'Fixable', panel: 'fix', seals: true,
+  { key: 'fixable', label: 'Fixable', panel: 'fix', seals: true, weight: 'primary',
     hint: 'Hay algo que aprovechar. Sella la pieza igual que un rechazo y guarda la propuesta.' },
-  { key: 'edit_text', label: 'Editar texto', panel: 'edit', seals: false,
-    hint: 'Corrige el texto de la pieza. No es un veredicto: la pieza sigue donde está.' },
-  { key: 'recompose_image', label: 'Regenerar imagen', panel: 'regen', seals: false,
-    hint: 'Regenera la escena con una corrección, sin votar.' },
-  { key: 'discard', label: 'Descartar', panel: 'discard', seals: true,
+  // Nivel secundario — sella sin juicio: saca la pieza y no enseña nada.
+  { key: 'discard', label: 'Descartar', panel: 'discard', seals: true, weight: 'secondary',
     hint: 'No voy a juzgar esta pieza: sale de la bandeja y NO entra al corpus.' },
+  // Nivel terciario — arreglo: corrigen el artefacto y no dejan aprendizaje.
+  { key: 'edit_text', label: 'Editar texto', panel: 'edit', seals: false, weight: 'tertiary',
+    hint: 'Corrige el texto de la pieza. No es un veredicto: la pieza sigue donde está.' },
+  { key: 'recompose_image', label: 'Regenerar imagen', panel: 'regen', seals: false, weight: 'tertiary',
+    hint: 'Regenera la escena con una corrección, sin votar.' },
 ];
 
 export type PanelKey = 'reject' | 'fix' | 'edit' | 'regen' | 'discard';
@@ -100,7 +136,7 @@ export type PanelKey = 'reject' | 'fix' | 'edit' | 'regen' | 'discard';
  */
 export function actionButtons(actions: PieceActions | null | undefined): Array<{
   key: PieceActionKey; label: string; panel: PanelKey | null; seals: boolean;
-  available: boolean; reason: string | null; hint: string;
+  weight: ActionWeight; available: boolean; reason: string | null; hint: string;
 }> {
   return ACTION_SPECS.map((spec) => {
     const a = actions?.[spec.key];
@@ -253,12 +289,28 @@ const DISABLED_STYLE =
   'border border-dashed border-zinc-800 bg-transparent text-zinc-600 shadow-none font-normal';
 
 const BUTTON_STYLE: Record<PieceActionKey, string> = {
+  // Primario — juicio: color propio, porque son las que escriben el corpus.
   approve: 'bg-accent text-black hover:bg-accent/90 shadow-md shadow-accent/20 font-semibold',
   reject: 'border border-rose-500/30 text-rose-300/90 hover:bg-rose-500/10',
   fixable: 'border border-sky-500/30 text-sky-300/90 hover:bg-sky-500/10',
-  edit_text: 'border border-emerald-500/30 text-emerald-300/90 hover:bg-emerald-500/10',
-  recompose_image: 'border border-violet-500/30 text-violet-300/90 hover:bg-violet-500/10',
+  // Secundario — sella sin juicio: borde neutro, sin color que señale una decisión.
   discard: 'border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200',
+  // Terciario — arreglo: sin color y sin borde a la vista, el mismo tratamiento que
+  // «Editar» tiene ya en Retenidas. El borde transparente existe sólo para que el apagado
+  // no abulte MÁS que el disponible: `DISABLED_STYLE` trae borde punteado.
+  edit_text: 'border border-transparent text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60',
+  recompose_image: 'border border-transparent text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60',
+};
+
+/**
+ * LA FORMA DE CADA NIVEL, separada del color. Un arreglo no sólo cambia de color respecto a
+ * un juicio: ocupa menos sitio y pesa menos tipográficamente. Si sólo cambiara el color,
+ * seguiría leyéndose como un botón más de la misma fila.
+ */
+const WEIGHT_SHAPE: Record<ActionWeight, string> = {
+  primary: 'px-4 py-2.5 rounded-lg text-sm font-medium',
+  secondary: 'px-4 py-2.5 rounded-lg text-sm font-medium',
+  tertiary: 'px-2.5 py-1.5 rounded-md text-[12px] font-normal',
 };
 
 const ICON: Record<PieceActionKey, React.ReactNode> = {
@@ -302,6 +354,12 @@ export function PieceActionsBar({
   const [regenNote, setRegenNote] = useState<null | { compuesta: boolean; refrescado: boolean; posts: number }>(null);
 
   const buttons = actionButtons(piece.actions);
+  /**
+   * LOS DOS GRUPOS SALEN DEL NIVEL, no de una lista escrita aparte. Si mañana entra una
+   * acción nueva, basta con declarar su `weight` en `ACTION_SPECS` y cae donde le toca.
+   */
+  const juicio = buttons.filter((b) => b.weight !== 'tertiary');
+  const arreglo = buttons.filter((b) => b.weight === 'tertiary');
   const spec = panel ? buttons.find((b) => b.panel === panel) : null;
   const copy = panel ? PANEL_COPY[panel] : null;
   const warning = spec ? slotWarning(spec.seals, piece.slot) : null;
@@ -415,6 +473,39 @@ export function PieceActionsBar({
     if (panel === 'edit') return submitEdit(false);
     return submitDiscard();
   };
+
+  /**
+   * UN SOLO PINTOR PARA LOS TRES NIVELES. Lo que cambia entre un juicio y un arreglo es la
+   * FORMA (`WEIGHT_SHAPE`) y el COLOR (`BUTTON_STYLE`), nunca el comportamiento: el mismo
+   * clic, el mismo panel, el mismo apagado con su motivo. Dos renderizadores distintos
+   * habrían divergido en el primer arreglo que tocara sólo uno.
+   */
+  const pintar = (b: (typeof buttons)[number]) => (
+    <button
+      key={b.key}
+      onClick={() => {
+        if (!b.available) return;
+        if (b.panel) return open(b.panel);
+        return submitVerdict('approved', 'approve');
+      }}
+      disabled={!!busy || !b.available}
+      // EL MOTIVO VIAJA EN EL TÍTULO. Un botón apagado sin explicación obliga a
+      // adivinar, y quien adivina termina preguntándolo por chat.
+      title={b.available ? b.hint : (b.reason ?? 'No disponible para esta pieza.')}
+      className={cn(
+        'flex items-center justify-center gap-2 transition-colors',
+        WEIGHT_SHAPE[b.weight],
+        // Apagado: estilo neutro en lugar del suyo, no su estilo atenuado.
+        b.available ? BUTTON_STYLE[b.key] : DISABLED_STYLE,
+        // `busy` atenúa sin cambiar la forma: la acción sigue siendo la que era,
+        // sólo está en curso.
+        !b.available && 'cursor-not-allowed',
+        !!busy && b.available && 'opacity-50 cursor-wait',
+      )}
+    >
+      {busy === b.key ? <Spinner size={14} /> : <>{ICON[b.key]} {b.label}</>}
+    </button>
+  );
 
   // Resuelta: lo único que queda en la tarjeta es el acuse. Los botones se retiran para que
   // nadie vuelva a pulsar sobre una pieza que ya se movió.
@@ -564,32 +655,13 @@ export function PieceActionsBar({
             <p className="text-[10px] font-mono leading-snug text-zinc-600">{copy?.foot}</p>
           </motion.div>
         ) : (
-          <motion.div key="actions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex gap-2 flex-wrap">
-            {buttons.map((b) => (
-              <button
-                key={b.key}
-                onClick={() => {
-                  if (!b.available) return;
-                  if (b.panel) return open(b.panel);
-                  return submitVerdict('approved', 'approve');
-                }}
-                disabled={!!busy || !b.available}
-                // EL MOTIVO VIAJA EN EL TÍTULO. Un botón apagado sin explicación obliga a
-                // adivinar, y quien adivina termina preguntándolo por chat.
-                title={b.available ? b.hint : (b.reason ?? 'No disponible para esta pieza.')}
-                className={cn(
-                  'flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                  // Apagado: estilo neutro en lugar del suyo, no su estilo atenuado.
-                  b.available ? BUTTON_STYLE[b.key] : DISABLED_STYLE,
-                  // `busy` atenúa sin cambiar la forma: la acción sigue siendo la que era,
-                  // sólo está en curso.
-                  !b.available && 'cursor-not-allowed',
-                  !!busy && b.available && 'opacity-50 cursor-wait',
-                )}
-              >
-                {busy === b.key ? <Spinner size={14} /> : <>{ICON[b.key]} {b.label}</>}
-              </button>
-            ))}
+          <motion.div key="actions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
+            {/* Juicio y sello: primero y juntos, sin un arreglo intercalado entre ellos. */}
+            <div className="flex gap-2 flex-wrap">{juicio.map(pintar)}</div>
+            {/* Arreglos: después, y subordinados. Siguen disponibles — pesan menos, nada más. */}
+            {arreglo.length > 0 && (
+              <div className="flex gap-1.5 flex-wrap items-center">{arreglo.map(pintar)}</div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
