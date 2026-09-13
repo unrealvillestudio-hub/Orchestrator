@@ -331,8 +331,80 @@ export function generationOf(piece: ContentPiece, cutoffs: PipelineCutoff[]): Ge
   };
 }
 
+// ── ACCIONES POR PIEZA · U-4 ────────────────────────────────────────────────────
+/**
+ * QUÉ SE PUEDE HACER CON ESTA PIEZA, Y SI NO SE PUEDE, POR QUÉ NO.
+ *
+ * Hasta U-4 la respuesta dependía de la PANTALLA: editar sólo en retenidas, recomponer
+ * sólo en calibración, y en publicación nada. Eso no era una regla, era el orden en que
+ * se construyeron las bandejas. Acá la respuesta depende del ESTADO DE LA PIEZA, que es
+ * lo único que la gobierna de verdad.
+ *
+ * Es una función PURA sobre la fila: no lee la red, no mira la franja y no sabe desde qué
+ * bandeja la llaman. Si algún día una acción se habilita o se cierra, se cambia acá y
+ * NINGUNA pantalla se toca — que es el motivo entero de este corte.
+ *
+ * El MOTIVO es obligatorio cuando `available` es false. Un botón apagado sin explicación
+ * obliga a adivinar, y quien adivina termina pidiéndoselo a alguien por chat.
+ */
+export type PieceActionKey =
+  | 'approve' | 'reject' | 'fixable' | 'discard' | 'edit_text' | 'recompose_image';
+
+export interface PieceAction {
+  available: boolean;
+  /** Por qué NO está disponible. `null` cuando sí lo está. */
+  reason: string | null;
+}
+
+export type PieceActions = Record<PieceActionKey, PieceAction>;
+
+export const ACTION_KEYS: readonly PieceActionKey[] =
+  ['approve', 'reject', 'fixable', 'discard', 'edit_text', 'recompose_image'];
+
+const SI: PieceAction = { available: true, reason: null };
+const NO = (reason: string): PieceAction => ({ available: false, reason });
+
+/** Las tres razones transversales, escritas una sola vez. */
+const YA_PUBLICADA = 'La pieza ya salió. Revertir una publicación no es una acción de bandeja.';
+const YA_DESCARTADA = 'La pieza ya está sellada: tiene `discarded_at`. Un veredicto no se pisa.';
+const YA_APROBADA = 'Ya está aprobada y con franja. Para cambiar de opinión, rechazar o descartar.';
+
+export function actionsFor(piece: {
+  status?: string | null;
+  discarded_at?: string | null;
+  assets?: { image?: { url?: string | null } } | null;
+}): PieceActions {
+  const todas = (a: PieceAction): PieceActions =>
+    Object.fromEntries(ACTION_KEYS.map((k) => [k, a])) as PieceActions;
+
+  // ORDEN DE LAS PUERTAS, Y NO ES INDIFERENTE. `published` manda sobre `discarded_at`:
+  // una pieza publicada Y descartada es un estado incoherente que el carril puede producir,
+  // y el motivo que hay que leer es que ya salió, no que esté sellada.
+  if (piece?.status === 'published') return todas(NO(YA_PUBLICADA));
+  if (piece?.discarded_at) return todas(NO(YA_DESCARTADA));
+
+  const aprobada = piece?.status === 'scheduled';
+  const hayImagen = typeof piece?.assets?.image?.url === 'string' && !!piece.assets.image.url;
+
+  return {
+    // Aprobar es habilitar. Una pieza ya habilitada no se vuelve a habilitar.
+    approve: aprobada ? NO(YA_APROBADA) : SI,
+    // Los tres que sacan la pieza de circulación valen en CUALQUIER estado vivo, incluida
+    // `scheduled`. Ésa es la novedad que U-3 dejó lista: al sellarla, su franja se libera.
+    reject: SI,
+    fixable: SI,
+    discard: SI,
+    edit_text: SI,
+    recompose_image: hayImagen
+      ? SI
+      : NO('Esta pieza no tiene imagen: no hay nada que recomponer.'),
+  };
+}
+
 /** Contexto plano de una pieza (lo que la bandeja muestra y el corpus copia). */
 export interface PieceContext {
+  /** U-4 — qué se puede hacer con esta pieza. Lo decide el contrato, nunca la pantalla. */
+  actions: PieceActions;
   piece_id: string;
   brand_id: string;
   voice: string | null;
@@ -408,6 +480,10 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
   const trace = extras.trace ?? EMPTY_TRACE;
   const gen = extras.generation ?? UNKNOWN_GENERATION;
   return {
+    // U-4 — va PRIMERO a propósito: es lo que la tarjeta necesita antes de pintar nada.
+    // `calibration-queue` y `publish-queue` lo heredan sin tocarse, porque las dos arman
+    // su pieza con esta función.
+    actions: actionsFor(piece),
     piece_id: piece.id,
     brand_id: piece.brand_id,
     voice: piece.voice ?? null,

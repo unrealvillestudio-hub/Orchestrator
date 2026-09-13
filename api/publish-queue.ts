@@ -198,14 +198,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // cadencia real). Un aviso que describe un sistema que ya cambió es peor que ninguno: enseña a
       // desconfiar de los avisos.
       //
-      // La bandeja de publicación sigue sin aprobar, pero por otro motivo y por diseño: aprobar es
-      // del carril de CALIBRACIÓN, que es donde se juzga la pieza. Ésta muestra a dónde va y si el
-      // canal está operativo.
+      // U-4 — ESTE BLOQUE DEJÓ DE SER LA RESPUESTA, Y NO SE BORRA: SE REDIRIGE.
+      // El motivo viejo decía que esta bandeja no aprueba POR DISEÑO, y eso dejó de ser
+      // cierto por decisión de Sam del 2026-09-13: lo que se puede hacer con una pieza
+      // depende de SU ESTADO, no de la bandeja donde se la mire. Eso viaja ahora en
+      // `pieces[].actions`, una entrada por acción y con su motivo cuando no está disponible.
+      //
+      // POR QUÉ SIGUE EN `false`, Y NO ES UN OLVIDO. `PublishQueueModule` pinta su aviso
+      // ámbar exactamente cuando este campo es `false`. Ponerlo en `true` acá apagaría ese
+      // aviso UN CORTE ANTES de que exista el botón, y dejaría la bandeja muda: ni avisa ni
+      // aprueba. El campo vuelve a `true` en U-5, que es cuando la bandeja aprueba de verdad.
+      // Decisión de Sam del 2026-09-13, sobre la contradicción entre §3 y §5.a del brief.
+      //
+      // La nota de SIGN-01 corte E que vivía acá queda cumplida por segunda vez: advertía que
+      // un motivo obsoleto enseña a desconfiar de los avisos, y era este motivo el que había
+      // quedado obsoleto. Se reescribe para que diga lo que hoy es cierto — que el botón
+      // todavía no existe — en vez de lo que se creía en su momento.
+      //
+      // `deprecated: true` es la señal de que este campo de nivel superior se retira en
+      // cuanto ningún consumidor lo lea: la respuesta ya vive por pieza, en `actions`.
       approval: {
         available: false,
-        reason: 'Esta bandeja no aprueba por diseño: la aprobación vive en la bandeja de calibración, '
-          + 'que es donde se juzga la pieza. Aprobar allá sella la habilitación y content-scheduler '
-          + '(modo placement) calcula la franja. Acá se ve a dónde va cada pieza y si su canal está operativo.',
+        deprecated: true,
+        reason: 'Todavía no hay botón de aprobar en esta bandeja: llega en el corte siguiente. '
+          + 'Lo que se puede hacer con cada pieza ya viaja por pieza, en `pieces[].actions`, '
+          + 'con su motivo cuando una acción no está disponible.',
       },
       cutoffs_source: cutoffsRaw === null ? 'unavailable' : (cutoffs.length ? 'seeded' : 'empty'),
       ...(truncated ? { truncated: true } : {}),

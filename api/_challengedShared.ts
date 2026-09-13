@@ -35,7 +35,10 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { SB_URL, SB_KEY, channelTextOf, type PieceTextInput, type TextSource } from './_calibrationShared.js';
+import {
+  SB_URL, SB_KEY, channelTextOf, actionsFor,
+  type PieceTextInput, type TextSource, type PieceActions,
+} from './_calibrationShared.js';
 import { readingLanguageOf, type BrandLanguageCatalog } from './_brandLanguage.js';
 
 // ── Tipos del contrato (CALIB-01 §2) ─────────────────────────────────────────────
@@ -81,6 +84,13 @@ export interface ChallengedRow {
    */
   reading_language: string | null;
   piece: {
+    /**
+     * U-4 — qué se puede hacer con esta pieza. Sale de `actionsFor`, igual que en las otras
+     * dos bandejas: la acción la decide el ESTADO de la pieza, no la pantalla que la abre.
+     * Cuando la pieza no se pudo leer, el sub-objeto entero es `null` y NO se inventan
+     * acciones — no saber qué se puede hacer no es lo mismo que poder hacerlo todo.
+     */
+    actions: PieceActions;
     id: string;
     title: string | null;
     body: string | null;
@@ -176,7 +186,10 @@ export async function fetchRuleStatements(codes: string[]): Promise<Map<string, 
 }
 
 /** Las columnas de pieza que la bandeja necesita. `assets` trae el texto y el título. */
-const PIECE_SELECT = 'id,brand_id,domain,platform,status,created_at,assets,pass_type,challenged_at,edited_at,edited_by';
+// U-4 — `discarded_at` entra acá porque `actionsFor` lo necesita: sin él, una pieza ya
+// sellada llegaría a la tarjeta con sus seis acciones disponibles. Una columna que falta
+// no da error, da un permiso.
+const PIECE_SELECT = 'id,brand_id,domain,platform,status,discarded_at,created_at,assets,pass_type,challenged_at,edited_at,edited_by';
 
 export interface RawPiece {
   id: string;
@@ -184,9 +197,16 @@ export interface RawPiece {
   domain: string | null;
   platform: string | null;
   status: string | null;
+  discarded_at?: string | null;
   created_at: string | null;
   assets: {
     copy?: { title?: string | null; raw?: string | null; aife_filtered?: string | null };
+    // U-4 — MISMO DEFECTO QUE `discarded_at`, EN EL OTRO SENTIDO. `PIECE_SELECT` ya traía
+    // `assets` entero, así que la imagen LLEGABA y sólo faltaba declararla. Sin esta línea
+    // `actionsFor` no la ve nunca y apaga `recompose_image` en TODAS las retenidas, con el
+    // motivo «no tiene imagen» — que sería falso. Una columna sin declarar da una
+    // denegación silenciosa, igual que una sin pedir da un permiso.
+    image?: { url?: string | null };
     // El adaptado POR CANAL. `PIECE_SELECT` ya traia `assets` entero: el dato llegaba y
     // nadie lo declaraba, asi que nadie lo leia.
     social?: { adapted?: Array<{ copy?: string | null; platform?: string | null }> };
@@ -268,6 +288,7 @@ export function toChallengedRow(
     reading_language: readingLanguageOf(row.brand_id, brandLangs),
     piece: p
       ? {
+          actions: actionsFor(p),
           id: p.id,
           title: pieceTitle(p),
           body: pieceBody(p),
