@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   indexBrandTimezones, indexByPiece, indexNextFree, timezoneOf, slotOf, forecastFor,
+  releaseSlotsForPiece,
   type PublishSlotRow,
 } from './_publishSlots.js';
 import type { ContentPiece } from './_calibrationShared.js';
@@ -167,8 +168,130 @@ describe('ni un huso, ni un desfase, ni una marca en el código', () => {
       expect(SRC).not.toContain(nombre);
   });
 
-  it('este módulo no escribe: nada de POST, PATCH, DELETE ni upsert', () => {
-    expect(SRC).not.toMatch(/method:\s*'(POST|PATCH|PUT|DELETE)'/);
+  // U-3 CAMBIÓ ESTE CASO, Y SE DEJA ESCRITO POR QUÉ. Hasta U-3 el módulo no escribía nada y
+  // este caso lo fijaba con `not.toMatch(/method:\s*'(POST|PATCH|PUT|DELETE)'/)`. La
+  // liberación de franja lo vuelve falso por construcción. Borrarlo habría quitado la
+  // protección entera; lo que se hace es ACOTARLO a lo que sigue siendo cierto y que es más
+  // estrecho que antes: existe UNA escritura, es un PATCH, y va contra la tabla de franjas.
+  // Un POST, un DELETE, un segundo PATCH o un upsert siguen siendo fallo.
+  it('la ÚNICA escritura es el PATCH de liberación: ni POST, ni DELETE, ni upsert', () => {
+    const escrituras = SRC.match(/method:\s*'(POST|PATCH|PUT|DELETE)'/g) ?? [];
+    expect(escrituras).toEqual(["method: 'PATCH'"]);
     expect(SRC).not.toMatch(/\bupsert\b/i);
+  });
+
+  it('esa escritura sólo puede tocar franjas, nunca piezas', () => {
+    // El PATCH apunta a `brand_publish_slots`. Que este módulo escribiera en `content_pieces`
+    // sería invertir el orden que U-3 fija: la pieza la sella el llamador, ANTES.
+    expect(SRC).toContain('/rest/v1/brand_publish_slots');
+    expect(SRC).not.toMatch(/method:\s*'PATCH'[\s\S]{0,600}content_pieces/);
+  });
+});
+
+// ── U-3 · LA LIBERACIÓN DE FRANJA ────────────────────────────────────────────────
+/**
+ * Sin red y sin base: `fetch` va doblado. Lo que se fija acá no es que PostgREST responda
+ * —eso sólo se sabe contra la base real, y su verificación es la del brief—, sino que la
+ * petición que sale es la correcta y que NINGÚN fallo escapa hacia el llamador.
+ *
+ * El `piece_id` de las fixtures es ficticio: si algo dependiera de una pieza o una marca
+ * reales, estas pruebas fallarían.
+ */
+const PIEZA = 'piece-ficticia-0001';
+
+function doblarFetch(impl: (url: string, init: RequestInit) => unknown) {
+  const llamadas: Array<{ url: string; init: RequestInit }> = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = ((url: string, init: RequestInit) => {
+    llamadas.push({ url: String(url), init });
+    return Promise.resolve(impl(String(url), init));
+  }) as unknown as typeof fetch;
+  return { llamadas, restaurar: () => { globalThis.fetch = original; } };
+}
+
+const respuesta = (status: number, cuerpo: unknown) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  json: async () => cuerpo,
+  text: async () => (typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo)),
+});
+
+describe('releaseSlotsForPiece — devolver la franja al pozo', () => {
+  beforeEach(() => {
+    process.env.SUPABASE_URL = 'https://proyecto-ficticio.supabase.co';
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'clave-ficticia';
+  });
+
+  it('el PATCH va bien formado: filtra por pieza Y por reserved, y declara Content-Profile', async () => {
+    const d = doblarFetch(() => respuesta(200, [{ id: 'slot-1' }]));
+    try {
+      await releaseSlotsForPiece(PIEZA);
+      expect(d.llamadas).toHaveLength(1);
+      const { url, init } = d.llamadas[0];
+
+      expect(url).toContain(`piece_id=eq.${PIEZA}`);
+      // El filtro por `reserved` es lo que impide pisar una franja ya publicada.
+      expect(url).toContain('status=eq.reserved');
+      expect(init.method).toBe('PATCH');
+
+      // `Accept-Profile` gobierna la lectura; una ESCRITURA contra `intel` necesita además
+      // `Content-Profile`. Sin esta cabecera el PATCH se iría contra el schema por defecto.
+      const headers = init.headers as Record<string, string>;
+      expect(headers['Content-Profile']).toBe('intel');
+      expect(headers['Accept-Profile']).toBe('intel');
+
+      // Los tres campos viajan JUNTOS: el CHECK de la tabla rechaza la fila si falta uno.
+      expect(JSON.parse(String(init.body))).toEqual({ status: 'free', piece_id: null, reserved_at: null });
+    } finally { d.restaurar(); }
+  });
+
+  it('dos franjas devueltas → released 2, y dice cuáles', async () => {
+    const d = doblarFetch(() => respuesta(200, [{ id: 'slot-1' }, { id: 'slot-2' }]));
+    try {
+      expect(await releaseSlotsForPiece(PIEZA))
+        .toEqual({ ok: true, released: 2, slot_ids: ['slot-1', 'slot-2'] });
+    } finally { d.restaurar(); }
+  });
+
+  it('cero franjas NO es error: una pieza puede no tener franja', async () => {
+    const d = doblarFetch(() => respuesta(200, []));
+    try {
+      const r = await releaseSlotsForPiece(PIEZA);
+      expect(r.ok).toBe(true);
+      expect(r.released).toBe(0);
+      expect(r.error).toBeUndefined();
+    } finally { d.restaurar(); }
+  });
+
+  it('400 de PostgREST → ok false, con el cuerpo del servidor recortado en error', async () => {
+    const d = doblarFetch(() => respuesta(400, 'violates check constraint'));
+    try {
+      const r = await releaseSlotsForPiece(PIEZA);
+      expect(r.ok).toBe(false);
+      expect(r.released).toBe(0);
+      expect(r.error).toContain('400');
+      expect(r.error).toContain('violates check constraint');
+    } finally { d.restaurar(); }
+  });
+
+  it('fetch que lanza → ok false, y la excepción NO escapa hacia el llamador', async () => {
+    // Importa que no escape: el llamador ya selló la pieza, y una excepción acá convertiría
+    // un veredicto aplicado en un 500 que afirma que no se hizo nada.
+    const d = doblarFetch(() => { throw new Error('socket colgado'); });
+    try {
+      const r = await releaseSlotsForPiece(PIEZA);
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/^red: /);
+      expect(r.error).toContain('socket colgado');
+    } finally { d.restaurar(); }
+  });
+
+  it('piece_id vacío → ok false sin llamar a fetch: no se manda un PATCH sin ancla', async () => {
+    const d = doblarFetch(() => respuesta(200, []));
+    try {
+      const r = await releaseSlotsForPiece('   ');
+      expect(r).toEqual({ ok: false, released: 0, slot_ids: [], error: 'piece_id vacío' });
+      expect(d.llamadas).toHaveLength(0);
+    } finally { d.restaurar(); }
   });
 });
