@@ -1,5 +1,87 @@
 # PENDING_FIXES — UNRLVL Orchestrator
 
+## ⛔ DOCUMENTO HISTÓRICO — verificado y fechado el 2026-09-13 (U-9 §3.6)
+
+**Este documento describe EN PRESENTE un estado de 2026-05-27 que ya no es el de hoy.**
+No se borra —conserva la causa raíz mejor escrita del ecosistema, ver abajo— pero **no se
+lee como una lista de tareas pendientes**: se lee como el registro de un problema resuelto.
+
+**Lo que se verificó, punto por punto** [`medido` el 2026-09-13 contra
+`content.content_pieces`, últimos 14 días]:
+
+| Lo que este documento afirma | Hoy |
+|---|---|
+| §0 · SocialLab `/api/execute` y `/api/publish` **cuelgan** | **90 de 90 piezas** producidas en los últimos 14 días llevan `sociallab` en `lab_sources`. **Produce.** |
+| §3 · ImageLab `/api/execute` da `FUNCTION_INVOCATION_TIMEOUT` | **56 de 90** llevan `imagelab`. **Produce.** (Las otras 34 son piezas sin imagen por diseño, no fallos.) |
+| «Bloqueador único para el flujo end-to-end» | **No lo es.** El pipeline publica desde el 2026-05-29 |
+
+**Las secciones de UI (§1 ImageLab, §2 VideoLab) NO se verificaron acá**: son de otros
+repos y este corte no los toca. Quedan como estaban, con la misma fecha, **sin afirmar que
+sigan vigentes ni que estén resueltas** — que es lo único honesto que se puede decir sin
+haberlas mirado.
+
+### §0 conserva valor, y ahora se puede apuntar a dónde se arregló
+
+La causa raíz que §0 describe —`fetch` sin `AbortController` en serverless, que **no falla
+sino que espera** hasta que la plataforma mata la función— es exactamente la que
+**U-8 cerró en este repo el 2026-09-13**: las 38 llamadas de `api/` pasan por
+`api/_fetchWithTimeout.ts` y vencen con un error legible antes del `maxDuration`.
+
+Es decir: §0 diagnosticó bien un problema de otro repo, y ese diagnóstico terminó
+arreglando éste. **Por eso se conserva.** Si mañana un lab vuelve a colgar, este texto
+sigue siendo el mejor sitio donde empezar a leer.
+
+---
+
+## PENDIENTE DE VERDAD — abierto el 2026-09-13, por decisión de Sam
+
+Tres cosas medidas hoy que **sí** están abiertas, y que no pertenecen a ninguno de los nueve
+cortes. Se anotan acá para que dejen de vivir en un chat. **Las tres son de la misma
+familia: algo ocurre y no deja rastro.**
+
+### P-1 · El corpus no conserva la secuencia de veredictos
+
+`intel.approval_calibration` se escribe con `UPSERT on_conflict=piece_id`
+(`api/_calibrationShared.ts`), así que hay **una fila por pieza** y el último veredicto
+**pisa** al anterior sin archivarlo.
+
+[`medido` el 2026-09-13] La pieza `e0f2aec9` fue aprobada a las 16:21 y rechazada a las
+20:38. En el corpus queda **una sola fila**, creada en el instante de la aprobación y hoy
+con `verdict: 'rejected'`; su `_archive` está vacío. **Se perdió que alguien primero dijo
+que sí.**
+
+Para un carril que existe para aprender, «cambió de opinión» es de los casos que más
+enseñan: dice que el criterio de aprobación dejó pasar algo. Hoy es invisible.
+
+### P-2 · Liberar una franja no deja fecha
+
+`releaseSlotsForPiece` (`api/_publishSlots.ts`, U-3) limpia `status`, `piece_id` y
+`reserved_at` en un solo PATCH, pero **no estampa `updated_at`**.
+
+[`medido` el 2026-09-13] La franja `ff4e90bb` se liberó a las 20:56 y su `updated_at` sigue
+diciendo `2026-09-05`, de cuando se sembró. **Consecuencia práctica:** no se puede auditar
+cuándo se liberó una franja, y una consulta de vigilancia del tipo «franjas tocadas en la
+última hora» **devuelve vacío sobre una liberación que sí ocurrió** — lo que hace parecer
+un fallo lo que fue un acierto.
+
+### P-3 · `canales_activos` tiene tres formatos y tres nulos
+
+[`medido` el 2026-09-13 sobre `public.brands`] De las 14 marcas activas: **10** usan
+`A | B | C`, **1** usa `A, B` con otro separador y otro vocabulario, y **3** la tienen
+nula. Además, **ningún valor de ninguna marca se traduce al eje `PlatformId`** que usa el
+pipeline: no existe un canal que signifique la red que hoy sí se publica.
+
+Es el bloqueo de U-9 §3.5, y es **dato, no código**: se cierra normalizando la columna, no
+escribiendo un intérprete. Ver el PR de U-9 para el detalle.
+
+---
+
+## ⛔ NO OPERATIVO — texto original del 2026-05-27, conservado íntegro
+
+Todo lo que sigue es el documento tal como se escribió. **Sus afirmaciones en presente
+describen el 2026-05-27, no hoy.** Ver la tabla de verificación de arriba antes de actuar
+sobre cualquiera de sus puntos.
+
 Estos fixes **no se aplican en este repo**. Viven en repos separados (`ImageLab`,
 `VideoLab`, `SocialLab`) y deben ejecutarse en otra sesión de Claude Code
 apuntando a esos worktrees.

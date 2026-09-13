@@ -8,7 +8,9 @@ import {
 import { useFlowStore } from '../../store/useFlowStore';
 import { executeStage } from '../../services/orchestratorEngine';
 import { getLabById } from '../../config/labs';
-import { getBrandById } from '../../config/brands';
+// U-9 — las marcas salen del dato. Acá sólo se resuelve una por su id.
+import { useBrands } from '../../services/useBrands';
+import { getBrandById } from '../../services/brandsLoader';
 import { FlowStage, FlowStageStatus } from '../../core/types';
 import { cn, Spinner, GlowDot } from '../../ui/components';
 
@@ -480,9 +482,10 @@ export default function FlowExecutorModule({ onComplete, onReset }: ExecutorProp
   const executingRef = useRef(false);
   const [flowDone, setFlowDone] = useState(false);
 
+  const { brands }    = useBrands();
   const stages        = activePlan?.stages ?? [];
   const stagesWithLab = stages.map(s => ({ ...s, lab: getLabById(s.labId) }));
-  const brand         = getBrandById(activePlan?.brandId ?? '');
+  const brand         = getBrandById(brands, activePlan?.brandId ?? '');
 
   useEffect(() => {
     if (!activePlan || executingRef.current) return;

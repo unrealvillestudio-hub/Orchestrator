@@ -1,29 +1,28 @@
 /**
- * UNRLVL — Orchestrator: brands.ts
+ * brands.ts — ⛔ VACIADO EN U-9, 2026-09-13. NO VOLVER A PONER MARCAS ACÁ.
  *
- * IDs corregidos a canónicos Supabase (v2.0):
- *   UnrealIlleStudio → UnrealvilleStudio
- *   NeuroneCosmetics → NeuroneSCF
- *   PHAS             → ForumPHs
- * Mantener como BrandProfile[] para compatibilidad con BRANDS.map() en los módulos.
- * Para datos en tiempo real desde Supabase usar brandsLoader.ts → loadBrands().
+ * ── QUÉ HABÍA Y POR QUÉ SE FUE ───────────────────────────────────────────────────
+ * Este archivo contenía una lista de once marcas con su color y su mercado: la SEGUNDA
+ * copia de la misma lista, porque `brandsLoader.ts` tenía otra como respaldo. Dos copias
+ * de la misma cosa divergen, y éstas divergieron de la base: le faltaban cuatro marcas
+ * activas —una de ellas con piezas y franjas en producción— y conservaba una que la base
+ * marca como fusionada.
+ *
+ * Nadie lo vio porque nada fallaba. Una marca nueva simplemente no aparecía en el selector,
+ * y eso no se parece a un error: se parece a que la marca no está dada de alta.
+ *
+ * ── DÓNDE ESTÁN AHORA ────────────────────────────────────────────────────────────
+ * En `public.brands`, que es su sitio. Se leen con `loadBrands()` de
+ * `src/services/brandsLoader.ts`, o con el hook `useBrands()` de `src/services/useBrands.ts`
+ * si quien las necesita es un componente. **Meter una marca nueva es insertar una fila; no
+ * toca ninguna línea de código.**
+ *
+ * ── POR QUÉ ESTE ARCHIVO SIGUE EXISTIENDO ────────────────────────────────────────
+ * Para que un import olvidado falle de forma legible —«no exporta BRANDS»— en vez de
+ * encontrar una lista vieja y seguir funcionando mal en silencio. Es el alias legacy que
+ * la regla multimarca manda conservar documentado durante un corte.
+ *
+ * **Su borrado es un tercer PR**, cuando no quede ningún import apuntando acá.
  */
 
-import { BrandProfile } from '../core/types';
-
-export const BRANDS: BrandProfile[] = [
-  { id: 'NeuroneSCF',               name: 'Neurone South & Central Florida', color: '#0076A8', market: 'South & Central Florida', description: 'cosmetics_haircare'   },
-  { id: 'PatriciaOsorioPersonal',   name: 'Patricia Osorio · Personal',      color: '#EC4899', market: 'Miami, FL',               description: 'personal_branding'    },
-  { id: 'PatriciaOsorioComunidad',  name: 'Patricia Osorio · Comunidad',     color: '#A855F7', market: 'Miami, FL',               description: 'community_networking' },
-  { id: 'PatriciaOsorioVizosSalon', name: 'Patricia Osorio · Vizos Salon',   color: '#F59E0B', market: 'Miami, FL',               description: 'luxury_salon'         },
-  { id: 'DiamondDetails',           name: 'Diamond Details',                  color: '#3B82F6', market: 'Alicante, España',        description: 'automotive_detailing' },
-  { id: 'D7Herbal',                 name: 'D7 Herbal',                        color: '#22C55E', market: 'Alicante, España',        description: 'cosmetics_haircare'   },
-  { id: 'VivoseMask',               name: 'Vivosé Mask',                      color: '#F472B6', market: 'España',                  description: 'beauty_skincare'      },
-  { id: 'VizosCosmetics',           name: 'Vizos Cosmetics',                  color: '#6366F1', market: 'Miami + España',          description: 'high_end_beauty'      },
-  { id: 'ForumPHs',                 name: 'ForumPHs',                         color: '#14B8A6', market: 'Panamá',                  description: 'property_management'  },
-  { id: 'UnrealvilleStudio',        name: 'Unrealville Studio',               color: '#FFAB00', market: 'Florida USA',             description: 'marketing_agency'     },
-  { id: 'UnrealvilleStores',        name: 'Unrealville Stores',               color: '#F97316', market: 'Florida USA',             description: 'ecommerce'            },
-];
-
-export const getBrandById = (id: string): BrandProfile | undefined =>
-  BRANDS.find(b => b.id === id);
+export {};
