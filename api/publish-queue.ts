@@ -119,11 +119,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const channelKey    = strParam(req.query.channel);
   const channelStatus = enumParam<ChannelStatusFilter>(req.query.channel_status, CHANNEL_STATUS_FILTERS, 'all');
   const generation    = enumParam<GenerationFilter>(req.query.generation, GENERATION_FILTERS, 'all');
-  // U-7 — EL ESTADO DE LA PIEZA. Va acá y no en calibración, y no es indiferente: la bandeja
-  // de calibración lista UN SOLO estado por contrato (`CALIBRATION_STATUSES`), así que darle
-  // un filtro de estado exigiría ampliar lo que esa bandeja ES — y entonces duplicaría a
-  // ésta, que ya lista cinco y desde U-5 tiene todos los botones. El filtro se pone donde
-  // hay estados que filtrar.
+  // U-7 — EL ESTADO DE LA PIEZA. Va acá y no en calibración, y no es indiferente.
+  //
+  // PRECISIÓN 2026-09-18: el argumento original decía que calibración lista «UN SOLO estado por
+  // contrato». Ya no es cierto — `CALIBRATION_STATUSES` lista los tres estados VIVOS, porque
+  // esconder una aplazada era esconder trabajo pendiente. Lo que sí sigue siendo cierto, y es lo
+  // que este filtro defiende, es el REPARTO: calibración lista lo que espera una decisión y lo
+  // distingue con `pendingStateOf`; esta bandeja lista el ciclo entero —incluido lo ya sellado y
+  // lo ya publicado— y por eso es acá donde hay estados que filtrar. Darle un filtro de estado a
+  // calibración la convertiría en ésta.
   const status        = strParam(req.query.status);
 
   // U-7 — buscar por id. Un `q` inválido es 400, no una lista vacía: «no existe» y «no supe

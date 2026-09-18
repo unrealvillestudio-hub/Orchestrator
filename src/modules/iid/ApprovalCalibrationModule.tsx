@@ -15,7 +15,8 @@ import { PieceActionsBar, type ActionOutcome } from './pieceActions';
 // en las dos vistas o no sirve para compararlas.
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader, shortId,
-  ForecastLine, SlotsNotice, PieceSearchBox, SearchNotice,
+  ForecastLine, SlotsNotice, PieceSearchBox, SearchNotice, PendingStateBadge, PENDING_STATE_UI,
+  DeferralNotice,
 } from './pieceUi';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
 import { SpeechReader } from '../../ui/SpeechReader';
@@ -276,19 +277,29 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
   // quitaba la pieza en seco, así que aprobar desde ahí no acusaba nada — y un acuse ausente
   // no se distingue de una acción que no ocurrió. Un solo acuse, en el sitio de la acción.
 
-  const rejected = piece.watcher_result === 'REJECT';
+  // EL BORDE PINTA EL ESTADO DE PENDIENTE, NO EL VEREDICTO. (Regla de Sam, 2026-09-18.)
+  //
+  // Antes era `rejected ? '#f43f5e' : '#FFAB00'`, dos colores para un eje que el `WatcherBadge` de
+  // abajo ya nombra con su texto y su icono. Duplicaba una señal y dejaba sin ninguna a la que Sam
+  // necesita a distancia: QUÉ LE TOCA HACER con esta pieza. Con la bandeja mostrando ya cuatro
+  // situaciones —esperando, para recalibrar, aplazada, retenida—, un solo color para todas las
+  // volvería a hacer indistinguibles, que es el defecto que SIGN-01 corte D quiso resolver
+  // escondiéndolas.
+  const estado = PENDING_STATE_UI[piece.pending_state];
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
       className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden"
-      style={{ borderLeftWidth: 3, borderLeftColor: rejected ? '#f43f5e' : '#FFAB00' }}
+      style={{ borderLeftWidth: 3, borderLeftColor: estado.color }}
     >
       <div className="p-4 space-y-4">
         {/* Cabecera (compartida con la bandeja de publicación) + veredicto + generación. */}
         <div className="space-y-1.5">
           <PieceHeader piece={piece} />
           <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono text-zinc-600">
+            {/* Primero el estado: es lo que decide qué hacer con la pieza. */}
+            <PendingStateBadge state={piece.pending_state} />
             {piece.psycho_preset && <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">{piece.psycho_preset}</span>}
             <WatcherBadge
               verdict={piece.watcher_verdict}
@@ -300,6 +311,11 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
             <GenerationBadge generation={piece.generation} label={piece.cutoff_label} at={piece.cutoff_at} />
           </div>
         </div>
+
+        {/* APARTADA POR EL SISTEMA: hasta cuándo y por qué. Va ANTES de la previsión porque
+            cambia cómo se lee la previsión — la fecha prevista de una aplazada sólo ocurre si
+            Sam decide ahora. Sin esta línea la tarjeta la contaría como una pendiente normal. */}
+        <DeferralNotice state={piece.pending_state} until={piece.deferred_until} reason={piece.deferred_reason} />
 
         {/* DÓNDE CAERÍA SI SE APROBARA AHORA. PREVISIÓN, no compromiso. */}
         <ForecastLine forecast={piece.forecast_slot} slotsRead={slotsRead} />

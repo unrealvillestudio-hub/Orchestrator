@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../ui/components';
 import type {
-  FlowGeneration, PieceMetrics, CountAgainstLimit, SignatureCheck,
+  FlowGeneration, PieceMetrics, CountAgainstLimit, SignatureCheck, PendingState,
 } from '../../services/calibrationInbox';
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -815,6 +815,103 @@ export function Provenance({ piece }: { piece: PieceProvenance }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── ESTADO DE PENDIENTE · el color de la tarjeta ────────────────────────────────────────────────
+//
+// REGLA DE SAM (2026-09-18): todo lo que está pendiente aparece en la bandeja. Y como ahora
+// conviven cuatro situaciones distintas, la tarjeta tiene que decir CUÁL de un vistazo — que es
+// justo lo que faltaba cuando SIGN-01 corte D las escondió en vez de distinguirlas.
+//
+// EL COLOR VIVE ACÁ Y EL EJE EN EL SERVER, a propósito. `pendingStateOf` decide el estado sin saber
+// de colores; esta tabla decide el color sin saber de reglas. Un estado nuevo entra en las dos, y
+// el `Record` tipado hace que TypeScript falle si se añade allá y se olvida acá.
+//
+// Por qué el borde izquierdo y no una píldora más: el borde se ve ANTES de leer, y esta bandeja se
+// recorre en vertical. Lo que Sam necesita distinguir a distancia es qué le toca hacer, no qué
+// opinó el juez — ese veredicto ya tiene su `WatcherBadge` y conserva su sitio.
+export const PENDING_STATE_UI: Record<PendingState, { color: string; label: string; hint: string }> = {
+  esperando:  { color: '#FFAB00', label: 'esperando',
+                hint: 'Espera su primer veredicto. Es el caso normal.' },
+  recalibrar: { color: '#00FFD1', label: 'para recalibrar',
+                hint: 'Ya se juzgó una vez, se corrigió y volvió a la bandeja. Hasta el 2026-09-18 éstas eran invisibles.' },
+  aplazada:   { color: '#7C8CF8', label: 'aplazada',
+                hint: 'El sistema la apartó por duplicación hasta una fecha. Nadie la devuelve solo: sin verla, la fecha pasa y no ocurre nada.' },
+  retenida:   { color: '#C084FC', label: 'retenida',
+                hint: 'Retenida por desacuerdo entre el juez y el arbitraje (CALIB-01).' },
+};
+
+/** La píldora que nombra el estado. El color lo pone la misma tabla que pinta el borde. */
+export function PendingStateBadge({ state }: { state: PendingState }) {
+  const ui = PENDING_STATE_UI[state];
+  return (
+    <span
+      className="px-1.5 py-0.5 rounded font-mono"
+      style={{ color: ui.color, backgroundColor: `${ui.color}1A` }}
+      title={ui.hint}
+    >
+      {ui.label}
+    </span>
+  );
+}
+
+// ── EL APLAZAMIENTO, DICHO EN LA TARJETA ────────────────────────────────────────
+//
+// POR QUÉ EXISTE. `CALIBRATION_STATUSES` vuelve a admitir `deferred`, así que una pieza que el
+// sistema apartó vuelve a la bandeja. Devolverla sin decir que está apartada repetiría —al
+// revés— el defecto de SIGN-01 corte D: entonces la pieza se escondía y Sam no sabía que
+// existía; escondiendo sólo el APLAZAMIENTO, Sam la vería pero decidiría sobre ella sin saber
+// que el sistema ya la había apartado y por qué. Las dos formas producen la misma decisión no
+// informada, que es el daño que el corte D quiso evitar.
+//
+// LA REGLA QUE ESTO SOSTIENE, y la razón de no restringir los botones: una decisión se toma
+// INFORMADA, no se prohíbe. Sam anuló un aplazamiento a mano el 2026-09-12 [medido: fila de
+// `intel.piece_edits`], así que quitarle el botón le quitaría algo que ya usó. Lo que faltaba
+// no era el permiso: era el dato.
+//
+// LA FECHA VA EN HORA DEL OPERADOR (`fmtDate`), no de la marca. `deferred_until` es cuándo el
+// SISTEMA volvería a mirarla — un hecho del motor que lee quien está delante de la pantalla—,
+// no una hora del público de la marca como sí lo es una franja de publicación. Ver el bloque
+// de `fmtInZone` sobre por qué son dos ejes distintos.
+//
+// POR QUÉ PIDE EL ESTADO Y NO LE BASTAN LAS DOS COLUMNAS. Medido el 2026-09-18 sobre las dos
+// piezas que Sam mandó devolver a la bandeja: `5aeb27e3` y `7a7a8a58` están vivas y
+// `awaiting_approval`, y ARRASTRAN un `deferred_until` de un ciclo anterior —2026-09-17 y
+// 2026-09-10, las dos fechas ya pasadas— porque devolverlas limpió el sello pero no el residuo.
+// Un aviso disparado por «la columna no es nula» les pintaría «el sistema la apartó hasta» una
+// fecha vencida: una afirmación de estado FALSA en la pantalla, que es el mismo daño que esta
+// tarjeta viene a cerrar. Manda el estado; las columnas sólo lo detallan.
+export function DeferralNotice({ state, until, reason }: {
+  state: PendingState;
+  until: string | null | undefined;
+  reason: string | null | undefined;
+}) {
+  if (state !== 'aplazada') return null;
+  // Aplazada sin fecha ni motivo: la píldora de estado ya lo dice, y un aviso vacío enseñaría a
+  // ignorar el aviso lleno.
+  if (!until && !reason) return null;
+
+  return (
+    <div
+      className={cn(DATE_ROW, 'bg-indigo-500/[0.07] border-indigo-400/40 border-dashed text-indigo-200/90')}
+      title="content_pieces.deferred_until / deferred_reason — la pieza sigue viva y sigue pendiente; el sistema sólo la apartó."
+    >
+      <CalendarOff size={13} className="shrink-0 mt-0.5" />
+      <span>
+        <span className="text-indigo-300/70">El sistema la apartó hasta</span>{' '}
+        <span className="font-semibold">{fmtDate(until)}</span>
+        {reason && (
+          <>
+            <span className="text-indigo-300/70"> · motivo:</span>{' '}
+            <span className="font-semibold">{reason}</span>
+          </>
+        )}
+        <span className="text-indigo-300/55">
+          {' '}· sigue pendiente y se puede decidir ahora: el aplazamiento no la juzga, sólo la aparta
+        </span>
+      </span>
     </div>
   );
 }

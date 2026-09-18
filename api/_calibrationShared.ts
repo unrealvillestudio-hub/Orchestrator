@@ -165,6 +165,8 @@ export interface ContentPiece {
   created_at?: string | null;
   discarded_at?: string | null;
   discarded_reason?: string | null;
+  deferred_until?: string | null;
+  deferred_reason?: string | null;
   // SIGN-01 corte D — `clean` frente a `assisted` (CALIB-01). Sam necesita ver de un vistazo si la
   // pieza cuenta para el objetivo del 90% o para el ratio aprovechable.
   pass_type?: string | null;
@@ -513,9 +515,13 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     artifact_url: publicArtifactUrl(piece.brand_id, piece.id),
     // `watcher_result` conserva su forma LEGACY (PASS | REJECT | null) porque es la que viaja al
     // corpus `intel.approval_calibration`, cuya columna significa "la primera opinión que Sam valida
-    // o corrige". Un RESCHEDULE no es una opinión sobre la pieza —es "todavía no"— y además una
-    // aplazada no llega a la bandeja de calibración. El veredicto COMPLETO viaja en
-    // `watcher_verdict`, que es el que lee la tarjeta.
+    // o corrige". Un RESCHEDULE no es una opinión sobre la pieza: es "todavía no". El veredicto
+    // COMPLETO viaja en `watcher_verdict`, que es el que lee la tarjeta.
+    //
+    // CORREGIDO 2026-09-18: acá decía además que "una aplazada no llega a la bandeja de
+    // calibración". Dejó de ser cierto — las aplazadas vuelven, distinguidas por `pendingStateOf`.
+    // El resto del párrafo sigue valiendo, y por eso se conserva: un RESCHEDULE sigue sin ser una
+    // opinión, y por eso sigue sin viajar al corpus.
     watcher_result: w.result === 'RESCHEDULE' ? null : w.result,
     watcher_gate: w.gate,
     watcher_failed_rules: w.failed_rules,
@@ -528,6 +534,9 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     reading_language: extras.reading_language ?? null,
 
     status: piece.status ?? null,
+    // HASTA CUÁNDO y POR QUÉ la apartó el sistema. `null` en toda pieza no aplazada.
+    deferred_until: piece.deferred_until ?? null,
+    deferred_reason: piece.deferred_reason ?? null,
     created_at: piece.created_at ?? null,
     approved_at: piece.approved_at ?? null,
     queue_id: piece.queue_id ?? null,
@@ -700,7 +709,10 @@ export function buildHtml(piece: ContentPiece): string {
 // ── Acceso a datos (PostgREST, service_role) ──────────────────────────────────────
 // Fuente = content.content_pieces (ver la nota del encabezado). Expuesta por PostgREST
 // vía Accept-Profile: content.
-const PIECE_SELECT = 'id,brand_id,queue_id,finding_id,orchestrator_job_id,voice,platform,format,domain,status,created_at,discarded_at,discarded_reason,pass_type,approved_at,assets';
+// `deferred_until` y `deferred_reason` entran el 2026-09-18: sin ellos, una pieza aplazada vuelve
+// a la bandeja sin poder decir HASTA CUÁNDO ni POR QUÉ, y entonces mostrarla no informa la
+// decisión — que es justo lo que el corte D de SIGN-01 quiso evitar cuando las escondió.
+const PIECE_SELECT = 'id,brand_id,queue_id,finding_id,orchestrator_job_id,voice,platform,format,domain,status,created_at,discarded_at,discarded_reason,deferred_until,deferred_reason,pass_type,approved_at,assets';
 
 function sbHeaders(profile: 'content' | 'intel', extra: Record<string, string> = {}): Record<string, string> {
   return { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': profile, ...extra };
@@ -750,18 +762,62 @@ export async function fetchLivePieces(
 }
 
 /**
- * Material de la bandeja de calibración: SÓLO lo que espera aprobación.
+ * LOS ESTADOS EN LOS QUE UNA PIEZA ESTÁ VIVA Y PENDIENTE.
  *
- * SIGN-01 corte D — antes era "toda pieza viva, sin filtro de estado", y por eso la bandeja mezclaba
- * estados: mostraba piezas `deferred` (aplazadas por el sistema, DIV-01) y `challenged` (retenidas
- * por desacuerdo, CALIB-01) como si esperaran el visto bueno de Sam. `c5d542b7` y `afded574` fueron
- * RECHAZADAS estando ya apartadas por el sistema — una decisión sobre una pieza que nadie había
- * puesto a decisión.
+ * REGLA DE SAM (2026-09-18), y manda sobre lo que había: **todo lo que está pendiente tiene que
+ * aparecer en la bandeja.** Una pieza que no aparece no es una pieza en calma: es una pieza cuyo
+ * rastro se pierde, y entonces nadie puede decir qué queda por decidir.
  *
- * Las aplazadas y las retenidas tienen sus propias vistas y sus propias acciones; la de calibración
- * juzga lo que de verdad está esperando.
+ * QUÉ HABÍA ANTES, Y POR QUÉ NO BASTABA. SIGN-01 corte D estrechó esta lista a `awaiting_approval`
+ * porque la bandeja mezclaba estados sin distinguirlos: mostraba `deferred` y `challenged` como si
+ * esperaran el visto bueno de Sam, y `c5d542b7` y `afded574` fueron RECHAZADAS estando ya apartadas
+ * por el sistema — una decisión sobre una pieza que nadie había puesto a decisión. **El diagnóstico
+ * era correcto y el remedio se pasó de largo**: el problema no era que se vieran, era que se veían
+ * IGUALES. Esconderlas arregló la confusión creando una peor, la de no saber que existen.
+ *
+ * Aquel comentario justificaba la exclusión diciendo que las aplazadas y las retenidas «tienen sus
+ * propias vistas y sus propias acciones». Medido el 2026-09-18: **para `deferred` esa vista no
+ * existe** — cero módulos y cero endpoints en este repositorio. Las retenidas sí tienen
+ * `ChallengedInboxModule`. Una exclusión apoyada en una vista que nadie construyó deja la pieza en
+ * ningún sitio.
+ *
+ * QUÉ CAMBIA. Vuelven a la bandeja, y vuelven DISTINGUIDAS: `pendingStateOf` da el eje y la tarjeta
+ * lo pinta. Ver ahí por qué cada estado es pendiente y en qué se diferencia.
+ *
+ * `challenged` entra aunque hoy no haya ninguna pieza con ese estado [medido 2026-09-18: 0 filas;
+ * `challenged_at` marca piezas que YA avanzaron a `scheduled` o `published`]. Se declara porque el
+ * `CHECK` de la columna lo admite y una pieza que caiga ahí mañana no debe desaparecer por no
+ * estar en una lista.
  */
-export const CALIBRATION_STATUSES = ['awaiting_approval'];
+export const CALIBRATION_STATUSES = ['awaiting_approval', 'deferred', 'challenged'];
+
+/**
+ * EN QUÉ ESTADO DE PENDIENTE ESTÁ. Eje del sistema, no de ninguna marca: cuatro situaciones
+ * distintas, cada una con lo que Sam tiene que hacer con ella.
+ *
+ *   esperando   — espera su primer veredicto. Es el caso normal.
+ *   recalibrar  — YA tiene fila en el corpus y sigue viva: se juzgó, se corrigió y volvió a la
+ *                 bandeja. Hasta hoy éstas eran invisibles, porque la bandeja excluía por corpus
+ *                 sin mirar si la pieza seguía pendiente. Son las que Sam perdía de vista.
+ *   aplazada    — el sistema la apartó (duplicación) hasta una fecha. Nadie la devuelve solo: sin
+ *                 verla, su `deferred_until` pasa y no ocurre nada.
+ *   retenida    — retenida por desacuerdo (CALIB-01).
+ *
+ * Es una función PURA sobre (estado, ¿tiene fila en el corpus?): sin DB y sin red, para que el test
+ * la ejecute tal cual. El COLOR no vive acá — vive en la interfaz, que es quien pinta. Acá sólo el
+ * eje, que es lo que las dos mitades comparten.
+ */
+export type PendingState = 'esperando' | 'recalibrar' | 'aplazada' | 'retenida';
+
+export function pendingStateOf(status: string | null | undefined, yaCalibrada: boolean): PendingState {
+  const s = String(status ?? '').trim().toLowerCase();
+  if (s === 'deferred') return 'aplazada';
+  if (s === 'challenged') return 'retenida';
+  // `awaiting_approval` y cualquier otro estado vivo que llegue acá: lo que decide es si YA se
+  // juzgó una vez. Un estado nuevo en el CHECK cae en 'esperando', que es el caso menos
+  // sorprendente y el que no esconde nada — nunca en un silencio.
+  return yaCalibrada ? 'recalibrar' : 'esperando';
+}
 
 // ── BUSCAR UNA PIEZA POR SU ID · U-7 ────────────────────────────────────────────
 /**
@@ -1163,11 +1219,18 @@ export async function upsertVerdict(row: {
 //
 // TRES VEREDICTOS, DOS RAMAS — Y ES DELIBERADO, NO UN OLVIDO.
 // `fixable` cae por la misma rama que `rejected` y sella la pieza igual. La razón es dura y está
-// medida en este mismo archivo: la bandeja lista `CALIBRATION_STATUSES = ['awaiting_approval']`
-// filtrando por `discarded_at=is.null`. Un veredicto que NO sella deja la pieza viva y en ese
-// estado, así que reaparece en la bandeja al día siguiente — y entonces no es un veredicto: es una
+// medida en este mismo archivo: la bandeja lista los estados de `CALIBRATION_STATUSES` filtrando
+// por `discarded_at=is.null`. Un veredicto que NO sella deja la pieza viva y en uno de esos
+// estados, así que reaparece en la bandeja al día siguiente — y entonces no es un veredicto: es una
 // nota que no se aplica. Es el defecto de SIGN-01 corte A2 otra vez, que ya costó seis decisiones
 // sin efecto.
+//
+// PRECISIÓN 2026-09-18, y no deroga nada de lo anterior: reaparecer YA NO ES EL ACCIDENTE que este
+// párrafo temía. Una pieza que se corrige y se devuelve a la bandeja DEBE reaparecer, y ahora lo
+// hace marcada como `recalibrar`. Lo que sigue siendo cierto es lo que este bloque defiende: un
+// veredicto que no sella y TAMPOCO devuelve deja la pieza indistinguible de una sin juzgar. Sellar
+// sigue siendo el efecto por defecto; devolver es un acto explícito, con su registro en
+// `intel.piece_edits`.
 //
 // La diferencia entre `rejected` y `fixable` vive ENTERA en el corpus: misma sellada sobre la
 // pieza, etiqueta distinta y una propuesta de corrección en la fila. Decisión de Sam del
@@ -1176,7 +1239,23 @@ export function verdictEffect(
   verdict: CalibrationVerdict, nowIso: string, by: string, reason: string | null,
   fixProposal: string | null = null,
 ): Record<string, unknown> {
-  if (verdict === 'approved') return { status: 'scheduled', approved_at: nowIso, approved_by: by };
+  // UN VEREDICTO HUMANO DEROGA EL APLAZAMIENTO DEL SISTEMA, y por eso lo LIMPIA.
+  //
+  // Medido el 2026-09-18: `5aeb27e3` y `7a7a8a58` volvieron a la bandeja vivas arrastrando un
+  // `deferred_until` ya vencido de un ciclo anterior. La columna no corta nada —
+  // `publish-slot-reserver` saca de juego por `status`, no por fecha [medido: su
+  // `ESTADOS_FUERA_DE_JUEGO`]— pero mientras quede puesta, la fila DICE algo que ya no es cierto, y
+  // una tarjeta honesta tiene que preguntarle al estado en vez de creerle a la columna. Limpiarla en
+  // el veredicto corta el residuo en su origen.
+  //
+  // NO SE PIERDE NADA: el corpus copia el contexto completo de la pieza —aplazamiento incluido—
+  // ANTES de que este efecto se aplique, así que por qué y hasta cuándo la apartó el sistema queda
+  // registrado en `intel.approval_calibration` para siempre.
+  const sinAplazamiento = { deferred_until: null, deferred_reason: null };
+
+  if (verdict === 'approved') {
+    return { status: 'scheduled', approved_at: nowIso, approved_by: by, ...sinAplazamiento };
+  }
 
   // MISMAS COLUMNAS EN LOS DOS VEREDICTOS QUE SELLAN. Lo único que cambia es qué dice el motivo:
   // un `fixable` lleva su marcador y la propuesta, para que la pieza siga diciendo qué hacer con
@@ -1187,7 +1266,7 @@ export function verdictEffect(
     ? [FIXABLE_REASON_PREFIX, propuesta || (reason ?? '')].join(' ').trim()
     : reason;
 
-  return { status: 'rejected', discarded_at: nowIso, discarded_reason };
+  return { status: 'rejected', discarded_at: nowIso, discarded_reason, ...sinAplazamiento };
 }
 
 /**

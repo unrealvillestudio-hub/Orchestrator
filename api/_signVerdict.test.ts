@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   watcherOf, verdictReason, verdictEffect, toContext, CALIBRATION_STATUSES, FIXABLE_REASON_PREFIX,
+  pendingStateOf,
   type ContentPiece,
 } from './_calibrationShared.js';
 import { buildCriterion, REJECT_REASONS, REASON_PREFIX } from '../src/services/calibrationInbox';
@@ -137,11 +138,62 @@ describe('D · los cuatro estados se nombran', () => {
     expect(UI).toMatch(/ratio aprovechable/);
   });
 
-  it('la bandeja de calibración SÓLO lista lo que espera aprobación', () => {
-    // `c5d542b7` y `afded574` fueron rechazadas estando ya apartadas por el sistema.
-    expect(CALIBRATION_STATUSES).toEqual(['awaiting_approval']);
-    expect(CALIBRATION_STATUSES).not.toContain('deferred');
-    expect(CALIBRATION_STATUSES).not.toContain('challenged');
+  // ── CORTE D, CORREGIDO EL 2026-09-18 — LA MISMA INTENCIÓN, EL REMEDIO CONTRARIO ──────
+  //
+  // QUÉ AFIRMABA ESTA PRUEBA HASTA HOY: `CALIBRATION_STATUSES` debía ser exactamente
+  // `['awaiting_approval']`, y no contener `deferred` ni `challenged`. El daño que protegía es
+  // real y está medido: `c5d542b7` y `afded574` fueron rechazadas estando YA apartadas por el
+  // sistema, sin que la pantalla lo dijera. Sam decidió sin saber.
+  //
+  // POR QUÉ EL REMEDIO ERA EL EQUIVOCADO. Excluir esos estados no informa la decisión: la
+  // suprime. La pieza desaparece de la única pantalla donde Sam mira lo pendiente, su
+  // `deferred_until` pasa solo y nadie la devuelve — medido el 2026-09-18 con la primera pieza
+  // `blog` de la historia de la marca (`2c391e74`, `duplication:0.85`, aplazada hasta
+  // 2026-10-09), que el motor generó bien y la bandeja no mostró. Y la exclusión se apoyaba en
+  // una bandeja de aplazadas que NO EXISTE en este repositorio.
+  //
+  // LA REGLA DE SAM, literal: «TODO lo que está pendiente debe aparecer en la bandeja».
+  //
+  // QUÉ SE EXIGE AHORA, que es lo que el corte D quería y no consiguió: la pieza aparece Y la
+  // pantalla dice en qué estado está. Una decisión informada necesita las dos mitades — por eso
+  // esta prueba falla si se amplía la lista sin el eje que la distingue, o si se pinta el eje
+  // sin decir el aplazamiento. Ni la inclusión sola ni el color solo cierran el corte D.
+  it('todo lo pendiente se lista, y la tarjeta dice en qué estado está cada cosa', () => {
+    // 1 · aparece: los tres estados vivos del CHECK, ninguno escondido.
+    expect([...CALIBRATION_STATUSES].sort()).toEqual(['awaiting_approval', 'challenged', 'deferred']);
+
+    // 2 · se distingue: incluir sin distinguir es el defecto de corte D al revés.
+    expect(pendingStateOf('deferred', false)).toBe('aplazada');
+    expect(pendingStateOf('challenged', false)).toBe('retenida');
+    expect(pendingStateOf('awaiting_approval', false)).toBe('esperando');
+
+    // 3 · se dice POR QUÉ y HASTA CUÁNDO. Es exactamente lo que le faltó a `c5d542b7`.
+    expect(toContext(piece({ status: 'deferred', deferred_until: '2026-10-09T10:31:35Z', deferred_reason: 'duplication:0.85' })))
+      .toMatchObject({ deferred_until: '2026-10-09T10:31:35Z', deferred_reason: 'duplication:0.85' });
+    expect(sinComentarios(UI)).toMatch(/deferred_until|DeferralNotice/);
+    expect(sinComentarios(UI)).toMatch(/apartó hasta/);
+
+    // 4 · y el aviso lo decide el ESTADO, no la columna. Medido el 2026-09-18: `5aeb27e3` y
+    // `7a7a8a58` volvieron a la bandeja vivas y `awaiting_approval` arrastrando un
+    // `deferred_until` YA VENCIDO del ciclo anterior. Si el aviso se disparara por «la columna
+    // no es nula», esas dos leerían «apartada hasta» una fecha pasada: una afirmación falsa en
+    // la pantalla, el mismo daño que el corte D. `toContext` reporta la columna tal cual —es
+    // el dato—; quien calla es la tarjeta.
+    expect(toContext(piece({ status: 'awaiting_approval', deferred_until: '2026-09-10T13:00:54Z' })).deferred_until)
+      .toBe('2026-09-10T13:00:54Z');
+    expect(pendingStateOf('awaiting_approval', true)).not.toBe('aplazada');
+    expect(sinComentarios(UI)).toMatch(/state !== 'aplazada'\) return null/);
+  });
+
+  it('un veredicto humano DEROGA el aplazamiento del sistema, y limpia sus dos columnas', () => {
+    // El residuo medido: `5aeb27e3` y `7a7a8a58` volvieron a la bandeja arrastrando un
+    // `deferred_until` vencido. Mientras la columna quede puesta, la fila dice algo que ya no es
+    // cierto. Los TRES veredictos la limpian — aprobar, rechazar y fixable son decisiones humanas,
+    // y una decisión humana manda sobre el apartado automático.
+    for (const v of ['approved', 'rejected', 'fixable'] as const) {
+      expect(verdictEffect(v, '2026-09-18T22:00:00Z', 'sam', 'motivo:x', 'propuesta'))
+        .toMatchObject({ deferred_until: null, deferred_reason: null });
+    }
   });
 
   it('el corpus conserva su contrato: un RESCHEDULE no es una opinión sobre la pieza', () => {
