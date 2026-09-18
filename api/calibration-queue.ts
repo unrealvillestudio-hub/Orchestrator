@@ -38,6 +38,7 @@ import {
   fetchWatcherTraces, fetchAttemptsByQueue,
   latestPerQueue, generationOf, watcherOf, toContext, PIECES_CAP,
   parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
+  pendingStateOf, type PendingState,
   type ContentPiece, type PieceContext, type PipelineCutoff, type GenerationInfo,
   type PieceSearch,
 } from './_calibrationShared.js';
@@ -67,7 +68,11 @@ import {
  * fecha. La previsión es de esta bandeja y de ninguna otra — la cola de publicación muestra
  * `slot`, que es un compromiso. Dos cosas distintas, dos nombres distintos, a propósito.
  */
-type CalibrationInboxPiece = PieceContext & { forecast_slot: ForecastSlot | null };
+type CalibrationInboxPiece = PieceContext & {
+  forecast_slot: ForecastSlot | null;
+  /** Eje de pendiente: la tarjeta lo pinta. Ver `pendingStateOf`. */
+  pending_state: PendingState;
+};
 
 // Ejes de orden y filtro. Son del SISTEMA (una pieza tiene fecha, marca y veredicto en
 // cualquier marca), no de ningún caso particular.
@@ -185,9 +190,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ]);
     const cutoffs: PipelineCutoff[] = cutoffsRaw ?? [];
 
-    // 1. sin fila en el corpus · 2. última versión por queue_id
-    const pending  = allPieces.filter((p) => !evaluated.ids.has(p.id));
-    const perPiece = latestPerQueue(pending);
+    // EL CORPUS YA NO EXCLUYE: ANOTA. (Regla de Sam, 2026-09-18.)
+    //
+    // Antes esta línea era `filter((p) => !evaluated.ids.has(p.id))`, y escondía toda pieza con fila
+    // en `intel.approval_calibration`. Para una pieza SELLADA eso es correcto y sigue siéndolo — pero
+    // el sellado ya la saca por `status` y `discarded_at`, así que ese filtro no aportaba nada ahí.
+    // A quien escondía de verdad era a la pieza que se juzgó, SE CORRIGIÓ y volvió a la bandeja: vive,
+    // está pendiente, y desaparecía. Medido el 2026-09-18: `5aeb27e3` y `7a7a8a58`, devueltas el
+    // 2026-09-15 con su corrección registrada en `intel.piece_edits`, invisibles desde entonces.
+    //
+    // «Ya calibrada» es historia de la pieza, no su estado actual. Viaja como eje —`pendingStateOf`—
+    // y la tarjeta la distingue por color; no la borra de la lista.
+    const perPiece = latestPerQueue(allPieces);
+    const yaCalibrada = (id: string) => evaluated.ids.has(id);
 
     // Generación de cada pieza (se calcula una vez: filtra, ordena y viaja a la tarjeta).
     const genById = new Map<string, GenerationInfo>();
@@ -203,8 +218,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (search) scoped = scoped.filter((p) => idMatchesSearch(p.id, search));
     if (platform) scoped = scoped.filter((p) => (p.platform ?? '') === platform);
 
+    // UNA MARCA NO DESAPARECE: DECLARA CERO. (Regla de Sam, 2026-09-18.)
+    //
+    // `by_brand` se contaba sólo sobre `scoped`, el conjunto YA filtrado, así que una marca cuyas
+    // piezas caían todas por un filtro se esfumaba de la interfaz sin que nada lo señalara — y
+    // «no hay pestaña» se lee como «esa marca no existe», no como «no hay nada con estos filtros».
+    // Le pasó a LucienSael, cuya única pieza viva estaba oculta por el corpus.
+    //
+    // Omitir y mostrar cero son dos afirmaciones distintas. Las marcas salen del conjunto SIN
+    // filtrar y los conteos del filtrado: quien tenga 0 con los filtros puestos lo dice con un 0.
     const by_brand: Record<string, number> = {};
-    for (const p of scoped) by_brand[p.brand_id] = (by_brand[p.brand_id] ?? 0) + 1;
+    for (const p of perPiece) by_brand[p.brand_id] = 0;
+    for (const p of scoped)   by_brand[p.brand_id] = (by_brand[p.brand_id] ?? 0) + 1;
 
     // Filtro de marca (si vino) y orden.
     const inBrand = brand ? scoped.filter((p) => p.brand_id === brand) : scoped;
@@ -229,6 +254,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // franja: esto es dónde caería si se aprobara ahora, y otra pieza aprobada antes se
       // la lleva. Por eso NO se llama `slot` — el nombre distingue las dos cosas.
       forecast_slot: forecastFor(p, freeSlots, brandZones),
+      // EN QUÉ ESTADO DE PENDIENTE ESTÁ. Es lo que la tarjeta pinta para que cuatro situaciones
+      // distintas no se lean iguales — que es el defecto que SIGN-01 corte D intentó resolver
+      // escondiéndolas.
+      pending_state: pendingStateOf(p.status, yaCalibrada(p.id)),
     }));
 
     // U-8 — DOS LOTES PUEDEN CORTARSE, Y CORTARSE MIENTE DE DOS MANERAS DISTINTAS.

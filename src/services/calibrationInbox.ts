@@ -261,7 +261,23 @@ export interface CalibrationPiece {
    * etiqueta en pantalla es «Fecha prevista de publicación», nunca «fecha de publicación».
    */
   forecast_slot: ForecastSlot | null;
+  /**
+   * EN QUÉ ESTADO DE PENDIENTE ESTÁ. El eje lo resuelve el server (`pendingStateOf`); acá sólo
+   * se transporta para que la tarjeta lo pinte. Cuatro situaciones que exigen cosas distintas de
+   * Sam y que hasta el 2026-09-18 se leían iguales — o directamente no se leían.
+   */
+  pending_state: PendingState;
+  /** Aplazamiento: hasta cuándo y por qué. `null` en toda pieza no aplazada. */
+  deferred_until: string | null;
+  deferred_reason: string | null;
 }
+
+/**
+ * Los cuatro estados en los que una pieza está viva y pendiente. Mismo vocabulario que el server:
+ * si divergen, la tarjeta pinta un estado que nadie emite. Ver `pendingStateOf` en
+ * `api/_calibrationShared.ts`.
+ */
+export type PendingState = 'esperando' | 'recalibrar' | 'aplazada' | 'retenida';
 
 export interface QueueResult {
   total_pending: number;
