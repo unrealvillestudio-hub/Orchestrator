@@ -234,41 +234,77 @@ describe('E · motivo de rechazo estructurado', () => {
 });
 
 // ── el tercer veredicto: fixable ─────────────────────────────────────────────────
-describe('fixable · sella igual que un rechazo, y la diferencia vive en el corpus', () => {
-  it('sella la pieza: sin discarded_at reaparecería en la bandeja mañana', () => {
-    // Es la restricción que decide el diseño entero. La bandeja lista CALIBRATION_STATUSES
-    // filtrando por discarded_at IS NULL: un veredicto que no sella no es un veredicto.
+describe('fixable · RETA la pieza, no la descarta (cambio de diseño del 2026-09-20)', () => {
+  it('NO sella: marcar algo para arreglarlo no puede sacarlo de la cola de lo arreglable', () => {
+    // EL DEFECTO QUE CIERRA. `discarded_at` no sólo saca la pieza de esta bandeja: la saca del
+    // SISTEMA. Medido en unrlvl-iid-functions (migración 20260920030000): con esa columna puesta,
+    // `storage-orphan-sweep` deja de sostener su imagen, `publish-slot-reserver` y el scheduler la
+    // excluyen, y la vía de re-adaptación (READAPT-01) la rechaza por diseño.
     const e = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'motivo:titulo', 'se rescata el gancho');
+    expect(e.status).toBe('challenged');
+    expect(e.challenged_at).toBe('2026-08-31T22:00:00Z');
+    expect(e.discarded_at).toBeNull();
+  });
+
+  it('limpia un descarte previo EXPLÍCITAMENTE, en vez de omitir la columna', () => {
+    // Omitirla dejaría a una pieza re-juzgada tras un descarte diciendo a la vez que está retada y
+    // que está descartada. Gana la que se escribe, así que las dos se escriben.
+    const e = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'x', 'la propuesta');
+    expect(Object.keys(e)).toContain('discarded_at');
+    expect(Object.keys(e)).toContain('discarded_reason');
+    expect(e.discarded_reason).toBeNull();
+  });
+
+  it('el motivo va a SU columna, `challenged_reason`, con el marcador y la propuesta', () => {
+    // `challenged_reason` existe desde la migración del 2026-09-19, que nació porque el reto era el
+    // único de los tres estados con fecha y sin motivo — así que el motivo caía en la del descarte.
+    const e = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'motivo:titulo', 'se rescata el gancho');
+    expect(e.challenged_reason).toBe(`${FIXABLE_REASON_PREFIX} se rescata el gancho`);
+    expect(e.discarded_reason).toBeNull();
+  });
+
+  it('el marcador es LEGIBLE, no criterio: el estado decide, el texto sólo acompaña', () => {
+    // Es la corrección de Sam del 2026-09-20: «podría decir otra cosa y entonces fallaría».
+    // MEDIDO ese mismo día: de las 41 piezas con veredicto `fixable` en el corpus, 3 NO llevaban
+    // el prefijo en su motivo. Un criterio de prefijo habría callado 3 sin que nadie lo notara.
+    // Por eso lo que se exige acá es que el ESTADO no dependa del texto en ningún caso.
+    for (const propuesta of ['se rescata el gancho', 'otra cosa entera', '   ']) {
+      const e = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'motivo:x', propuesta);
+      expect(e.status).toBe('challenged');
+      expect(e.discarded_at).toBeNull();
+    }
+  });
+
+  it('un rechazo sigue siendo un rechazo, sin marcador y sin tocar el reto', () => {
+    const e = verdictEffect('rejected', '2026-08-31T22:00:00Z', 'sam', 'motivo:falta_firma');
     expect(e.status).toBe('rejected');
     expect(e.discarded_at).toBe('2026-08-31T22:00:00Z');
-    expect(CALIBRATION_STATUSES).toContain('awaiting_approval');
-  });
-
-  it('MISMAS COLUMNAS que un rechazo: lo único que cambia es qué dice el motivo', () => {
-    // La versión anterior de esta prueba exigía `toEqual` con el rechazo, que era la lectura
-    // literal del brief. Sam la corrigió el 2026-08-31: el corpus SE ARCHIVA, y una fila
-    // `fixable` archivada dejaría la pieza indistinguible de un rechazo en `content_pieces`
-    // para siempre. Lo que se sigue exigiendo —y es lo que protegía la prueba— es que el
-    // SELLADO sea idéntico: mismas columnas, mismo status, misma fecha.
-    const fix = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'x', 'la propuesta');
-    const rej = verdictEffect('rejected', '2026-08-31T22:00:00Z', 'sam', 'x');
-    expect(Object.keys(fix).sort()).toEqual(Object.keys(rej).sort());
-    expect(fix.status).toBe(rej.status);
-    expect(fix.discarded_at).toBe(rej.discarded_at);
-    expect(fix.discarded_reason).not.toBe(rej.discarded_reason);
-  });
-
-  it('el motivo de la pieza lleva el marcador y la propuesta, no el criterio', () => {
-    const e = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'motivo:titulo', 'se rescata el gancho');
-    expect(e.discarded_reason).toBe(`${FIXABLE_REASON_PREFIX} se rescata el gancho`);
-    // Greppable: una consulta sobre content_pieces puede separar los dos sin mirar el corpus.
-    expect(String(e.discarded_reason).startsWith(FIXABLE_REASON_PREFIX)).toBe(true);
-  });
-
-  it('un rechazo NO gana marcador: sigue llevando su criterio tal cual', () => {
-    const e = verdictEffect('rejected', '2026-08-31T22:00:00Z', 'sam', 'motivo:falta_firma');
     expect(e.discarded_reason).toBe('motivo:falta_firma');
     expect(String(e.discarded_reason)).not.toContain(FIXABLE_REASON_PREFIX);
+    expect(e.challenged_at).toBeUndefined();
+  });
+
+  it('los dos dejan de compartir columnas: son estados distintos, no etiquetas del mismo', () => {
+    const fix = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'x', 'la propuesta');
+    const rej = verdictEffect('rejected', '2026-08-31T22:00:00Z', 'sam', 'x');
+    expect(fix.status).not.toBe(rej.status);
+    expect(Object.keys(fix).sort()).not.toEqual(Object.keys(rej).sort());
+  });
+
+  it('la pieza retada sigue en la bandeja, pero NO como una tarjeta sin juzgar', () => {
+    // Es lo que el sellado venía a evitar, y sigue evitado: `pendingStateOf` le da eje propio.
+    // Un veredicto que no sella y tampoco distingue sería una nota que no se aplica — el defecto
+    // de SIGN-01 corte A2, que ya costó seis decisiones sin efecto.
+    expect(CALIBRATION_STATUSES).toContain('challenged');
+    expect(pendingStateOf('challenged', true)).toBe('por_arreglar');
+    expect(pendingStateOf('challenged', true)).not.toBe('esperando');
+  });
+
+  it('y no se confunde con una retenida del JUEZ, que se arbitra en vez de arreglarse', () => {
+    // Los distingue si hay fila en el corpus: el juez escribe `intel.judge_calibration`, no
+    // `intel.approval_calibration`. Una retada CON veredicto humano sólo puede venir de un fixable.
+    expect(pendingStateOf('challenged', false)).toBe('retenida');
+    expect(pendingStateOf('challenged', true)).not.toBe('retenida');
   });
 
   it('la propuesta baja a la pieza, no sólo al corpus', () => {

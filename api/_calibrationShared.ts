@@ -795,24 +795,33 @@ export const CALIBRATION_STATUSES = ['awaiting_approval', 'deferred', 'challenge
  * EN QUÉ ESTADO DE PENDIENTE ESTÁ. Eje del sistema, no de ninguna marca: cuatro situaciones
  * distintas, cada una con lo que Sam tiene que hacer con ella.
  *
- *   esperando   — espera su primer veredicto. Es el caso normal.
- *   recalibrar  — YA tiene fila en el corpus y sigue viva: se juzgó, se corrigió y volvió a la
- *                 bandeja. Hasta hoy éstas eran invisibles, porque la bandeja excluía por corpus
- *                 sin mirar si la pieza seguía pendiente. Son las que Sam perdía de vista.
- *   aplazada    — el sistema la apartó (duplicación) hasta una fecha. Nadie la devuelve solo: sin
- *                 verla, su `deferred_until` pasa y no ocurre nada.
- *   retenida    — retenida por desacuerdo (CALIB-01).
+ *   esperando    — espera su primer veredicto. Es el caso normal.
+ *   recalibrar   — YA tiene fila en el corpus y sigue viva: se juzgó, se corrigió y volvió a la
+ *                  bandeja. Hasta hoy éstas eran invisibles, porque la bandeja excluía por corpus
+ *                  sin mirar si la pieza seguía pendiente. Son las que Sam perdía de vista.
+ *   aplazada     — el sistema la apartó (duplicación) hasta una fecha. Nadie la devuelve solo: sin
+ *                  verla, su `deferred_until` pasa y no ocurre nada.
+ *   retenida     — retenida por desacuerdo DEL JUEZ (CALIB-01). Se arbitra, no se arregla: quien
+ *                  decide es si el juez tenía razón o si la regla falló.
+ *   por_arreglar — SAM la marcó como fixable. Tiene defecto declarado y tiene futuro: espera una
+ *                  sesión de arreglos, no un veredicto. Desde el 2026-09-20 un `fixable` reta la
+ *                  pieza en vez de descartarla, así que este eje es lo que impide que reaparezca
+ *                  como una tarjeta sin juzgar — el riesgo que el sellado venía a evitar.
+ *
+ * LOS DOS `challenged` NO SON EL MISMO CASO, y por eso son dos ejes. Los distingue si hay fila en
+ * el corpus: el juez no escribe `intel.approval_calibration` —escribe `intel.judge_calibration`—,
+ * así que una pieza retada CON veredicto humano registrado sólo puede venir de un `fixable`.
  *
  * Es una función PURA sobre (estado, ¿tiene fila en el corpus?): sin DB y sin red, para que el test
  * la ejecute tal cual. El COLOR no vive acá — vive en la interfaz, que es quien pinta. Acá sólo el
  * eje, que es lo que las dos mitades comparten.
  */
-export type PendingState = 'esperando' | 'recalibrar' | 'aplazada' | 'retenida';
+export type PendingState = 'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar';
 
 export function pendingStateOf(status: string | null | undefined, yaCalibrada: boolean): PendingState {
   const s = String(status ?? '').trim().toLowerCase();
   if (s === 'deferred') return 'aplazada';
-  if (s === 'challenged') return 'retenida';
+  if (s === 'challenged') return yaCalibrada ? 'por_arreglar' : 'retenida';
   // `awaiting_approval` y cualquier otro estado vivo que llegue acá: lo que decide es si YA se
   // juzgó una vez. Un estado nuevo en el CHECK cae en 'esperando', que es el caso menos
   // sorprendente y el que no esconde nada — nunca en un silencio.
@@ -1112,15 +1121,19 @@ export async function ensureArtifact(pieceId: string): Promise<{ artifact_url: s
  *   fixable  → la pieza no sirve TAL COMO ESTÁ pero hay algo que aprovechar, y Sam escribe
  *              qué propone para aprovecharlo
  *
- * `fixable` tiene el MISMO efecto que `rejected` sobre la pieza y se diferencia SÓLO en el
- * corpus. Ver el bloque de `verdictEffect`, que explica por qué no puede ser de otra forma.
+ * Los tres tienen efecto DISTINTO sobre la pieza: `approved` la habilita, `rejected` la descarta y
+ * `fixable` la RETA —`status='challenged'`, sin `discarded_at`—, porque marcar algo para arreglarlo
+ * no puede sacarlo de la cola de lo arreglable. Ver el bloque de `verdictEffect`.
  */
 export type CalibrationVerdict = 'approved' | 'rejected' | 'fixable';
 
 /**
- * Marcador de veredicto en `discarded_reason` de la pieza. `fixable` sella la pieza como
- * `rejected` —no puede ser de otra forma, ver `verdictEffect`—, así que sin este marcador una
- * pieza marcada para corregir sería INDISTINGUIBLE de un rechazo mirando `content_pieces`.
+ * Marcador de veredicto en `challenged_reason` de la pieza (hasta el 2026-09-20 iba en
+ * `discarded_reason`, cuando un `fixable` todavía descartaba). Sin él, una pieza retada por SAM
+ * sería indistinguible de una retenida por el JUEZ mirando sólo `content_pieces`.
+ *
+ * ES LEGIBLE, NO ES CRITERIO. Nada decide por este texto: quien distingue un fixable es el estado
+ * `challenged` más su fila en el corpus. Ver el bloque de `verdictEffect`.
  *
  * Y eso no es un problema de comodidad: el corpus se ARCHIVA (44 filas movidas el 2026-08-31), y
  * una fila `fixable` archivada dejaría la pieza indistinguible de un rechazo para siempre. La
@@ -1217,24 +1230,50 @@ export async function upsertVerdict(row: {
 // DESPUÉS del upsert — si el corpus falla, la pieza no se mueve, por el mismo criterio que el
 // arbitraje de CALIB-01: mover sin registrar por qué es el defecto de este brief del otro lado.
 //
-// TRES VEREDICTOS, DOS RAMAS — Y ES DELIBERADO, NO UN OLVIDO.
-// `fixable` cae por la misma rama que `rejected` y sella la pieza igual. La razón es dura y está
-// medida en este mismo archivo: la bandeja lista los estados de `CALIBRATION_STATUSES` filtrando
-// por `discarded_at=is.null`. Un veredicto que NO sella deja la pieza viva y en uno de esos
-// estados, así que reaparece en la bandeja al día siguiente — y entonces no es un veredicto: es una
-// nota que no se aplica. Es el defecto de SIGN-01 corte A2 otra vez, que ya costó seis decisiones
-// sin efecto.
+// TRES VEREDICTOS, TRES RAMAS — Y ES UN CAMBIO DE DISEÑO, FECHADO Y MEDIDO.
 //
-// PRECISIÓN 2026-09-18, y no deroga nada de lo anterior: reaparecer YA NO ES EL ACCIDENTE que este
-// párrafo temía. Una pieza que se corrige y se devuelve a la bandeja DEBE reaparecer, y ahora lo
-// hace marcada como `recalibrar`. Lo que sigue siendo cierto es lo que este bloque defiende: un
-// veredicto que no sella y TAMPOCO devuelve deja la pieza indistinguible de una sin juzgar. Sellar
-// sigue siendo el efecto por defecto; devolver es un acto explícito, con su registro en
-// `intel.piece_edits`.
+// ── LO QUE ESTE BLOQUE DECÍA HASTA EL 2026-09-20, Y POR QUÉ ERA RAZONABLE ─────────────────────
 //
-// La diferencia entre `rejected` y `fixable` vive ENTERA en el corpus: misma sellada sobre la
-// pieza, etiqueta distinta y una propuesta de corrección en la fila. Decisión de Sam del
-// 2026-08-31: «mismo efecto que rejected... su único objetivo es marcarla bien».
+// `fixable` caía por la misma rama que `rejected` y sellaba la pieza igual. El argumento era
+// bueno: la bandeja lista los estados de `CALIBRATION_STATUSES` filtrando por
+// `discarded_at=is.null`, así que un veredicto que no sella deja la pieza viva y reaparece al día
+// siguiente — y entonces no es un veredicto, es una nota que no se aplica. Ése fue el defecto de
+// SIGN-01 corte A2, que costó seis decisiones sin efecto. La diferencia entre rechazar y marcar
+// para arreglar vivía ENTERA en el corpus.
+//
+// ── POR QUÉ CAMBIA ────────────────────────────────────────────────────────────────────────────
+//
+// Porque sellar tiene un efecto que el argumento no contemplaba: `discarded_at` no es sólo lo que
+// saca la pieza de ESTA bandeja. Es lo que la saca del SISTEMA. Medido en el otro repositorio
+// (`unrlvl-iid-functions`, migración 20260920030000): con `discarded_at` puesto,
+// `storage-orphan-sweep` deja de sostener su imagen, `publish-slot-reserver` y el scheduler la
+// excluyen, y la vía de re-adaptación (READAPT-01) la rechaza por diseño. Marcar una pieza para
+// ARREGLARLA la estaba sacando de la cola de lo arreglable — y con su imagen en la cuenta atrás.
+//
+// Una pieza marcada para arreglar tiene defecto Y TIENE FUTURO. Una descartada no tiene futuro.
+// No son el mismo estado, y el CHECK de `content_pieces` ya tenía el que corresponde: `challenged`.
+//
+// ── Y LO QUE EL ARGUMENTO VIEJO DEFENDÍA SIGUE EN PIE ─────────────────────────────────────────
+//
+// No reaparece como una tarjeta sin juzgar. `pendingStateOf` la distingue: `challenged` + fila en
+// el corpus = `por_arreglar`, que es su propio eje, con su propio color, separado de `retenida`
+// (el desacuerdo del juez, que es otra cosa y se arbitra en otra bandeja). El veredicto SÍ tuvo
+// efecto y se ve: la pieza cambió de estado, salió de «esperando» y entró en la cola de arreglos.
+//
+// ── EL MOTIVO VA A SU COLUMNA ─────────────────────────────────────────────────────────────────
+//
+// `challenged_reason`, que existe desde la migración del 2026-09-19 y nació justamente porque el
+// reto era el único de los tres estados con fecha y sin motivo — así que el motivo caía en la
+// columna del descarte. Ahora no hace falta que caiga ahí: tiene la suya.
+//
+// ── LO QUE NO IDENTIFICA A UN FIXABLE ─────────────────────────────────────────────────────────
+//
+// El texto de su motivo. `FIXABLE_REASON_PREFIX` es legible para un humano y nada más: ningún
+// contador, ninguna consulta y ninguna rama decide por él. Medido el 2026-09-20 sobre las 41
+// piezas descartadas con veredicto `fixable` en el corpus: 3 de ellas NO llevan ese prefijo en su
+// motivo. Un criterio de prefijo habría callado 3 piezas sin que nadie lo notara — que es
+// exactamente lo que Sam anticipó el 2026-09-20: «podría decir otra cosa y entonces fallaría».
+// El criterio es el ESTADO, y el registro de la decisión es el corpus.
 export function verdictEffect(
   verdict: CalibrationVerdict, nowIso: string, by: string, reason: string | null,
   fixProposal: string | null = null,
@@ -1257,16 +1296,29 @@ export function verdictEffect(
     return { status: 'scheduled', approved_at: nowIso, approved_by: by, ...sinAplazamiento };
   }
 
-  // MISMAS COLUMNAS EN LOS DOS VEREDICTOS QUE SELLAN. Lo único que cambia es qué dice el motivo:
-  // un `fixable` lleva su marcador y la propuesta, para que la pieza siga diciendo qué hacer con
-  // ella cuando su fila del corpus ya esté archivada. `rejected` no cambia: sigue llevando el
-  // criterio, exactamente como hasta hoy.
-  const propuesta = (fixProposal ?? '').trim();
-  const discarded_reason = verdict === 'fixable'
-    ? [FIXABLE_REASON_PREFIX, propuesta || (reason ?? '')].join(' ').trim()
-    : reason;
+  // MARCAR PARA ARREGLAR: RETA LA PIEZA, NO LA DESCARTA. Sin `discarded_at`, que es lo que la
+  // sacaría del sistema entero y no sólo de esta bandeja.
+  //
+  // `discarded_at: null` y `discarded_reason: null` van EXPLÍCITOS y no omitidos: una pieza que
+  // vuelve a juzgarse tras un descarte previo arrastraría el sello viejo, y la fila diría a la vez
+  // que está retada y que está descartada. Lo que gana el que se escribe.
+  //
+  // El marcador sigue delante del motivo por lo mismo que lo puso Sam el 2026-08-31: el corpus se
+  // ARCHIVA, y sin él una pieza retada por Sam sería indistinguible de una retenida por el juez
+  // mirando sólo `content_pieces`. Es legible, no es criterio — ver el bloque de arriba.
+  if (verdict === 'fixable') {
+    const propuesta = (fixProposal ?? '').trim();
+    return {
+      status: 'challenged',
+      challenged_at: nowIso,
+      challenged_reason: [FIXABLE_REASON_PREFIX, propuesta || (reason ?? '')].join(' ').trim(),
+      discarded_at: null,
+      discarded_reason: null,
+      ...sinAplazamiento,
+    };
+  }
 
-  return { status: 'rejected', discarded_at: nowIso, discarded_reason, ...sinAplazamiento };
+  return { status: 'rejected', discarded_at: nowIso, discarded_reason: reason, ...sinAplazamiento };
 }
 
 /**

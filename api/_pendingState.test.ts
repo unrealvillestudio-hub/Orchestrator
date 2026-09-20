@@ -90,3 +90,48 @@ describe('la consulta de la bandeja no vuelve a excluir por corpus', () => {
     expect(QUEUE).toMatch(/for\s*\(const p of perPiece\)\s*by_brand\[p\.brand_id\]\s*=\s*0/);
   });
 });
+
+// ── EL EJE SE DECLARA EN DOS SITIOS, Y AQUÍ SE COMPRUEBA QUE DIGAN LO MISMO ──────────────────
+//
+// `PendingState` vive dos veces: en el server (`_calibrationShared.ts`, que lo EMITE) y en el
+// cliente (`src/services/calibrationInbox.ts`, que lo transporta para que la tarjeta lo pinte).
+// Son dos listas, no una importación: el cliente no puede importar de `api/`.
+//
+// ESTO NO ES TEÓRICO. Al añadir `por_arreglar` el 2026-09-20, el server lo emitía y el cliente no
+// lo conocía — y `tsc -b` pasó en verde, porque `PENDING_STATE_UI` está tipado contra el tipo DEL
+// CLIENTE: la tabla estaba completa respecto de una lista que ya no era la buena. El compilador no
+// puede ver la divergencia; sólo puede verla algo que lea los dos archivos.
+//
+// El síntoma habría sido una tarjeta con `PENDING_STATE_UI[state]` en `undefined` y un fallo al
+// leerle `.color` — en producción, sobre la pieza recién marcada como fixable.
+describe('los dos `PendingState` —server y cliente— declaran exactamente los mismos ejes', () => {
+  const literales = (fuente: string, decl: string): string[] => {
+    const m = fuente.match(new RegExp(`export type ${decl} =([^;]*);`));
+    expect(m, `no se encontró la declaración de ${decl}`).not.toBeNull();
+    return [...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort();
+  };
+
+  const SERVER = readFileSync(new URL('./_calibrationShared.ts', import.meta.url), 'utf8');
+  const CLIENTE = readFileSync(new URL('../src/services/calibrationInbox.ts', import.meta.url), 'utf8');
+  const UI = readFileSync(new URL('../src/modules/iid/pieceUi.tsx', import.meta.url), 'utf8');
+
+  const ejesServer = literales(SERVER, 'PendingState');
+
+  it('el cliente conoce todos los ejes que el server emite, y ninguno de más', () => {
+    expect(literales(CLIENTE, 'PendingState')).toEqual(ejesServer);
+  });
+
+  it('la tabla de color cubre todos los ejes: una tarjeta sin color revienta al pintarse', () => {
+    const tabla = UI.slice(UI.indexOf('PENDING_STATE_UI'), UI.indexOf('PendingStateBadge'));
+    for (const eje of ejesServer) {
+      expect(tabla, `PENDING_STATE_UI no tiene fila para '${eje}'`).toMatch(new RegExp(`\\b${eje}\\s*:`));
+    }
+  });
+
+  it('los dos `challenged` tienen color distinto: arbitrar no es arreglar', () => {
+    const fila = (eje: string) => UI.match(new RegExp(`${eje}\\s*:\\s*\\{[^}]*color:\\s*'(#[0-9A-Fa-f]{3,8})'`))?.[1];
+    expect(fila('retenida')).toBeTruthy();
+    expect(fila('por_arreglar')).toBeTruthy();
+    expect(fila('por_arreglar')).not.toBe(fila('retenida'));
+  });
+});

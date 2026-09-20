@@ -38,13 +38,14 @@ const PAGE = 20;
  * Cuatro salidas, tres de ellas veredicto:
  *   Aprobar   → corpus `approved`   · habilita la pieza
  *   Rechazar  → corpus `rejected`   · sella y saca de la bandeja (criterio OPCIONAL)
- *   Fixable   → corpus `fixable`    · MISMO sellado que rechazar, con la PROPUESTA de qué
- *               hacer con la pieza. Obligatoria: sin ella sería un rechazo con otro nombre.
+ *   Fixable   → corpus `fixable`    · RETA la pieza (`challenged`), con la PROPUESTA de qué
+ *               hacer con ella. Obligatoria: sin ella sería un rechazo con otro nombre.
  *   Descartar → NO entra al corpus; sella discarded_at y sale de la bandeja
  *
- * Fixable sella igual que Rechazar y no es un olvido: la bandeja lista `awaiting_approval`
- * con `discarded_at IS NULL`, así que un veredicto que no sella deja la pieza viva y
- * reaparece mañana. La diferencia entre los dos vive ENTERA en el corpus.
+ * Fixable NO sella, desde el 2026-09-20. Descartar una pieza no la saca sólo de esta bandeja:
+ * la saca del sistema —deja de sostenerse su imagen, el scheduler la excluye y la vía de
+ * re-adaptación la rechaza—, y eso es lo contrario de marcarla para arreglar. Vuelve a la
+ * bandeja distinguida como `por arreglar`, que es lo que impide que se lea como sin juzgar.
  *
  * NO publica nada.
  */

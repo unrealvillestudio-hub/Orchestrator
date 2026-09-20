@@ -30,11 +30,15 @@
  *    había flujo, había opiniones registradas.
  *      approved → status='scheduled' + approved_at + approved_by (desde la SESIÓN)
  *      rejected → status='rejected' + discarded_at + discarded_reason (el motivo estructurado)
- *      fixable  → EL MISMO EFECTO QUE rejected. No es un olvido: la bandeja lista
- *                 `awaiting_approval` con `discarded_at IS NULL`, así que un veredicto que no
- *                 sella deja la pieza viva y reaparece mañana — una nota que no se aplica, que
- *                 es el defecto A2 otra vez. La diferencia vive ENTERA en el corpus: etiqueta
- *                 `fixable` + `fix_proposal` con lo que Sam propone para aprovecharla.
+ *      fixable  → status='challenged' + challenged_at + challenged_reason. RETA la pieza, NO la
+ *                 descarta (cambio de diseño del 2026-09-20). Hasta esa fecha sellaba igual que
+ *                 un rechazo, y el argumento era bueno mientras sólo se mirara esta bandeja:
+ *                 un veredicto que no sella deja la pieza viva y reaparece mañana.
+ *                 LO QUE FALTABA: `discarded_at` no la saca sólo de aquí, la saca del SISTEMA
+ *                 — `storage-orphan-sweep` deja de sostener su imagen, el scheduler la excluye
+ *                 y la vía de re-adaptación la rechaza por diseño. Marcar una pieza para
+ *                 arreglarla la sacaba de la cola de lo arreglable.
+ *                 Y no reaparece sin juzgar: vuelve con eje propio, `por_arreglar`.
  *    El efecto va DESPUÉS del upsert: si el corpus falla, la pieza no se mueve — mover una pieza sin
  *    registrar por qué es el mismo defecto, del otro lado.
  *  · LA PROPUESTA ES OBLIGATORIA con `fixable` (400 si falta o viene vacía). Un `fixable` sin
@@ -174,7 +178,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       note: verdict === 'approved'
         ? 'habilitada — la franja la calcula content-scheduler mode=placement'
         : verdict === 'fixable'
-          ? 'marcada como fixable — sale de la bandeja igual que un rechazo; la propuesta queda en el corpus'
+          ? 'marcada como fixable — RETADA, no descartada: conserva su imagen y su sitio, y espera una sesión de arreglos'
           : 'rechazada y descartada — sale de la bandeja',
     });
   } catch (err) {
