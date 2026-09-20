@@ -111,8 +111,11 @@ export const ACTION_SPECS: ReadonlyArray<{
     hint: 'Habilita la pieza. La franja la calcula content-scheduler.' },
   { key: 'reject', label: 'Rechazar', panel: 'reject', seals: true, weight: 'primary',
     hint: 'Entra al corpus como rechazo y sella la pieza.' },
-  { key: 'fixable', label: 'Fixable', panel: 'fix', seals: true, weight: 'primary',
-    hint: 'Hay algo que aprovechar. Sella la pieza igual que un rechazo y guarda la propuesta.' },
+  // `seals: false` — y es el cambio del 2026-09-20. Un fixable RETA la pieza: la saca de
+  // «esperando» y la pone en la cola de arreglos, pero no la descarta. Sellarla la sacaba del
+  // sistema entero (imagen, franjas, re-adaptación), que es lo contrario de marcarla para arreglar.
+  { key: 'fixable', label: 'Fixable', panel: 'fix', seals: false, weight: 'primary',
+    hint: 'Hay algo que aprovechar. Reta la pieza y guarda la propuesta: queda por arreglar, no descartada.' },
   // Nivel secundario — sella sin juicio: saca la pieza y no enseña nada.
   { key: 'discard', label: 'Descartar', panel: 'discard', seals: true, weight: 'secondary',
     hint: 'No voy a juzgar esta pieza: sale de la bandeja y NO entra al corpus.' },
@@ -218,7 +221,7 @@ export function slotReleaseNotice(
 export const OUTCOME_COPY: Record<ActionOutcome, { tone: 'ok' | 'sealed'; text: string }> = {
   approved: { tone: 'ok', text: 'Aprobada y guardada en el corpus. Habilitada para salir: la franja la calcula content-scheduler, no este clic.' },
   rejected: { tone: 'sealed', text: 'Rechazada y guardada en el corpus. La pieza queda sellada y sale de la bandeja.' },
-  fixable: { tone: 'sealed', text: 'Marcada como fixable. Sella la pieza igual que un rechazo; la propuesta queda en el corpus.' },
+  fixable: { tone: 'ok', text: 'Marcada como fixable. La pieza queda RETADA, no descartada: espera una sesión de arreglos con la propuesta en su motivo.' },
   discarded: { tone: 'sealed', text: 'Descartada. Sale de la bandeja y NO entra al corpus: un descarte no es un rechazo.' },
 };
 
@@ -238,8 +241,8 @@ export const PANEL_COPY: Record<PanelKey, {
     label: 'Qué propongo para aprovecharla',
     placeholder: 'Qué se rescata de esta pieza y cómo — con esto se corrige después en el chat…',
     confirm: 'Confirmar fixable',
-    foot: 'Fixable SELLA la pieza igual que un rechazo: sale de la bandeja. Lo que cambia es la '
-      + 'etiqueta del corpus y la propuesta, que queda guardada. La propuesta es obligatoria.',
+    foot: 'Fixable RETA la pieza: queda «por arreglar», no descartada, y conserva su imagen y su '
+      + 'sitio en la cola. La propuesta es obligatoria y baja al motivo del reto.',
     focus: 'focus:border-sky-500/60', button: 'bg-sky-500/90 hover:bg-sky-500', required: true,
   },
   edit: {

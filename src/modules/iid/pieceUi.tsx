@@ -822,8 +822,13 @@ export function Provenance({ piece }: { piece: PieceProvenance }) {
 // ── ESTADO DE PENDIENTE · el color de la tarjeta ────────────────────────────────────────────────
 //
 // REGLA DE SAM (2026-09-18): todo lo que está pendiente aparece en la bandeja. Y como ahora
-// conviven cuatro situaciones distintas, la tarjeta tiene que decir CUÁL de un vistazo — que es
+// conviven CINCO situaciones distintas, la tarjeta tiene que decir CUÁL de un vistazo — que es
 // justo lo que faltaba cuando SIGN-01 corte D las escondió en vez de distinguirlas.
+//
+// LOS DOS AZULES NO SON EL MISMO CASO. `retenida` (violeta) es el desacuerdo del JUEZ y se
+// arbitra; `por_arreglar` (celeste) es un fixable de SAM y espera una sesión de arreglos. Las dos
+// tienen `status='challenged'` en la base y lo que las separa es quién decidió — ver
+// `pendingStateOf`. Pintar las dos igual sería volver a esconder una dentro de la otra.
 //
 // EL COLOR VIVE ACÁ Y EL EJE EN EL SERVER, a propósito. `pendingStateOf` decide el estado sin saber
 // de colores; esta tabla decide el color sin saber de reglas. Un estado nuevo entra en las dos, y
@@ -840,7 +845,9 @@ export const PENDING_STATE_UI: Record<PendingState, { color: string; label: stri
   aplazada:   { color: '#7C8CF8', label: 'aplazada',
                 hint: 'El sistema la apartó por duplicación hasta una fecha. Nadie la devuelve solo: sin verla, la fecha pasa y no ocurre nada.' },
   retenida:   { color: '#C084FC', label: 'retenida',
-                hint: 'Retenida por desacuerdo entre el juez y el arbitraje (CALIB-01).' },
+                hint: 'Retenida por desacuerdo entre el juez y el arbitraje (CALIB-01). Se arbitra, no se arregla.' },
+  por_arreglar: { color: '#38BDF8', label: 'por arreglar',
+                hint: 'Marcada como fixable: tiene defecto declarado y tiene futuro. Espera una sesión de arreglos, no un veredicto. La propuesta está en el motivo del reto.' },
 };
 
 /** La píldora que nombra el estado. El color lo pone la misma tabla que pinta el borde. */

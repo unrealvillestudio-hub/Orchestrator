@@ -20,9 +20,11 @@
  *   rejected → no sirve
  *   fixable  → no sirve tal como está, pero hay algo que aprovechar y Sam escribe qué propone
  *
- * `fixable` sella la pieza IGUAL que `rejected` —sale de la bandeja— y se diferencia sólo en el
- * corpus. Un veredicto que no sella deja la pieza viva y reaparece mañana: sería una nota, no un
- * veredicto. El contrato completo está en `api/calibration-verdict.ts`.
+ * Los tres tienen efecto DISTINTO sobre la pieza. `fixable` la RETA —`status='challenged'`, sin
+ * `discarded_at`— desde el 2026-09-20: descartarla la sacaba del sistema entero, no sólo de la
+ * bandeja, y eso es lo contrario de marcarla para arreglar. No reaparece como una tarjeta sin
+ * juzgar: entra en la bandeja con eje propio, `por_arreglar`.
+ * El contrato completo está en `api/calibration-verdict.ts`.
  */
 import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 export type Verdict = 'approved' | 'rejected' | 'fixable';
@@ -263,7 +265,7 @@ export interface CalibrationPiece {
   forecast_slot: ForecastSlot | null;
   /**
    * EN QUÉ ESTADO DE PENDIENTE ESTÁ. El eje lo resuelve el server (`pendingStateOf`); acá sólo
-   * se transporta para que la tarjeta lo pinte. Cuatro situaciones que exigen cosas distintas de
+   * se transporta para que la tarjeta lo pinte. Cinco situaciones que exigen cosas distintas de
    * Sam y que hasta el 2026-09-18 se leían iguales — o directamente no se leían.
    */
   pending_state: PendingState;
@@ -273,11 +275,18 @@ export interface CalibrationPiece {
 }
 
 /**
- * Los cuatro estados en los que una pieza está viva y pendiente. Mismo vocabulario que el server:
+ * Los CINCO estados en los que una pieza está viva y pendiente. Mismo vocabulario que el server:
  * si divergen, la tarjeta pinta un estado que nadie emite. Ver `pendingStateOf` en
  * `api/_calibrationShared.ts`.
+ *
+ * `por_arreglar` entra el 2026-09-20 con el cambio de diseño de `fixable`: marcar una pieza para
+ * arreglarla la RETA en vez de descartarla, y necesita su propio eje para no reaparecer como una
+ * tarjeta sin juzgar. Es distinto de `retenida`, que es el desacuerdo del JUEZ y se arbitra.
+ *
+ * ESTE TIPO ES UN ESPEJO, y `calibrationInbox.test.ts` lo compara con el del server: dos listas
+ * que tienen que decir lo mismo sólo lo siguen diciendo si algo lo comprueba.
  */
-export type PendingState = 'esperando' | 'recalibrar' | 'aplazada' | 'retenida';
+export type PendingState = 'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar';
 
 export interface QueueResult {
   total_pending: number;

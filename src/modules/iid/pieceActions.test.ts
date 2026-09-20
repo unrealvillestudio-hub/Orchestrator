@@ -322,8 +322,23 @@ describe('toda acción que resuelve la pieza lo dice, y lo dice igual en las dos
     expect(OUTCOME_COPY.rejected.text).toMatch(/corpus/i);
   });
 
-  it('fixable acusa que SELLA igual que un rechazo', () => {
-    expect(OUTCOME_COPY.fixable.text).toMatch(/sella/i);
+  it('fixable acusa que RETA, no que descarta — y no deja pensar que la pieza se perdió', () => {
+    // Hasta el 2026-09-20 este acuse decía que fixable sellaba igual que un rechazo, y era
+    // verdad. Dejó de serlo: descartar una pieza no la saca sólo de la bandeja, la saca del
+    // sistema. El acuse tiene que decir lo que pasa AHORA, porque es lo único que Sam ve del
+    // efecto — un acuse desactualizado es peor que ninguno: afirma con confianza algo falso.
+    expect(OUTCOME_COPY.fixable.text).toMatch(/retada/i);
+    expect(OUTCOME_COPY.fixable.text).not.toMatch(/sella/i);
+    expect(OUTCOME_COPY.fixable.text).not.toMatch(/descartada\b(?!:)/i);
+  });
+
+  it('y el botón de fixable ya no se declara sellador', () => {
+    // `seals` gobierna la confirmación y lo que la interfaz promete. Un botón que dice sellar y
+    // no sella es la misma divergencia entre lo que se ve y lo que pasa que este archivo combate.
+    const spec = (k: PieceActionKey) => ACTION_SPECS.find((b) => b.key === k)!;
+    expect(spec('fixable').seals).toBe(false);
+    expect(spec('reject').seals).toBe(true);
+    expect(spec('discard').seals).toBe(true);
   });
 
   it('`approve` pasa por el mismo acuse que los demás: ningún camino corto', () => {
