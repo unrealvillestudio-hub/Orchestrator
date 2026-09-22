@@ -8,6 +8,34 @@
   --color-bg:     #050508;
 }
 
+/* ── LO QUE EL TELEFONO SE QUEDA ABAJO ──────────────────────────────────────────────────────────
+ *
+ * EL CASO, reportado por Sam el 2026-09-22 con una captura: los botones «Anterior» y «Siguiente»
+ * de la bandeja quedaban debajo de la barra de navegacion del telefono. No estaban mal puestos —
+ * estaban TAPADOS, y por dos cosas a la vez:
+ *
+ *   1 · el pie fijo de la aplicacion (`position: fixed; bottom: 0`, alto 1.75rem) flota POR ENCIMA
+ *       del contenido, y el contenido no reservaba ni un pixel para el. El ultimo elemento de
+ *       cualquier pantalla quedaba debajo del pie, siempre, en cualquier dispositivo.
+ *   2 · encima de eso, el telefono se queda su propia franja —barra de tres botones o de gestos—,
+ *       que en el navegador se expresa como `env(safe-area-inset-bottom)`.
+ *
+ * Un elemento tapado no avisa: se ve la pantalla entera y parece que la paginacion no existe.
+ *
+ * `--hueco-inferior` NOMBRA la suma de las dos, UNA VEZ, para que el pie y el contenido no puedan
+ * discrepar. Dos numeros escritos en dos sitios se separan en el primer cambio de altura del pie,
+ * y entonces vuelve el mismo defecto con otro tamaño.
+ *
+ * `env(..., 0px)` lleva su respaldo explicito: en un navegador sin zonas seguras la expresion
+ * entera se invalidaria y la declaracion caeria en silencio — el peor desenlace, porque la
+ * pantalla se veria igual de bien en el escritorio donde se prueba.
+ */
+:root {
+  /* La altura del pie fijo. Es `h-7` de Tailwind; si cambia alla, cambia aca. */
+  --pie-fijo: 1.75rem;
+  --hueco-inferior: calc(var(--pie-fijo) + env(safe-area-inset-bottom, 0px));
+}
+
 @layer base {
   * { box-sizing: border-box; }
 
@@ -42,6 +70,24 @@
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 2px; }
 }
+
+/* ── Las dos mitades del arreglo del hueco inferior ─────────────────────────────────────────── */
+
+/**
+ * El CONTENIDO reserva sitio para lo que flota encima. Va sobre el contenedor que scrollea, no
+ * sobre el paginador: lo que se tapa es SIEMPRE el ultimo elemento de la pantalla, sea cual sea —
+ * arreglarlo en el paginador dejaria el defecto vivo en cualquier vista que no lo monte.
+ *
+ * El `1rem` extra es respiro: un boton que termina justo en el borde de la barra del telefono se
+ * pulsa mal aunque se vea entero.
+ */
+.pb-hueco-inferior { padding-bottom: calc(var(--hueco-inferior) + 1rem); }
+
+/**
+ * El PIE se aparta de la franja del telefono en vez de compartirla. Sin esto, «System Ready» se
+ * dibuja debajo de la barra de navegacion y el pie parece medio pie.
+ */
+.pie-sobre-la-barra { padding-bottom: env(safe-area-inset-bottom, 0px); }
 
 /* Font utilities */
 .font-display { font-family: "Syne", ui-sans-serif, sans-serif; }
