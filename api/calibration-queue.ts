@@ -38,10 +38,13 @@ import {
   fetchWatcherTraces, fetchAttemptsByQueue,
   latestPerQueue, generationOf, watcherOf, toContext, PIECES_CAP,
   parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
-  pendingStateOf, type PendingState,
+  pendingStateOf, PENDING_STATES, type PendingState,
   type ContentPiece, type PieceContext, type PipelineCutoff, type GenerationInfo,
   type PieceSearch,
 } from './_calibrationShared.js';
+// LO-CORREGIDO-01 — el circuito de arreglos: qué pidió Sam, qué se hizo desde entonces y por qué
+// versión va. Enriquece la tarjeta; nunca decide si la pieza aparece. Ver `_fixFlow.ts`.
+import { fetchPieceEdits, fixFlowOf, type FixFlow } from './_fixFlow.js';
 
 /**
  * U-7 — LAS PLATAFORMAS PRESENTES EN UN LOTE, ordenadas. Sale del dato, nunca de una lista
@@ -73,6 +76,13 @@ type CalibrationInboxPiece = PieceContext & {
   forecast_slot: ForecastSlot | null;
   /** Eje de pendiente: la tarjeta lo pinta. Ver `pendingStateOf`. */
   pending_state: PendingState;
+  /**
+   * LO-CORREGIDO-01 — el circuito de arreglos. Viaja en TODA pieza, no sólo en las corregidas: una
+   * pieza sin reto lo trae con `challenged_at:null` y `version:1`, que es una afirmación útil («no
+   * se tocó») y no un hueco. Poner el campo sólo cuando aplica obligaría a la tarjeta a distinguir
+   * «no vino» de «no hay», y esas dos cosas ya se confundieron una vez en este repositorio.
+   */
+  fix: FixFlow;
 };
 
 // Ejes de orden y filtro. Son del SISTEMA (una pieza tiene fecha, marca y veredicto en
@@ -92,6 +102,38 @@ type GenerationFilter = (typeof GENERATION_FILTERS)[number];
 // y `verdict`: un filtro transversal que se aplica ANTES de `by_brand`.
 const URGENCY_FILTERS = ['all', 'urgent'] as const;
 type UrgencyFilter = (typeof URGENCY_FILTERS)[number];
+
+/**
+ * LO-CORREGIDO-01 — FILTRAR POR EL EJE DE PENDIENTE, que es lo que convierte «otro tab» en algo
+ * que no duplica una línea de la bandeja.
+ *
+ * Sam pidió una pestaña para las corregidas. Una pestaña es un CONJUNTO, y acá ya había un eje que
+ * define conjuntos: `pending_state`. Construir un módulo aparte habría significado una segunda
+ * tarjeta, una segunda barra de acciones y una segunda forma de leer una pieza — tres cosas que
+ * divergen en el primer cambio. Con el filtro, la pestaña es esta misma bandeja con su alcance
+ * puesto, y todo lo que se arregle acá se arregla allá.
+ *
+ * Los valores salen de `PENDING_STATES`, no de una lista escrita acá: un eje nuevo entra en el
+ * filtro solo, y TypeScript falla si alguien lo añade en un sitio y lo olvida en el otro.
+ *
+ * ── ES UN CONJUNTO, NO UN VALOR ─────────────────────────────────────────────────
+ * `state` admite varios ejes separados por coma (`state=por_arreglar,corregida`) porque el
+ * circuito de arreglos tiene DOS mitades —lo que espera arreglo y lo que volvió arreglado— y una
+ * pestaña que sólo enseñara una de las dos escondería la otra. Un valor único habría obligado a
+ * inventar un séptimo nombre para «las dos», y un nombre que agrupa ejes deja de ser un eje.
+ *
+ * Un valor desconocido en la lista se IGNORA y los válidos siguen aplicando; si no queda ninguno,
+ * el filtro es `all`. Nunca una lista vacía: un filtro roto que devuelve cero se lee como «no hay
+ * nada», que es la mentira más cara de esta bandeja.
+ */
+function parseStates(v: unknown): PendingState[] {
+  const raw = strParam(v);
+  if (!raw || raw === 'all') return [];
+  const pedidos = raw.split(',').map((x) => x.trim()).filter(Boolean);
+  const validos = pedidos.filter((x): x is PendingState =>
+    (PENDING_STATES as readonly string[]).includes(x));
+  return Array.from(new Set(validos));
+}
 
 function intParam(v: unknown, def: number, min: number, max: number): number {
   const n = Array.isArray(v) ? v[0] : v;
@@ -159,6 +201,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // porque un filtro que esconde una franja de mañana es peor que uno que muestra una de pasado.
   const urgency = enumParam<UrgencyFilter>(req.query.urgency, URGENCY_FILTERS, 'all');
   const urgencyHours = intParam(req.query.urgency_hours, URGENCY_HOURS_DEFAULT, 1, URGENCY_HOURS_MAX);
+  // LO-CORREGIDO-01 — el alcance de la pestaña. Vacío = `all`, que es toda la bandeja.
+  const states = parseStates(req.query.state);
   // U-7 — la PLATAFORMA DE LA PIEZA. No confundir con el `channel` de `publish-queue`, que
   // filtra el CANAL OPERATIVO de la marca: son dos ejes distintos y por eso llevan nombres
   // distintos. Unificarlos a la fuerza haría que un filtro dijera lo que el otro hace.
@@ -221,6 +265,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const genById = new Map<string, GenerationInfo>();
     for (const p of perPiece) genById.set(p.id, generationOf(p, cutoffs));
 
+    // LO-CORREGIDO-01 — EL EJE SE RESUELVE SOBRE TODO LO PENDIENTE, no sobre la página.
+    //
+    // Hasta acá se calculaba dentro del `.map()` final, es decir DESPUÉS de filtrar, ordenar y
+    // paginar. Servía mientras sólo pintaba un color. En el momento en que el eje FILTRA, hacerlo
+    // ahí significaría filtrar por un valor que todavía no existe — y contar `by_state` sobre
+    // veinte tarjetas en vez de sobre las ciento y pico que hay.
+    const stateById = new Map<string, PendingState>();
+    for (const p of perPiece) {
+      stateById.set(p.id, pendingStateOf(
+        p.status,
+        yaCalibrada(p.id),
+        // RETADA = lleva la marca del reto en su historia. La marca no se borra al volver, y eso
+        // es precisamente lo que permite reconocer una pieza corregida meses después.
+        Boolean(p.challenged_at),
+      ));
+    }
+
     // Filtros transversales (veredicto y generación) — antes de by_brand.
     let scoped = perPiece;
     if (verdict !== 'all') scoped = scoped.filter((p) => watcherOf(p).result === verdict);
@@ -238,6 +299,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const urgentes = urgentChannels(freeSlots, urgencyHours);
     if (urgency === 'urgent') scoped = scoped.filter((p) => isUrgentPiece(p, urgentes));
 
+    // LO-CORREGIDO-01 — el alcance de la pestaña, con los demás transversales y ANTES de `by_brand`:
+    // las pastillas de marca tienen que contar lo que esta pestaña daría, no lo que daría la bandeja
+    // entera. Es el mismo orden que ya siguen el veredicto, la plataforma y la urgencia.
+    if (states.length) scoped = scoped.filter((p) => states.includes(stateById.get(p.id)!));
+
     // UNA MARCA NO DESAPARECE: DECLARA CERO. (Regla de Sam, 2026-09-18.)
     //
     // `by_brand` se contaba sólo sobre `scoped`, el conjunto YA filtrado, así que una marca cuyas
@@ -251,15 +317,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const p of perPiece) by_brand[p.brand_id] = 0;
     for (const p of scoped)   by_brand[p.brand_id] = (by_brand[p.brand_id] ?? 0) + 1;
 
+    // LO-CORREGIDO-01 — CUÁNTAS HAY EN CADA EJE. Es lo que deja que la pestaña muestre su número
+    // sin una segunda petición, y lo que impide que «no hay pestaña» se lea como «no existe eso».
+    //
+    // Se cuenta sobre `perPiece` —TODO lo pendiente—, no sobre `scoped`: si se contara sobre el
+    // conjunto ya filtrado, entrar en la pestaña de corregidas pondría a cero el número de todas
+    // las demás, y el contador diría que la bandeja se vació. Es el mismo razonamiento por el que
+    // `urgent_channels.candidates` se cuenta sobre `perPiece`. Los seis ejes se declaran siempre,
+    // incluso en cero: una pestaña que desaparece cuando no tiene piezas es una pestaña que nadie
+    // vuelve a buscar.
+    const by_state: Record<PendingState, number> = Object.fromEntries(
+      PENDING_STATES.map((e) => [e, 0])) as Record<PendingState, number>;
+    for (const p of perPiece) by_state[stateById.get(p.id)!] += 1;
+
     // Filtro de marca (si vino) y orden.
     const inBrand = brand ? scoped.filter((p) => p.brand_id === brand) : scoped;
     const ordered = sortPieces(inBrand, order);
     const page    = ordered.slice(offset, offset + limit);
 
     // Procedencia: sólo para la página visible (el `in.()` de PostgREST crece con la lista).
-    const [traces, attempts] = await Promise.all([
+    const [traces, attempts, edits] = await Promise.all([
       fetchWatcherTraces(page.map((p) => p.orchestrator_job_id ?? '')),
       fetchAttemptsByQueue(page.map((p) => p.queue_id ?? '')),
+      // LO-CORREGIDO-01 — sólo la página visible, igual que las otras dos: el `in.()` de PostgREST
+      // crece con la lista y el historial completo de ciento y pico piezas no cabe en una tarjeta.
+      fetchPieceEdits(page.map((p) => p.id)),
     ]);
 
     const pieces: CalibrationInboxPiece[] = page.map((p) => ({
@@ -274,10 +356,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // franja: esto es dónde caería si se aprobara ahora, y otra pieza aprobada antes se
       // la lleva. Por eso NO se llama `slot` — el nombre distingue las dos cosas.
       forecast_slot: forecastFor(p, freeSlots, brandZones),
-      // EN QUÉ ESTADO DE PENDIENTE ESTÁ. Es lo que la tarjeta pinta para que cuatro situaciones
+      // EN QUÉ ESTADO DE PENDIENTE ESTÁ. Es lo que la tarjeta pinta para que seis situaciones
       // distintas no se lean iguales — que es el defecto que SIGN-01 corte D intentó resolver
-      // escondiéndolas.
-      pending_state: pendingStateOf(p.status, yaCalibrada(p.id)),
+      // escondiéndolas. Sale del mapa, resuelto arriba sobre TODO lo pendiente.
+      pending_state: stateById.get(p.id)!,
+      // LO-CORREGIDO-01 — la propuesta de Sam, lo que cambió desde el reto y por qué versión va.
+      fix: fixFlowOf(p, edits.get(p.id) ?? []),
     }));
 
     // U-8 — DOS LOTES PUEDEN CORTARSE, Y CORTARSE MIENTE DE DOS MANERAS DISTINTAS.
@@ -300,6 +384,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       generation,
       urgency,
       urgency_hours: urgencyHours,
+      /**
+       * LO-CORREGIDO-01 — el alcance pedido, DEVUELTO. Va como lista y no como la cadena cruda
+       * para que la interfaz lea lo que de verdad se aplicó: si alguien pide `state=inventado`,
+       * acá vuelve `[]` —es decir, `all`— y la pantalla puede decirlo en vez de enseñar la bandeja
+       * entera bajo el título de una pestaña vacía.
+       */
+      state: states,
+      by_state,
       /**
        * U-9 — LOS CANALES QUE VENCEN, con cuántas candidatas tiene cada uno.
        *

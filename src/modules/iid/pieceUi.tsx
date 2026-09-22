@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import {
   ChevronLeft, ChevronRight, ShieldCheck, ShieldAlert, ShieldQuestion, Copy, Check, Clock, GitBranch, History,
-  CalendarCheck, CalendarClock, CalendarOff, CalendarX, Search, X, AlertTriangle,
+  CalendarCheck, CalendarClock, CalendarOff, CalendarX, Search, X, AlertTriangle, Wrench, HelpCircle,
 } from 'lucide-react';
 import { cn } from '../../ui/components';
 import type {
-  FlowGeneration, PieceMetrics, CountAgainstLimit, SignatureCheck, PendingState,
+  FlowGeneration, PieceMetrics, CountAgainstLimit, SignatureCheck, PendingState, FixFlow,
 } from '../../services/calibrationInbox';
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -822,7 +822,7 @@ export function Provenance({ piece }: { piece: PieceProvenance }) {
 // ── ESTADO DE PENDIENTE · el color de la tarjeta ────────────────────────────────────────────────
 //
 // REGLA DE SAM (2026-09-18): todo lo que está pendiente aparece en la bandeja. Y como ahora
-// conviven CINCO situaciones distintas, la tarjeta tiene que decir CUÁL de un vistazo — que es
+// conviven SEIS situaciones distintas, la tarjeta tiene que decir CUÁL de un vistazo — que es
 // justo lo que faltaba cuando SIGN-01 corte D las escondió en vez de distinguirlas.
 //
 // LOS DOS AZULES NO SON EL MISMO CASO. `retenida` (violeta) es el desacuerdo del JUEZ y se
@@ -848,6 +848,11 @@ export const PENDING_STATE_UI: Record<PendingState, { color: string; label: stri
                 hint: 'Retenida por desacuerdo entre el juez y el arbitraje (CALIB-01). Se arbitra, no se arregla.' },
   por_arreglar: { color: '#38BDF8', label: 'por arreglar',
                 hint: 'Marcada como fixable: tiene defecto declarado y tiene futuro. Espera una sesión de arreglos, no un veredicto. La propuesta está en el motivo del reto.' },
+  // LO-CORREGIDO-01 — la otra mitad del circuito de arreglos, y la única cuyo trabajo es COMPARAR:
+  // la pieza contra la propuesta que la retó. Verde porque es lo que está listo para sellar; los
+  // dos azules siguen siendo los dos `challenged` y este no es uno de ellos — ya volvió.
+  corregida:  { color: '#34D399', label: 'corregida',
+                hint: 'Se marcó como fixable, se arregló y volvió. Espera el visto bueno: la propuesta original está debajo, para comparar contra ella.' },
 };
 
 /** La píldora que nombra el estado. El color lo pone la misma tabla que pinta el borde. */
@@ -918,6 +923,96 @@ export function DeferralNotice({ state, until, reason }: {
         <span className="text-indigo-300/55">
           {' '}· sigue pendiente y se puede decidir ahora: el aplazamiento no la juzga, sólo la aparta
         </span>
+      </span>
+    </div>
+  );
+}
+
+// ── EL CIRCUITO DE ARREGLOS, DICHO EN LA TARJETA · LO-CORREGIDO-01 ──────────────
+//
+// POR QUÉ EXISTE. Sam describió el circuito así: «calibro > decido que va a fixable con mi
+// comentario > lo corregimos en chat > lo devuelves corregido a la bandeja > luego apruebo si está
+// bien». El último paso es el que no tenía dónde ocurrir: **«si está bien» exige tener delante
+// contra qué**, y lo que la pieza tiene que cumplir es lo que él mismo escribió al retarla.
+//
+// Ese texto vivía en `content_pieces.challenged_reason` y no se enseñaba en ninguna pantalla. Una
+// propuesta guardada y no mostrada es exactamente el defecto que la bandeja de retenidas ya
+// documentó en su cabecera: la evidencia estuvo escrita durante horas y nadie la vio.
+//
+// LO QUE NO HACE: no juzga. No dice si la corrección cumple la propuesta —eso lo decide Sam, que
+// es de quien es la propuesta—. Pone las dos cosas juntas y se aparta.
+export function FixNotice({ state, fix }: { state: PendingState; fix: FixFlow | null | undefined }) {
+  // Las dos mitades del circuito, y sólo ellas. En una pieza sin reto este aviso no tiene nada que
+  // decir, y un recuadro vacío en cien tarjetas enseña a saltarse el recuadro lleno.
+  if (!fix || (state !== 'corregida' && state !== 'por_arreglar')) return null;
+  if (!fix.challenge_reason && !fix.challenged_at) return null;
+
+  const volvio = state === 'corregida';
+  const tono = volvio
+    ? 'bg-emerald-500/[0.07] border-emerald-400/40 text-emerald-100/90'
+    : 'bg-sky-500/[0.07] border-sky-400/40 text-sky-100/90';
+  const suave = volvio ? 'text-emerald-300/70' : 'text-sky-300/70';
+
+  return (
+    <div
+      className={cn(DATE_ROW, tono, 'border-dashed flex-col items-stretch gap-1.5')}
+      title="content_pieces.challenged_reason — la propuesta con la que se marcó para arreglar. Es el criterio contra el que se aprueba."
+    >
+      <div className="flex items-start gap-2">
+        <Wrench size={13} className="shrink-0 mt-0.5" />
+        <span>
+          <span className={suave}>
+            {volvio ? 'Volvió corregida. Pediste:' : 'Marcada para arreglar. Pediste:'}
+          </span>{' '}
+          <span className="font-semibold">{fix.challenge_reason ?? 'sin propuesta escrita'}</span>
+          {fix.challenged_at && (
+            <span className={suave}> · {fmtDate(fix.challenged_at)}</span>
+          )}
+        </span>
+      </div>
+      <FixVersionLine fix={fix} suave={suave} />
+    </div>
+  );
+}
+
+/**
+ * POR QUÉ VERSIÓN VA, Y SI SE SABE.
+ *
+ * `version:null` NO se pinta como «v1»: la pieza se tocó y el cambio no dejó rastro, así que decir
+ * v1 sería afirmar que está como nació — falso, y de la peor clase, porque parece un dato. Medido
+ * el 2026-09-22: **32 piezas tienen `edited_at` y cero filas en `intel.piece_edits`**, de modo que
+ * este caso no es teórico. Se dice lo que se sabe y se nombra lo que no.
+ */
+function FixVersionLine({ fix, suave }: { fix: FixFlow; suave: string }) {
+  const cambios = fix.changes.length;
+
+  if (fix.version === null) {
+    return (
+      <div className="flex items-start gap-2 pl-[21px]">
+        <HelpCircle size={12} className="shrink-0 mt-0.5 opacity-70" />
+        <span className={suave}>
+          Se editó {fix.edited_at ? `el ${fmtDate(fix.edited_at)}` : 'en algún momento'}
+          {fix.edited_by ? ` · ${fix.edited_by}` : ''} y el cambio
+          {' '}<span className="font-semibold">no dejó rastro</span>: no se puede decir qué versión es
+          ni qué decía antes. Hay que comparar a ojo contra la propuesta.
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-2 pl-[21px]">
+      <History size={12} className="shrink-0 mt-0.5 opacity-70" />
+      <span className={suave}>
+        <span className="font-semibold">v{fix.version}</span>
+        {fix.version > 1 && <span> · se conserva la anterior</span>}
+        {cambios > 0
+          ? <span> · {cambios} {cambios === 1 ? 'cambio' : 'cambios'} desde el reto:{' '}
+              <span className="font-semibold">
+                {Array.from(new Set(fix.changes.map((c) => c.field))).join(', ')}
+              </span>
+            </span>
+          : <span> · sin cambios registrados desde el reto</span>}
       </span>
     </div>
   );
