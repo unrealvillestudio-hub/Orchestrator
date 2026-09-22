@@ -6,7 +6,7 @@ import type { IidSession } from '../../services/iidInbound';
 import {
   fetchQueue, renderArtifact, CalibrationError,
   type CalibrationPiece, type QueueResult, type QueueOrder, type VerdictFilter,
-  type GenerationFilter,
+  type GenerationFilter, type UrgencyFilter, type UrgentChannelInfo,
 } from '../../services/calibrationInbox';
 // U-5 — el ÚNICO componente de acciones del sistema. Las llamadas, los paneles de texto y
 // los motivos de rechazo viven ahí, no acá: dos implementaciones divergen en el primer cambio.
@@ -62,13 +62,15 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
   // U-7 — la plataforma de la pieza y la búsqueda por id.
   const [platform, setPlatform] = useState('');
   const [q, setQ]               = useState('');
+  // U-9 — lo que el carril necesita YA. Es del CANAL, no de la pieza: ver `UrgencyFilter`.
+  const [urgency, setUrgency]   = useState<UrgencyFilter>('all');
   const [offset, setOffset]   = useState(0);
 
   type Query = {
     offset: number; brand: string; order: QueueOrder; verdict: VerdictFilter; gen: GenerationFilter;
-    platform: string; q: string;
+    platform: string; q: string; urgency: UrgencyFilter;
   };
-  const current = (): Query => ({ offset, brand, order, verdict, gen, platform, q });
+  const current = (): Query => ({ offset, brand, order, verdict, gen, platform, q, urgency });
 
   const load = async (q: Query) => {
     setLoading(true); setError(null);
@@ -81,6 +83,7 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
         verdict: q.verdict,
         generation: q.gen,
         platform: q.platform || undefined,
+        urgency: q.urgency,
         q: q.q || undefined,
       });
       setData(r);
@@ -99,7 +102,7 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
   const apply = (patch: Partial<Query>) => {
     const q = { ...current(), offset: 0, ...patch };
     setOffset(q.offset); setBrand(q.brand); setOrder(q.order); setVerdict(q.verdict); setGen(q.gen);
-    setPlatform(q.platform); setQ(q.q);
+    setPlatform(q.platform); setQ(q.q); setUrgency(q.urgency);
     load(q);
   };
   const goPage = (o: number) => { setOffset(o); load({ ...current(), offset: o }); };
@@ -153,6 +156,32 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
         </div>
       )}
 
+      {/* U-9 · EL AVISO DE LO QUE VENCE — y por qué dice «necesita 1».
+          Lo que vence no es una pieza: es la FRANJA. Un canal con doce candidatas sigue siendo
+          UNA decisión, y contar doce tarjetas para descubrirlo es exactamente el trabajo que este
+          aviso quita. Sale SIEMPRE, con el filtro puesto o sin él: es el aviso, no el resultado.
+          Un canal SIN candidatas se marca aparte: ahí no falta criterio, falta producción, y
+          sellar algo no lo arregla. */}
+      {(data?.urgent_channels?.length ?? 0) > 0 && (
+        <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+          <div className="text-[11px] font-mono text-amber-500/90 mb-1">
+            FRANJAS POR VENCER · próximas {data?.urgency_hours ?? 48} h
+          </div>
+          <ul className="space-y-0.5">
+            {(data?.urgent_channels ?? []).map((c: UrgentChannelInfo) => (
+              <li key={`${c.brand_id}/${c.platform}`} className="text-[11px] font-mono text-zinc-400">
+                <span className="text-zinc-300">{c.brand_id}/{c.platform}</span>
+                {' · '}en {c.hours_left} h
+                {' · '}
+                {c.candidates === 0
+                  ? <span className="text-red-400/90">sin candidatas — falta producción, no criterio</span>
+                  : <span>necesita {c.needs} · tienes {c.candidates} candidata{c.candidates === 1 ? '' : 's'}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Orden + filtros transversales */}
       <div className="flex items-center gap-4 flex-wrap mb-5 text-[11px] font-mono text-zinc-600">
         <Selector
@@ -182,6 +211,15 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
             nunca de una lista escrita acá: una marca nueva con una plataforma nueva aparece
             sola. Ojo con el nombre: la bandeja de publicación llama `channel` a lo suyo y
             filtra el CANAL OPERATIVO de la marca — son dos ejes distintos. */}
+        {/* U-9 — LO QUE EL CARRIL NECESITA YA. No dice «piezas urgentes»: dice que hay un canal
+            con una franja a punto de vencer. La franja la ocupa UNA pieza, así que el filtro
+            muestra las candidatas de ese canal y el aviso de arriba dice cuántas hacen falta. */}
+        <Selector
+          label="Carril"
+          value={urgency}
+          onChange={(v) => apply({ urgency: v as UrgencyFilter })}
+          options={[['all', 'Todo'], ['urgent', 'Franja por vencer']]}
+        />
         <Selector
           label="Plataforma"
           value={platform}

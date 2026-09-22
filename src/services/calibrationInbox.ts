@@ -31,6 +31,28 @@ export type Verdict = 'approved' | 'rejected' | 'fixable';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
 export type QueueOrder = 'recent' | 'oldest' | 'brand' | 'verdict';
+
+/**
+ * U-9 — LO URGENTE ES DEL CANAL, NO DE LA PIEZA.
+ *
+ * `urgent` deja las piezas de los canales cuya próxima franja libre vence dentro de la ventana.
+ * NO es «piezas urgentes»: una franja la ocupa UNA pieza, así que un canal con doce candidatas
+ * sigue siendo una sola decisión. `urgent_channels` trae ese número para que la pantalla lo pueda
+ * decir en vez de dejar que se cuente a ojo sobre doce tarjetas.
+ */
+export type UrgencyFilter = 'all' | 'urgent';
+
+/** Un canal cuya franja está por vencer, con lo que hace falta y lo que hay. */
+export interface UrgentChannelInfo {
+  brand_id: string;
+  platform: string;
+  slot_at: string;
+  hours_left: number;
+  /** Siempre 1: una franja, una pieza. Explícito a propósito. */
+  needs: number;
+  /** Cuántas pendientes tiene ese canal EN TOTAL, sin que los demás filtros lo cambien. */
+  candidates: number;
+}
 /** Filtro por primera opinión del watcher. */
 export type VerdictFilter = 'all' | 'PASS' | 'REJECT';
 /** Filtro por generación del flujo (ver `FlowGeneration`). */
@@ -296,6 +318,14 @@ export interface QueueResult {
   order: QueueOrder;
   verdict: VerdictFilter;
   generation: GenerationFilter;
+  /** U-9 — el filtro de urgencia y la ventana con la que se resolvió. */
+  urgency: UrgencyFilter;
+  urgency_hours: number;
+  /**
+   * U-9 — los canales que vencen dentro de la ventana, ordenados por lo que falta.
+   * Vienen SIEMPRE, con el filtro puesto o sin él: son el aviso, no el resultado del filtro.
+   */
+  urgent_channels: UrgentChannelInfo[];
   /** U-7 — la plataforma elegida. `''` = todas. */
   platform: string;
   /** U-7 — las plataformas presentes en el lote. Del dato, nunca de una lista en el código. */
@@ -381,6 +411,10 @@ export function fetchQueue(
   opts: {
     limit?: number; offset?: number; brand?: string;
     order?: QueueOrder; verdict?: VerdictFilter; generation?: GenerationFilter;
+    /** U-9 — sólo lo que el carril necesita ya. Ver `UrgencyFilter`. */
+    urgency?: UrgencyFilter;
+    /** U-9 — cuántas horas cuentan como «cerca». Sam declaró 24-48; el defecto del server es 48. */
+    urgencyHours?: number;
     /** U-7 — plataforma de la pieza. No es el `channel` de publicación: ver su docstring. */
     platform?: string;
     /** U-7 — id de pieza o prefijo suyo. Menos de 4 caracteres lo rechaza el server. */
@@ -395,6 +429,8 @@ export function fetchQueue(
   if (opts.verdict) q.set('verdict', opts.verdict);
   if (opts.generation) q.set('generation', opts.generation);
   if (opts.platform) q.set('platform', opts.platform);
+  if (opts.urgency) q.set('urgency', opts.urgency);
+  if (opts.urgencyHours != null) q.set('urgency_hours', String(opts.urgencyHours));
   if (opts.q) q.set('q', opts.q);
   const qs = q.toString();
   return req<QueueResult>(`/api/calibration-queue${qs ? `?${qs}` : ''}`, token);

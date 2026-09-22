@@ -312,6 +312,104 @@ export function forecastFor(
   return { slot_at, timezone: timezoneOf(piece.brand_id, timezones) };
 }
 
+// ── URGENCIA · QUÉ CANAL ESTÁ A PUNTO DE PUBLICAR EN VACÍO ──────────────────────
+//
+// ── LA TRAMPA QUE ESTO EVITA, medida antes de escribirla ──────────────────────────
+//
+// Sam, 2026-09-22: «un filtro por urgente que me permita trabajar sobre eso, lo que el carril
+// requiere de mí», y definió urgente como «la franja cerca, las próximas 24-48 horas».
+//
+// La lectura literal era filtrar las piezas cuya PREVISIÓN (`forecastFor`) cae dentro de esa
+// ventana. Medido: `forecastFor` devuelve LA MISMA franja para todas las piezas pendientes de un
+// canal, porque el índice tiene una fila por (marca, canal) y la previsión no reserva nada. Con 12
+// piezas pendientes en un canal cuya próxima franja libre es esta noche, ese filtro habría marcado
+// las DOCE como urgentes.
+//
+// Un filtro que marca todo no filtra. Y peor: habría dicho «tienes 12 cosas urgentes» cuando la
+// decisión real es UNA — cuál de las doce ocupa esa franja.
+//
+// ── EL EJE: LA URGENCIA ES DEL CANAL ──────────────────────────────────────────────
+//
+// Lo que vence no es la pieza: es la FRANJA. Una franja libre que llega sin pieza se publica vacía,
+// y da igual cuántas candidatas hubiera esperando. Así que lo urgente es el CANAL que tiene una
+// franja próxima sin llenar, y las piezas de ese canal son sus candidatas — no doce urgencias.
+//
+// Quien consuma esto tiene que poder decir «este canal necesita 1 pieza · estás viendo N
+// candidatas». Por eso la función devuelve el canal con su franja y sus horas, y NO una lista de
+// piezas: el que decide cuántas piezas mostrar es el llamador, pero cuántas HACEN FALTA lo dice
+// esta estructura y no se puede perder por el camino.
+//
+// ── CERO MARCAS ───────────────────────────────────────────────────────────────────
+// Las claves salen del índice de franjas, que sale del dato. Una marca nueva con un canal nuevo
+// aparece como urgente en cuanto tiene una franja próxima, sin tocar una línea.
+
+/** Un canal cuya próxima franja libre está a punto de vencer. */
+export interface UrgentChannel {
+  brand_id: string;
+  platform: string;
+  /** La franja libre más próxima de ese canal, en ISO. */
+  slot_at: string;
+  /** Horas que faltan, redondeadas hacia abajo: «faltan 3» no puede leerse cuando faltan 3,9. */
+  hours_left: number;
+}
+
+/** Ventana por defecto, en horas. Es el extremo del rango que declaró Sam: 24-48. */
+export const URGENCY_HOURS_DEFAULT = 48;
+/** Tope: más allá de una semana, «urgente» deja de significar nada. */
+export const URGENCY_HOURS_MAX = 168;
+
+/**
+ * LOS CANALES URGENTES, indexados por `channelSlotKey` para poder preguntar por pieza en O(1).
+ *
+ * `freeSlots` ya viene ordenado y reducido a la PRÓXIMA franja libre de cada canal, así que acá no
+ * se vuelve a elegir: se filtra por ventana y se calcula cuánto falta.
+ *
+ * `null` (la lectura de franjas se cayó) devuelve un mapa VACÍO, no un mapa que lo incluya todo:
+ * ante la duda, no marcar nada como urgente. Marcar de más enseña a ignorar el filtro, que es la
+ * única forma de romperlo para siempre. El llamador distingue los dos casos por `slots_source`.
+ */
+export function urgentChannels(
+  freeSlots: SlotIndex,
+  hours: number = URGENCY_HOURS_DEFAULT,
+  now: Date = new Date(),
+): Map<string, UrgentChannel> {
+  const out = new Map<string, UrgentChannel>();
+  if (!freeSlots) return out;
+  const ventana = Math.min(URGENCY_HOURS_MAX, Math.max(1, Math.floor(hours)));
+  const limite = now.getTime() + ventana * 3_600_000;
+
+  for (const [key, row] of freeSlots) {
+    const brand = clean(row?.brand_id);
+    const platform = clean(row?.platform_key);
+    const slot_at = clean(row?.slot_at);
+    if (!brand || !platform || !slot_at) continue;
+    const t = Date.parse(slot_at);
+    // Una fecha ilegible NO es urgente: es un dato roto, y tratarla como urgente metería ruido
+    // permanente en el único filtro que existe para quitarlo.
+    if (!Number.isFinite(t)) continue;
+    // Una franja ya vencida tampoco entra: no queda nada que hacer con ella desde la bandeja.
+    if (t <= now.getTime() || t > limite) continue;
+    out.set(key, {
+      brand_id: brand,
+      platform,
+      slot_at,
+      hours_left: Math.floor((t - now.getTime()) / 3_600_000),
+    });
+  }
+  return out;
+}
+
+/** ¿La pieza pertenece a un canal urgente? Misma clave que el índice, sin recalcular nada. */
+export function isUrgentPiece(
+  piece: { brand_id?: unknown; platform?: unknown },
+  urgentes: Map<string, UrgentChannel>,
+): boolean {
+  const brand = clean(piece?.brand_id as string | null | undefined);
+  const platform = clean(piece?.platform as string | null | undefined);
+  if (!brand || !platform) return false;
+  return urgentes.has(channelSlotKey(brand, platform));
+}
+
 // ── ESCRITURA · liberación de franja ────────────────────────────────────────────
 /**
  * LIBERA LA FRANJA DE UNA PIEZA QUE YA NO VA A SALIR. Es la ÚNICA escritura de este
