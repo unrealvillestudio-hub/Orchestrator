@@ -140,7 +140,7 @@ export default function App() {
   const goHub = () => setView("hub");
 
   return (
-    <div className="min-h-screen bg-[#050508] text-zinc-200 selection:bg-accent/30">
+    <div className="min-h-screen bg-[#050508] text-zinc-200 selection:bg-accent/30 pb-hueco-inferior">
 
       {/* ── TOP NAV ── */}
       <header className="h-14 border-b border-zinc-800/60 px-5 flex items-center justify-between sticky top-0 bg-[#050508]/95 backdrop-blur-xl z-50">
@@ -246,7 +246,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* ── STATUS BAR ── */}
-      <footer className="fixed bottom-0 left-0 right-0 h-7 border-t border-zinc-800/40 px-5 flex items-center justify-between bg-[#050508]/80 backdrop-blur-sm z-50">
+      <footer className="fixed bottom-0 left-0 right-0 min-h-7 border-t border-zinc-800/40 px-5 flex items-center justify-between bg-[#050508]/80 backdrop-blur-sm z-50 pie-sobre-la-barra">
         <div className="flex items-center gap-5 text-[9px] font-mono text-zinc-800 uppercase tracking-widest">
           <div className="flex items-center gap-1.5">
             <GlowDot color="#22c55e" pulse={false} />
@@ -302,7 +302,7 @@ function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () 
   ];
 
   return (
-    <div className="min-h-screen bg-[#050508] text-zinc-200 selection:bg-accent/30">
+    <div className="min-h-screen bg-[#050508] text-zinc-200 selection:bg-accent/30 pb-hueco-inferior">
       <header className="h-14 border-b border-zinc-800/60 px-5 flex items-center justify-between sticky top-0 bg-[#050508]/95 backdrop-blur-xl z-50">
         <div className="flex items-center gap-3">
           <div className="w-7 h-7 bg-accent rounded-lg flex items-center justify-center text-black">
@@ -354,7 +354,7 @@ function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () 
         </motion.div>
       </AnimatePresence>
 
-      <footer className="fixed bottom-0 left-0 right-0 h-7 border-t border-zinc-800/40 px-5 flex items-center justify-between bg-[#050508]/80 backdrop-blur-sm z-50">
+      <footer className="fixed bottom-0 left-0 right-0 min-h-7 border-t border-zinc-800/40 px-5 flex items-center justify-between bg-[#050508]/80 backdrop-blur-sm z-50 pie-sobre-la-barra">
         <div className="flex items-center gap-1.5 text-[9px] font-mono text-zinc-800 uppercase tracking-widest">
           <GlowDot color="#22c55e" pulse={false} /> Conectado
         </div>

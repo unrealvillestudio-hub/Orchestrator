@@ -2,7 +2,10 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- `viewport-fit=cover` NO es decoracion: sin el, `env(safe-area-inset-*)` devuelve 0 y
+         todo el calculo del hueco inferior se evalua a cero sin fallar. Ver `--hueco-inferior`
+         en `src/index.css`. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>UNRLVL — Orchestrator</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

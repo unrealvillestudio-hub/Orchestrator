@@ -232,7 +232,9 @@ export default function FlowPlannerModule({ onApprove, onBack }: PlannerProps) {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.4 }}
-        className="fixed bottom-0 left-0 right-0 px-6 py-4 bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-800 flex items-center justify-between"
+        // Misma franja del telefono que el pie de la aplicacion: esta barra tambien esta fija
+        // abajo, asi que tambien se la come. Ver `--hueco-inferior` en `src/index.css`.
+        className="fixed bottom-0 left-0 right-0 px-6 py-4 bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-800 flex items-center justify-between pie-sobre-la-barra"
       >
         <div className="flex items-center gap-3">
           <Zap size={14} className="text-accent" />
