@@ -287,17 +287,50 @@ export interface CalibrationPiece {
   forecast_slot: ForecastSlot | null;
   /**
    * EN QUÉ ESTADO DE PENDIENTE ESTÁ. El eje lo resuelve el server (`pendingStateOf`); acá sólo
-   * se transporta para que la tarjeta lo pinte. Cinco situaciones que exigen cosas distintas de
+   * se transporta para que la tarjeta lo pinte. Seis situaciones que exigen cosas distintas de
    * Sam y que hasta el 2026-09-18 se leían iguales — o directamente no se leían.
    */
   pending_state: PendingState;
   /** Aplazamiento: hasta cuándo y por qué. `null` en toda pieza no aplazada. */
   deferred_until: string | null;
   deferred_reason: string | null;
+  /**
+   * LO-CORREGIDO-01 — el circuito de arreglos. Viene en TODA pieza: una que nunca se retó lo trae
+   * con `challenged_at:null` y `version:1`, que afirma «no se tocó» en vez de dejar un hueco.
+   */
+  fix: FixFlow;
+}
+
+/** Un cambio registrado sobre la pieza. Espejo de `FixChange` en `api/_fixFlow.ts`. */
+export interface FixChange {
+  field: string;
+  before_excerpt: string | null;
+  reason: string | null;
+  by: string | null;
+  at: string;
+  after_challenge: boolean;
 }
 
 /**
- * Los CINCO estados en los que una pieza está viva y pendiente. Mismo vocabulario que el server:
+ * EL ESTADO DE LA PIEZA DENTRO DEL CIRCUITO DE ARREGLOS. Espejo de `FixFlow` en `api/_fixFlow.ts`.
+ *
+ * `version:null` es una AUSENCIA DECLARADA, no un cero: la pieza se editó y el cambio no dejó
+ * rastro, de modo que no se sabe por qué versión va. La tarjeta lo dice con esas palabras en vez
+ * de pintar «v1», que afirmaría que está como nació. Medido el 2026-09-22: 32 piezas están así.
+ */
+export interface FixFlow {
+  challenged_at: string | null;
+  /** La propuesta de Sam, literal. Es el criterio contra el que se aprueba. */
+  challenge_reason: string | null;
+  version: number | null;
+  traced: boolean;
+  changes: FixChange[];
+  edited_at: string | null;
+  edited_by: string | null;
+}
+
+/**
+ * Los SEIS estados en los que una pieza está viva y pendiente. Mismo vocabulario que el server:
  * si divergen, la tarjeta pinta un estado que nadie emite. Ver `pendingStateOf` en
  * `api/_calibrationShared.ts`.
  *
@@ -305,10 +338,19 @@ export interface CalibrationPiece {
  * arreglarla la RETA en vez de descartarla, y necesita su propio eje para no reaparecer como una
  * tarjeta sin juzgar. Es distinto de `retenida`, que es el desacuerdo del JUEZ y se arbitra.
  *
+ * `corregida` entra el 2026-09-22 y cierra ese circuito: la pieza se arregló y VOLVIÓ, y lo que
+ * toca con ella no es corregirla otra vez sino compararla contra la propuesta que la retó. Medido
+ * ese día: 13 de las 14 piezas que salían como `recalibrar` eran en realidad éstas.
+ *
  * ESTE TIPO ES UN ESPEJO, y `calibrationInbox.test.ts` lo compara con el del server: dos listas
  * que tienen que decir lo mismo sólo lo siguen diciendo si algo lo comprueba.
  */
-export type PendingState = 'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar';
+export type PendingState =
+  'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida';
+
+/** Los seis, en orden. Un selector sale de acá y nunca de una lista escrita a mano. */
+export const PENDING_STATES: readonly PendingState[] =
+  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida'];
 
 export interface QueueResult {
   total_pending: number;
@@ -326,6 +368,16 @@ export interface QueueResult {
    * Vienen SIEMPRE, con el filtro puesto o sin él: son el aviso, no el resultado del filtro.
    */
   urgent_channels: UrgentChannelInfo[];
+  /**
+   * LO-CORREGIDO-01 — el alcance aplicado y cuántas hay en cada eje.
+   *
+   * `state` vuelve como LISTA de lo que de verdad se aplicó: pedir un eje que no existe devuelve
+   * `[]` —toda la bandeja—, y la pantalla puede decirlo en vez de enseñar cien tarjetas bajo el
+   * título de una pestaña. `by_state` se cuenta sobre TODO lo pendiente, así que entrar en una
+   * pestaña no pone a cero el número de las demás.
+   */
+  state: PendingState[];
+  by_state: Record<PendingState, number>;
   /** U-7 — la plataforma elegida. `''` = todas. */
   platform: string;
   /** U-7 — las plataformas presentes en el lote. Del dato, nunca de una lista en el código. */
@@ -419,6 +471,12 @@ export function fetchQueue(
     platform?: string;
     /** U-7 — id de pieza o prefijo suyo. Menos de 4 caracteres lo rechaza el server. */
     q?: string;
+    /**
+     * LO-CORREGIDO-01 — el alcance por eje de pendiente. Es un CONJUNTO: el circuito de arreglos
+     * tiene dos mitades y una pestaña que enseñara sólo una escondería la otra. Vacío = toda la
+     * bandeja.
+     */
+    states?: PendingState[];
   } = {},
 ): Promise<QueueResult> {
   const q = new URLSearchParams();
@@ -432,6 +490,7 @@ export function fetchQueue(
   if (opts.urgency) q.set('urgency', opts.urgency);
   if (opts.urgencyHours != null) q.set('urgency_hours', String(opts.urgencyHours));
   if (opts.q) q.set('q', opts.q);
+  if (opts.states?.length) q.set('state', opts.states.join(','));
   const qs = q.toString();
   return req<QueueResult>(`/api/calibration-queue${qs ? `?${qs}` : ''}`, token);
 }

@@ -6,7 +6,7 @@ import type { IidSession } from '../../services/iidInbound';
 import {
   fetchQueue, renderArtifact, CalibrationError,
   type CalibrationPiece, type QueueResult, type QueueOrder, type VerdictFilter,
-  type GenerationFilter, type UrgencyFilter, type UrgentChannelInfo,
+  type GenerationFilter, type UrgencyFilter, type UrgentChannelInfo, type PendingState,
 } from '../../services/calibrationInbox';
 // U-5 — el ÚNICO componente de acciones del sistema. Las llamadas, los paneles de texto y
 // los motivos de rechazo viven ahí, no acá: dos implementaciones divergen en el primer cambio.
@@ -16,7 +16,7 @@ import { PieceActionsBar, type ActionOutcome } from './pieceActions';
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader, shortId,
   ForecastLine, SlotsNotice, PieceSearchBox, SearchNotice, PendingStateBadge, PENDING_STATE_UI,
-  DeferralNotice,
+  DeferralNotice, FixNotice,
 } from './pieceUi';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
 import { SpeechReader } from '../../ui/SpeechReader';
@@ -49,7 +49,30 @@ const PAGE = 20;
  *
  * NO publica nada.
  */
-export default function ApprovalCalibrationModule({ session }: { session: IidSession }) {
+/**
+ * LO-CORREGIDO-01 — EL ALCANCE DE LA PANTALLA, Y POR QUÉ ES UNA PROP Y NO OTRO MÓDULO.
+ *
+ * Sam pidió «otro tab» para las piezas que vuelven corregidas. Un módulo aparte habría significado
+ * una segunda tarjeta, una segunda barra de acciones y una segunda forma de leer una pieza —
+ * exactamente las tres cosas que U-5 unificó y que este repositorio ya vio divergir. La pestaña es
+ * ESTA bandeja con su alcance puesto: mismas tarjetas, mismos botones, mismo contrato.
+ *
+ * `scope` fija los ejes que la pantalla muestra y OCULTA el selector: dentro de la pestaña de
+ * arreglos, cambiar el eje la convertiría en otra cosa sin cambiar su título. Sin `scope`, la
+ * bandeja se comporta como siempre y el selector aparece.
+ */
+export interface CalibrationScope {
+  /** Los ejes de pendiente que esta pantalla lista. Vacío o ausente = todos. */
+  states: PendingState[];
+  title: string;
+  subtitle: React.ReactNode;
+  /** Qué decir cuando no hay ninguna. No es «nada pendiente»: es «nada EN ESTA PESTAÑA». */
+  empty: string;
+}
+
+export default function ApprovalCalibrationModule(
+  { session, scope }: { session: IidSession; scope?: CalibrationScope },
+) {
   const token = session.session_token;
 
   const [data, setData]       = useState<QueueResult | null>(null);
@@ -64,13 +87,21 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
   const [q, setQ]               = useState('');
   // U-9 — lo que el carril necesita YA. Es del CANAL, no de la pieza: ver `UrgencyFilter`.
   const [urgency, setUrgency]   = useState<UrgencyFilter>('all');
+  // LO-CORREGIDO-01 — el eje de pendiente, SÓLO cuando la pantalla no trae alcance fijado. Dentro
+  // de una pestaña el eje no es un filtro: es qué pestaña es, y dejar cambiarlo la convertiría en
+  // otra cosa bajo el mismo título.
+  const [estado, setEstado]     = useState<PendingState | ''>('');
   const [offset, setOffset]   = useState(0);
 
   type Query = {
     offset: number; brand: string; order: QueueOrder; verdict: VerdictFilter; gen: GenerationFilter;
-    platform: string; q: string; urgency: UrgencyFilter;
+    platform: string; q: string; urgency: UrgencyFilter; estado: PendingState | '';
   };
-  const current = (): Query => ({ offset, brand, order, verdict, gen, platform, q, urgency });
+  const current = (): Query => ({ offset, brand, order, verdict, gen, platform, q, urgency, estado });
+
+  /** Los ejes que esta petición pide: el alcance de la pestaña manda sobre el selector. */
+  const statesOf = (q: Query): PendingState[] =>
+    (scope?.states?.length ? scope.states : (q.estado ? [q.estado] : []));
 
   const load = async (q: Query) => {
     setLoading(true); setError(null);
@@ -85,6 +116,7 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
         platform: q.platform || undefined,
         urgency: q.urgency,
         q: q.q || undefined,
+        states: statesOf(q),
       });
       setData(r);
     } catch (err) {
@@ -102,7 +134,7 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
   const apply = (patch: Partial<Query>) => {
     const q = { ...current(), offset: 0, ...patch };
     setOffset(q.offset); setBrand(q.brand); setOrder(q.order); setVerdict(q.verdict); setGen(q.gen);
-    setPlatform(q.platform); setQ(q.q); setUrgency(q.urgency);
+    setPlatform(q.platform); setQ(q.q); setUrgency(q.urgency); setEstado(q.estado);
     load(q);
   };
   const goPage = (o: number) => { setOffset(o); load({ ...current(), offset: o }); };
@@ -126,10 +158,16 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
       {/* Header */}
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
-          <h3 className="font-display text-lg font-bold text-white">Bandeja de calibración</h3>
+          <h3 className="font-display text-lg font-bold text-white">
+            {scope?.title ?? 'Bandeja de calibración'}
+          </h3>
           <p className="text-sm text-zinc-500 mt-0.5">
-            Una tarjeta por pieza. Aprobar, rechazar, marcar como fixable o descartar — un clic.
-            El criterio se dicta en el chat, no acá; <span className="text-zinc-400">nada se publica</span>.
+            {scope?.subtitle ?? (
+              <>
+                Una tarjeta por pieza. Aprobar, rechazar, marcar como fixable o descartar — un clic.
+                El criterio se dicta en el chat, no acá; <span className="text-zinc-400">nada se publica</span>.
+              </>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
@@ -226,6 +264,23 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
           onChange={(v) => apply({ platform: v })}
           options={[['', 'Todas'], ...(data?.platforms ?? []).map((p) => [p, p] as [string, string])]}
         />
+        {/* LO-CORREGIDO-01 — EL EJE DE PENDIENTE, con su número al lado. Sólo en la bandeja
+            general: dentro de una pestaña el eje ya está decidido y es su identidad.
+            Las opciones salen de `by_state`, que el server cuenta sobre TODO lo pendiente, así que
+            un eje en cero DICE cero en vez de desaparecer — la regla de Sam del 2026-09-18 aplicada
+            a una segunda dimensión. */}
+        {!scope && (
+          <Selector
+            label="Estado"
+            value={estado}
+            onChange={(v) => apply({ estado: v as PendingState | '' })}
+            options={[
+              ['', 'Todos'],
+              ...(Object.entries(data?.by_state ?? {}) as [PendingState, number][])
+                .map(([e, n]) => [e, `${PENDING_STATE_UI[e]?.label ?? e} (${n})`] as [string, string]),
+            ]}
+          />
+        )}
         {/* U-7 — el sitio donde pegar los 8 caracteres que pinta la tarjeta. */}
         <div className="ml-auto">
           <PieceSearchBox value={q} onSearch={(v) => apply({ q: v })} />
@@ -254,7 +309,11 @@ export default function ApprovalCalibrationModule({ session }: { session: IidSes
       ) : pieces.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 gap-2 text-zinc-700">
           <Inbox size={36} strokeWidth={1} />
-          <p className="text-sm">{total === 0 ? 'Nada pendiente de calibrar.' : 'Sin piezas en esta página.'}</p>
+          <p className="text-sm">
+            {total === 0
+              ? (scope?.empty ?? 'Nada pendiente de calibrar.')
+              : 'Sin piezas en esta página.'}
+          </p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -355,6 +414,9 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
             cambia cómo se lee la previsión — la fecha prevista de una aplazada sólo ocurre si
             Sam decide ahora. Sin esta línea la tarjeta la contaría como una pendiente normal. */}
         <DeferralNotice state={piece.pending_state} until={piece.deferred_until} reason={piece.deferred_reason} />
+        {/* LO-CORREGIDO-01 — la propuesta con la que Sam la retó, y por qué versión va. Es lo que
+            convierte «apruebo si está bien» en una comparación y no en una impresión. */}
+        <FixNotice state={piece.pending_state} fix={piece.fix} />
 
         {/* DÓNDE CAERÍA SI SE APROBARA AHORA. PREVISIÓN, no compromiso. */}
         <ForecastLine forecast={piece.forecast_slot} slotsRead={slotsRead} />

@@ -186,3 +186,42 @@ describe('la interfaz habla ES neutro internacional', () => {
     expect(CODE).toContain('sembrar los cortes');
   });
 });
+
+// ── 8 · El circuito de arreglos, dicho en la tarjeta · LO-CORREGIDO-01 ───────────
+//
+// LO QUE CIERRA. Sam describió el circuito y remató: «luego apruebo si está bien». «Si está bien»
+// es una COMPARACIÓN, y lo que la pieza tiene que cumplir es lo que él mismo escribió al retarla.
+// Ese texto vivía en `content_pieces.challenged_reason` desde el 2026-09-20 y no se enseñaba en
+// ninguna pantalla — evidencia escrita que nadie ve, que es exactamente el defecto que la bandeja
+// de retenidas documentó en su cabecera y que costó cinco piezas.
+describe('la tarjeta enseña la propuesta con la que se retó la pieza', () => {
+  it('el aviso lee `challenge_reason`, y no lo recorta', () => {
+    expect(SRC).toContain('fix.challenge_reason');
+    // Un `slice` sobre la propuesta la convertiría en un resumen, y un criterio a medias no sirve
+    // para comparar contra él. Lo que SÍ se recorta es el texto anterior, y eso pasa en el server.
+    expect(SRC).not.toMatch(/challenge_reason[^\n]*\.slice\(/);
+  });
+
+  it('sólo sale en las dos mitades del circuito: un recuadro vacío enseña a saltárselo', () => {
+    expect(SRC).toMatch(/state !== 'corregida' && state !== 'por_arreglar'/);
+  });
+
+  it('VERSIÓN DESCONOCIDA NO SE PINTA COMO v1', () => {
+    // Medido el 2026-09-22: 32 piezas tienen `edited_at` y cero filas en `intel.piece_edits`. Un
+    // «v1» en ese caso afirmaría «está como nació» — falso, y con la tipografía de un dato. El
+    // componente tiene que ramificar por `null` ANTES de escribir ninguna v.
+    expect(SRC).toContain('fix.version === null');
+    expect(SRC).toContain('no dejó rastro');
+  });
+
+  it('cuando hay versión anterior, se dice que se conserva', () => {
+    // Es la política que Sam eligió —«nueva versión, se conserva la anterior»— y la tarjeta es
+    // donde se comprueba que se cumplió, no una nota en un protocolo.
+    expect(SRC).toContain('se conserva la anterior');
+  });
+
+  it('no enumera campos editables: `field` llega como dato y se muestra tal cual', () => {
+    const bloque = SRC.slice(SRC.indexOf('function FixVersionLine'));
+    expect(bloque).not.toMatch(/'(title|body)'/);
+  });
+});

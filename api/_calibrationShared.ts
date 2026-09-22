@@ -171,6 +171,18 @@ export interface ContentPiece {
   // pieza cuenta para el objetivo del 90% o para el ratio aprovechable.
   pass_type?: string | null;
   approved_at?: string | null;
+  /**
+   * LO-CORREGIDO-01 — CUANDO Y POR QUE SE MARCO PARA ARREGLAR.
+   *
+   * `challenged_at` es la marca del reto y NO se borra cuando la pieza vuelve corregida: por eso
+   * sirve para reconocerla despues. `challenged_reason` es la propuesta de Sam, obligatoria en un
+   * fixable — es lo que dice contra que se compara la correccion.
+   */
+  challenged_at?: string | null;
+  challenged_reason?: string | null;
+  /** Cuando y quien la toco por ultima vez. Lo escribe la EF `piece-edit` al aplicar una edicion. */
+  edited_at?: string | null;
+  edited_by?: string | null;
   assets?: PieceAssets | null;
 }
 
@@ -478,6 +490,17 @@ export interface PieceContext {
   // firma contra el genoma. `null` = el llamador no resolvió los catálogos (el corpus,
   // por ejemplo, no los necesita): ausencia declarada, nunca un cero que parezca medido.
   metrics: PieceMetrics | null;
+  /**
+   * Aplazamiento: hasta cuándo y por qué. `null` en toda pieza no aplazada.
+   *
+   * `toContext` YA los devolvía desde el 2026-09-18 y la interfaz no los declaraba. No daba error
+   * porque `api/` queda fuera de `tsc -b` —sólo se compila `src`—, así que el contrato del server
+   * decía una cosa y el server devolvía otra, sin que nada lo señalara. Se declaran acá al pasar,
+   * que es donde se vio: un campo que viaja y no está en el tipo es un campo que el próximo
+   * llamante no sabe que puede pedir.
+   */
+  deferred_until: string | null;
+  deferred_reason: string | null;
 }
 
 /** Datos que no viven en la fila de la pieza y se resuelven aparte (traza, intentos, corte). */
@@ -712,7 +735,12 @@ export function buildHtml(piece: ContentPiece): string {
 // `deferred_until` y `deferred_reason` entran el 2026-09-18: sin ellos, una pieza aplazada vuelve
 // a la bandeja sin poder decir HASTA CUÁNDO ni POR QUÉ, y entonces mostrarla no informa la
 // decisión — que es justo lo que el corte D de SIGN-01 quiso evitar cuando las escondió.
-const PIECE_SELECT = 'id,brand_id,queue_id,finding_id,orchestrator_job_id,voice,platform,format,domain,status,created_at,discarded_at,discarded_reason,deferred_until,deferred_reason,pass_type,approved_at,assets';
+// LO-CORREGIDO-01 — `challenged_at`, `challenged_reason`, `edited_at` y `edited_by` entran aca.
+// Las cuatro ya existian en la tabla y ninguna se pedia, asi que el dato estaba y nadie lo leia —
+// el mismo defecto que `_challengedShared` documento dos veces: una columna sin declarar no da
+// error, da una ausencia que parece un hecho. Sin `challenged_at` una pieza corregida que vuelve
+// es indistinguible de una que nunca se reto, que es justo la distincion que esta bandeja necesita.
+const PIECE_SELECT = 'id,brand_id,queue_id,finding_id,orchestrator_job_id,voice,platform,format,domain,status,created_at,discarded_at,discarded_reason,deferred_until,deferred_reason,pass_type,approved_at,challenged_at,challenged_reason,edited_at,edited_by,assets';
 
 function sbHeaders(profile: 'content' | 'intel', extra: Record<string, string> = {}): Record<string, string> {
   return { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': profile, ...extra };
@@ -807,6 +835,25 @@ export const CALIBRATION_STATUSES = ['awaiting_approval', 'deferred', 'challenge
  *                  sesión de arreglos, no un veredicto. Desde el 2026-09-20 un `fixable` reta la
  *                  pieza en vez de descartarla, así que este eje es lo que impide que reaparezca
  *                  como una tarjeta sin juzgar — el riesgo que el sellado venía a evitar.
+ *   corregida    — se retó, se arregló y VOLVIÓ. Espera el visto bueno, no una corrección más.
+ *
+ * POR QUÉ `corregida` ES UN EJE Y NO UN MATIZ DE `recalibrar`. Medido el 2026-09-22: de las 14
+ * piezas vivas que hoy salen como `recalibrar`, **13 son piezas retadas que volvieron del arreglo**.
+ * Es decir, el eje que decía «ya se juzgó una vez» estaba nombrando, en la práctica, otra cosa: el
+ * final del circuito de arreglos. Y ese final es el único momento en que lo que Sam tiene que hacer
+ * es comparar la pieza CONTRA SU PROPIA PROPUESTA — que sigue escrita en `challenged_reason`.
+ *
+ * Mezcladas, esas 13 se leen como las otras 90 de la bandeja y la propuesta no se ve por ningún
+ * lado. Separadas, son trece decisiones con su criterio al lado. `recalibrar` no desaparece: sigue
+ * siendo el caso de una pieza juzgada que vuelve SIN haber pasado por un reto.
+ *
+ * LO QUE LO DECIDE ES `challenged_at`, NO EL RASTRO DE LA EDICIÓN. Medido el 2026-09-22: **32
+ * piezas tienen `edited_at` y CERO filas en `intel.piece_edits`** — hay caminos de corrección que
+ * no dejan rastro. Exigir el rastro habría escondido, entre otras, la pieza que Sam señaló el
+ * 2026-09-21 («debía tener imagen pero el botón no lo permite»), que es la que vino a preguntar.
+ * Es el mismo error que la migración `20260920110000` rechazó al no filtrar por el texto del motivo:
+ * **el hecho registrado manda sobre el rastro que pudo no escribirse.** El rastro ENRIQUECE la
+ * tarjeta —ver `_fixFlow.ts`— y no condiciona nunca que la pieza aparezca.
  *
  * LOS DOS `challenged` NO SON EL MISMO CASO, y por eso son dos ejes. Los distingue si hay fila en
  * el corpus: el juez no escribe `intel.approval_calibration` —escribe `intel.judge_calibration`—,
@@ -816,12 +863,31 @@ export const CALIBRATION_STATUSES = ['awaiting_approval', 'deferred', 'challenge
  * la ejecute tal cual. El COLOR no vive acá — vive en la interfaz, que es quien pinta. Acá sólo el
  * eje, que es lo que las dos mitades comparten.
  */
-export type PendingState = 'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar';
+export type PendingState =
+  'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida';
 
-export function pendingStateOf(status: string | null | undefined, yaCalibrada: boolean): PendingState {
+/** Todos los ejes, para que un selector salga de acá y no de una lista escrita a mano. */
+export const PENDING_STATES: readonly PendingState[] =
+  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida'];
+
+/**
+ * `retada` es el TERCER argumento y es OBLIGATORIO a propósito, aunque darle un valor por omisión
+ * habría dejado compilar todo lo que ya existía. Un parámetro opcional que decide un eje se olvida
+ * en el primer llamante nuevo y falla en silencio: la pieza sale como `recalibrar` y nadie ve el
+ * error. Obligatorio, TypeScript nombra cada sitio que hay que revisar.
+ */
+export function pendingStateOf(
+  status: string | null | undefined,
+  yaCalibrada: boolean,
+  retada: boolean,
+): PendingState {
   const s = String(status ?? '').trim().toLowerCase();
   if (s === 'deferred') return 'aplazada';
   if (s === 'challenged') return yaCalibrada ? 'por_arreglar' : 'retenida';
+  // VIVA Y CON UN RETO EN SU HISTORIA = volvió del arreglo. Va ANTES del corpus porque es más
+  // específico: toda pieza retada por Sam tiene fila en `approval_calibration` —el fixable es un
+  // veredicto—, así que preguntar primero por el corpus se las tragaría a todas.
+  if (retada) return 'corregida';
   // `awaiting_approval` y cualquier otro estado vivo que llegue acá: lo que decide es si YA se
   // juzgó una vez. Un estado nuevo en el CHECK cae en 'esperando', que es el caso menos
   // sorprendente y el que no esconde nada — nunca en un silencio.

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send, ShieldQuestion, Archive } from 'lucide-react';
+import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send, ShieldQuestion, Archive, Wrench } from 'lucide-react';
 import { useFlowStore } from './store/useFlowStore';
 import { cn, GlowDot } from './ui/components';
 import HubModule from './modules/hub/HubModule';
@@ -12,7 +12,7 @@ import EcosystemIntelModule from './modules/intel/EcosystemIntelModule';
 import LoginScreen from './modules/iid/LoginScreen';
 import IidSeedsUnified from './modules/iid/IidSeedsUnified';
 import CalibrationConsole from './modules/iid/CalibrationConsole';
-import ApprovalCalibrationModule from './modules/iid/ApprovalCalibrationModule';
+import ApprovalCalibrationModule, { type CalibrationScope } from './modules/iid/ApprovalCalibrationModule';
 import PublishQueueModule from './modules/iid/PublishQueueModule';
 import ChallengedInboxModule from './modules/iid/ChallengedInboxModule';
 import EvaluatedHistoryModule from './modules/iid/EvaluatedHistoryModule';
@@ -26,7 +26,35 @@ declare const __APP_VERSION__: string;
 declare const __APP_COMMIT__: string;
 const BUILD_TAG = __APP_COMMIT__ ? `v${__APP_VERSION__} · ${__APP_COMMIT__}` : `v${__APP_VERSION__}`;
 
-type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" | "calibration" | "challenged" | "publish" | "history";
+type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" | "calibration" | "fixes" | "challenged" | "publish" | "history";
+
+/**
+ * LO-CORREGIDO-01 — EL CIRCUITO DE ARREGLOS, EN SU PROPIA PESTAÑA.
+ *
+ * Sam lo pidió así (2026-09-21): «calibro > decido que va a fixable con mi comentario > lo
+ * corregimos en chat > lo devuelves corregido a la bandeja > luego apruebo si está bien. Pues
+ * estas las quiero en otro tab.»
+ *
+ * LAS DOS MITADES VAN JUNTAS. `por_arreglar` es lo que espera arreglo y `corregida` lo que ya
+ * volvió: son el ANTES y el DESPUÉS del mismo circuito, y separarlas en dos pestañas obligaría a
+ * ir y venir para saber cuánto queda. La tarjeta las distingue por color y por su aviso, que es
+ * donde la distinción se necesita.
+ *
+ * NO ES UN MÓDULO NUEVO: es la bandeja de calibración con su alcance puesto. Mismas tarjetas,
+ * mismos botones, mismo contrato — ver `CalibrationScope`.
+ */
+const FIX_SCOPE: CalibrationScope = {
+  states: ['por_arreglar', 'corregida'],
+  title: 'Arreglos',
+  subtitle: (
+    <>
+      Lo que marcaste como fixable y lo que ya volvió corregido. Cada tarjeta lleva{' '}
+      <span className="text-zinc-400">tu propuesta original</span> al lado, que es el criterio
+      contra el que se aprueba — y por qué versión va.
+    </>
+  ),
+  empty: 'Nada en el circuito de arreglos: ni pendiente de arreglar, ni esperando tu visto bueno.',
+};
 
 const NAV_ITEMS = [
   { id: "hub" as View,         label: "Orchestrator", icon: LayoutGrid },
@@ -34,6 +62,10 @@ const NAV_ITEMS = [
   { id: "monitor" as View,     label: "Monitor",      icon: History },
   { id: "intel" as View,       label: "IID Intel",    icon: Telescope },
   { id: "calibration" as View, label: "Calibración",  icon: ClipboardCheck },
+  // LO-CORREGIDO-01 — los arreglos van JUSTO DESPUÉS de la calibración porque es de donde salen:
+  // una pieza entra en el circuito desde esa bandeja y vuelve a ella. Ponerlos al final los habría
+  // dejado lejos del gesto que los crea.
+  { id: "fixes" as View,       label: "Arreglos",     icon: Wrench },
   // CALIB-01-E — las retenidas van junto a la calibración, que es donde Sam ya mira.
   { id: "challenged" as View,  label: "Retenidas",    icon: ShieldQuestion },
   { id: "publish" as View,     label: "Publicación",  icon: Send },
@@ -47,6 +79,9 @@ function initialView(): View {
   try {
     const v = new URLSearchParams(window.location.search).get('view');
     if (v === 'calibration') return 'calibration';
+    // LO-CORREGIDO-01 — enlace directo al circuito de arreglos. Entra acá y no como un caso más
+    // abajo porque es hermano de `calibration`: el mismo módulo con otro alcance.
+    if (v === 'fixes') return 'fixes';
     // Deep-link del email de RETENIDA y del digest → la bandeja de arbitraje.
     if (v === 'challenged') return 'challenged';
     if (v === 'publish') return 'publish';
@@ -96,6 +131,7 @@ export default function App() {
     monitor:     "Monitor",
     intel:       "Ecosystem Intel",
     calibration: "Calibración",
+    fixes:       "Arreglos",
     challenged:  "Retenidas",
     publish:     "Publicación",
     history:     "Historial",
@@ -202,6 +238,7 @@ export default function App() {
           {view === "monitor"     && <JobMonitorModule />}
           {view === "intel"       && <EcosystemIntelModule session={session} />}
           {view === "calibration" && <ApprovalCalibrationModule session={session} />}
+          {view === "fixes"       && <ApprovalCalibrationModule session={session} scope={FIX_SCOPE} />}
           {view === "challenged"  && <ChallengedInboxModule session={session} />}
           {view === "publish"     && <PublishQueueModule session={session} />}
           {view === "history"     && <EvaluatedHistoryModule session={session} />}
