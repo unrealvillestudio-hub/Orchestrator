@@ -299,6 +299,11 @@ export interface CalibrationPiece {
    * con `challenged_at:null` y `version:1`, que afirma «no se tocó» en vez de dejar un hueco.
    */
   fix: FixFlow;
+  /**
+   * SIN-IMAGEN-01 — si la pieza ya tiene imagen. Lo resuelve el server (`toContext`), y es lo que
+   * separa las dos caras de la acción de imagen: corregir una escena, o pedir la primera.
+   */
+  has_image: boolean;
 }
 
 /** Un cambio registrado sobre la pieza. Espejo de `FixChange` en `api/_fixFlow.ts`. */

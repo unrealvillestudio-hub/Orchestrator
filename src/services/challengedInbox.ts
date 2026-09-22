@@ -39,6 +39,8 @@ export interface ChallengedPiece {
    * las seis con su motivo — fail-loud, nunca un botón activo que fallaría al pulsarse.
    */
   actions: PieceActions;
+  /** SIN-IMAGEN-01 — si la pieza ya tiene imagen. Lo resuelve el server. */
+  has_image: boolean;
 }
 
 /** Una fila de la bandeja ES UN ARBITRAJE, no una pieza: el grano es (pieza, regla). */

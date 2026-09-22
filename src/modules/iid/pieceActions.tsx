@@ -73,6 +73,15 @@ export interface ActionablePiece {
   title: string | null;
   /** El COMPROMISO de fecha, cuando la bandeja lo entrega. Nunca se recalcula acá. */
   slot?: { slot_at: string; status: string; timezone: string | null } | null;
+  /**
+   * SIN-IMAGEN-01 — si la pieza YA tiene imagen. Lo resuelve el server (`toContext`).
+   *
+   * Es lo que separa las dos caras de la misma acción: CORREGIR una escena que existe, o PEDIR la
+   * primera. Opcional para que una bandeja que todavía no lo mande no se rompa; `undefined` se
+   * trata como «no se sabe», y ahí manda el caso conservador — se pide la directriz, que es lo
+   * que nunca produce una generación tirada.
+   */
+  has_image?: boolean;
 }
 
 /** Lo que le pasa a la pieza cuando una acción termina. `null` = sigue en la bandeja. */
@@ -125,6 +134,21 @@ export const ACTION_SPECS: ReadonlyArray<{
   { key: 'recompose_image', label: 'Regenerar imagen', panel: 'regen', seals: false, weight: 'tertiary',
     hint: 'Regenera la escena con una corrección, sin votar.' },
 ];
+
+/**
+ * SIN-IMAGEN-01 — CÓMO SE LLAMA LA ACCIÓN CUANDO NO HAY NADA QUE REGENERAR.
+ *
+ * «Regenerar» describe una de las dos caras. Sobre una pieza que nunca tuvo imagen, el verbo es
+ * GENERAR — y no es una sutileza de redacción: mientras el botón decía «regenerar», la respuesta
+ * coherente con esa palabra era apagarlo, que es justo el defecto que este corte arregla. El
+ * nombre sostenía la puerta.
+ *
+ * `undefined` conserva el texto de siempre: una bandeja que todavía no manda el dato no puede
+ * empezar a prometer «generar» sin saber si hay imagen.
+ */
+export function imageActionLabel(hasImage: boolean | undefined): string {
+  return hasImage === false ? 'Generar imagen' : 'Regenerar imagen';
+}
 
 export type PanelKey = 'reject' | 'fix' | 'edit' | 'regen' | 'discard';
 
@@ -271,6 +295,38 @@ export const PANEL_COPY: Record<PanelKey, {
   },
 };
 
+/**
+ * SIN-IMAGEN-01 — EL PANEL DE LA IMAGEN TIENE DOS CARAS, Y LA DIRECTRIZ SÓLO ES OBLIGATORIA EN UNA.
+ *
+ * El texto de `regen` decía «La directriz es obligatoria» porque el argumento que la exigía era:
+ * regenerar sin directriz devuelve la misma imagen con el mismo defecto y cobra una generación por
+ * no cambiar nada. Es cierto — y **no aplica a una pieza que no tiene imagen**: ahí no hay «la
+ * misma imagen» que devolver ni defecto que repetir. El motor arma la escena con el título, la
+ * cabeza del copy y la `visual_directive` del dominio, exactamente como habría hecho el stage 3.
+ *
+ * El server hace cumplir lo mismo (`api/recompose-image.ts`), así que esto no es una guarda: es
+ * que la pantalla diga la verdad sobre lo que el server va a aceptar. Una pantalla que exige más
+ * que el server enseña a desconfiar de las dos.
+ *
+ * PURA y exportada para que el test la ejecute tal cual, sin montar React.
+ */
+export function panelCopyFor(panel: PanelKey, hasImage: boolean | undefined) {
+  const base = PANEL_COPY[panel];
+  if (panel !== 'regen' || hasImage !== false) return base;
+  return {
+    ...base,
+    label: 'Directriz para el generador (opcional)',
+    placeholder: 'Si se quiere dirigir la escena, la directriz ya redactada. En blanco, el generador usa la del dominio…',
+    confirm: 'Generar imagen',
+    foot: 'Esta pieza NO tiene imagen: el carril lo intentó y no la consiguió. Esto la pide por '
+      + 'primera vez. NO es un veredicto: la pieza sigue en la bandeja y no entra al corpus. Cuesta '
+      + 'una generación y actualiza los posts que sigan pendientes de publicar. La directriz es '
+      + 'OPCIONAL acá — en blanco, la escena se arma con la del dominio, que es lo que el carril '
+      + 'habría usado.',
+    required: false,
+  };
+}
+
 /** Forma de cada botón. Sin marcas, sin canales: sólo la acción. */
 /**
  * UN BOTÓN APAGADO TIENE QUE VERSE APAGADO — corrección del 2026-09-13, sobre captura.
@@ -356,7 +412,9 @@ export function PieceActionsBar({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [regenNote, setRegenNote] = useState<null | { compuesta: boolean; refrescado: boolean; posts: number }>(null);
 
-  const buttons = actionButtons(piece.actions);
+  // SIN-IMAGEN-01 — el verbo de la acción de imagen depende de si hay una. Ver `imageActionLabel`.
+  const buttons = actionButtons(piece.actions).map((b) =>
+    b.key === 'recompose_image' ? { ...b, label: imageActionLabel(piece.has_image) } : b);
   /**
    * LOS DOS GRUPOS SALEN DEL NIVEL, no de una lista escrita aparte. Si mañana entra una
    * acción nueva, basta con declarar su `weight` en `ACTION_SPECS` y cae donde le toca.
@@ -364,7 +422,7 @@ export function PieceActionsBar({
   const juicio = buttons.filter((b) => b.weight !== 'tertiary');
   const arreglo = buttons.filter((b) => b.weight === 'tertiary');
   const spec = panel ? buttons.find((b) => b.panel === panel) : null;
-  const copy = panel ? PANEL_COPY[panel] : null;
+  const copy = panel ? panelCopyFor(panel, piece.has_image) : null;
   const warning = spec ? slotWarning(spec.seals, piece.slot) : null;
   const faltaTexto = !!copy?.required && !note.trim();
 

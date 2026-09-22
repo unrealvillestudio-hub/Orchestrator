@@ -461,6 +461,9 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
             actions: piece.actions,
             body: piece.body,
             title: piece.title,
+            // SIN-IMAGEN-01 — decide si la acción de imagen dice «generar» o «regenerar», y si
+            // la directriz se exige. Ver `panelCopyFor`.
+            has_image: piece.has_image,
           }}
           token={token}
           onResolved={(id) => onResolved(id)}

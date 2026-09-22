@@ -135,6 +135,8 @@ export interface PublishablePiece {
   // FIX-CARD-06 — la MISMA cabecera que la bandeja de calibración: las dos llaman a
   // `metricsOf` en el server, así que no pueden contar distinto la misma pieza.
   metrics: PieceMetrics | null;
+  /** SIN-IMAGEN-01 — si la pieza ya tiene imagen. Lo resuelve el server (`toContext`). */
+  has_image: boolean;
   // Canal de destino y su estado operativo.
   channel: ChannelInfo;
   /**

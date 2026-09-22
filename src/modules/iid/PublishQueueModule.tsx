@@ -382,6 +382,9 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
             body: piece.body,
             title: piece.title,
             slot: slotsRead ? piece.slot : null,
+            // SIN-IMAGEN-01 — mismo dato en las tres bandejas: la acción no puede llamarse
+            // distinto según desde dónde se abra.
+            has_image: piece.has_image,
           }}
           token={token}
           onResolved={(id) => onResolved(id)}

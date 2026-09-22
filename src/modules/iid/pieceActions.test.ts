@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   actionButtons, slotWarning, slotReleaseNotice, ACTION_SPECS, PANEL_COPY, OUTCOME_COPY,
+  panelCopyFor, imageActionLabel,
 } from './pieceActions';
 import type { PieceActions, PieceActionKey } from '../../services/calibrationInbox';
 
@@ -451,5 +452,66 @@ describe('el nivel de una acción lo decide qué deja aprendizaje', () => {
     // inventado, la caza esto.
     for (const s of ACTION_SPECS)
       expect(['primary', 'secondary', 'tertiary'], `${s.key} sin nivel válido`).toContain(s.weight);
+  });
+});
+
+// ── SIN-IMAGEN-01 · la acción de imagen tiene dos caras ──────────────────────────
+//
+// EL CASO, en las palabras de Sam (2026-09-21): «es una que dije que debía tener imagen pero el
+// botón de generar imagen no lo permite».
+//
+// Y no lo permitía por una razón que se leía bien: la acción se llamaba «regenerar», y regenerar
+// algo que no existe no tiene sentido. **El nombre sostenía la puerta.** La operación que el botón
+// dispara —medido el 2026-09-22— manda siempre `regenerate_image:true`, y en esa rama el motor no
+// lee la imagen anterior: arma la escena desde el título, la cabeza del copy y la directriz del
+// dominio. Es decir, generaba perfectamente sin imagen previa; sólo había que dejarla.
+//
+// MEDIDO el mismo día: 7 piezas vivas sin imagen, las 7 porque ImageLab devolvió 429 («Resource
+// exhausted»). Ninguna era un caso raro — eran piezas normales a las que se les cayó un lab.
+describe('pedir una imagen cuando no hay ninguna', () => {
+  it('el verbo cambia con el hecho: sin imagen se GENERA, con imagen se REgenera', () => {
+    expect(imageActionLabel(false)).toBe('Generar imagen');
+    expect(imageActionLabel(true)).toBe('Regenerar imagen');
+  });
+
+  it('sin dato se conserva el texto de siempre: no se promete lo que no se sabe', () => {
+    // Una bandeja que todavía no manda `has_image` no puede empezar a decir «generar».
+    expect(imageActionLabel(undefined)).toBe('Regenerar imagen');
+  });
+
+  it('la directriz deja de ser obligatoria SÓLO cuando no hay imagen', () => {
+    expect(panelCopyFor('regen', false).required).toBe(false);
+    expect(panelCopyFor('regen', true).required).toBe(true);
+    // Y sin dato, el caso conservador: se pide. Es el que nunca produce una generación tirada.
+    expect(panelCopyFor('regen', undefined).required).toBe(true);
+  });
+
+  it('el panel dice que la directriz es opcional, no sólo deja de exigirla', () => {
+    // Un campo que ya no bloquea pero sigue rotulado «obligatoria» se sigue rellenando por si
+    // acaso, y entonces la regla no se relajó para nadie.
+    const sin = panelCopyFor('regen', false);
+    expect(sin.label).toContain('opcional');
+    expect(sin.foot).toContain('OPCIONAL');
+    expect(sin.confirm).toBe('Generar imagen');
+  });
+
+  it('NINGÚN otro panel cambia de forma por la imagen', () => {
+    // La imagen no tiene nada que decir sobre rechazar, retar, editar o descartar. Si este test
+    // falla, `panelCopyFor` dejó de ser una ramificación de un solo panel.
+    for (const k of ['reject', 'fix', 'edit', 'discard'] as const) {
+      expect(panelCopyFor(k, false)).toEqual(PANEL_COPY[k]);
+      expect(panelCopyFor(k, true)).toEqual(PANEL_COPY[k]);
+    }
+  });
+
+  it('el panel de imagen CON imagen es exactamente el de siempre', () => {
+    expect(panelCopyFor('regen', true)).toEqual(PANEL_COPY.regen);
+  });
+
+  it('las dos caras siguen costando una generación, y las dos lo dicen', () => {
+    // Relajar la directriz no puede relajar el aviso del costo: es lo que hace que un clic de más
+    // se piense. Es el único texto que las dos versiones tienen que compartir.
+    expect(panelCopyFor('regen', false).foot).toContain('una generación');
+    expect(panelCopyFor('regen', true).foot).toContain('una generación');
   });
 });

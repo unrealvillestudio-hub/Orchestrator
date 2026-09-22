@@ -61,17 +61,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const pieceId = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';
   if (!pieceId) return res.status(400).json({ error: 'piece_id required' });
 
-  // La directriz es OBLIGATORIA, y va al revés que el criterio de un veredicto. No es una
-  // incoherencia: un criterio explica un juicio ya tomado y puede llegar después, mientras que
-  // aquí la directriz ES la operación. Regenerar sin ella devuelve la misma imagen con el mismo
-  // defecto y cobra una generación por no cambiar nada.
+  // La directriz es obligatoria CUANDO HAY UNA IMAGEN QUE CORREGIR, y va al revés que el criterio
+  // de un veredicto. No es una incoherencia: un criterio explica un juicio ya tomado y puede llegar
+  // después, mientras que aquí la directriz ES la operación. Regenerar sin ella devuelve la misma
+  // imagen con el mismo defecto y cobra una generación por no cambiar nada.
+  //
+  // SIN-IMAGEN-01 (2026-09-22) — Y ESE ARGUMENTO NO APLICA A UNA PIEZA QUE NO TIENE IMAGEN.
+  // No hay «la misma imagen» que devolver ni defecto que repetir: la generación produce algo donde
+  // no había nada, y el motor ya sabe qué pintar —lo arma con el título y la cabeza del copy más la
+  // `visual_directive` del dominio, que es exactamente lo que el stage 3 habría usado—.
+  //
+  // Exigirla ahí convertía una regla de ahorro en una puerta cerrada. Se comprueba DESPUÉS de leer
+  // la pieza, porque hasta leerla no se sabe cuál de los dos casos es. El techo de caracteres sí se
+  // valida acá: vale para las dos, y quien escribe de más tiene que saberlo antes de pagar el viaje.
   const directive = typeof body.visual_directive === 'string' ? body.visual_directive.trim() : '';
-  if (!directive) {
-    return res.status(400).json({
-      error: 'visual_directive required',
-      detail: 'regenerar sin directriz devuelve el mismo defecto y cobra una generación por no cambiar nada',
-    });
-  }
   if (directive.length > DIRECTIVE_MAX_CHARS) {
     return res.status(400).json({
       error: 'visual_directive too long',
@@ -96,13 +99,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    // SIN-IMAGEN-01 — la directriz se exige sólo si hay una imagen que corregir. Ver arriba.
+    const tieneImagen = typeof piece.assets?.image?.url === 'string' && !!piece.assets.image.url;
+    if (tieneImagen && !directive) {
+      return res.status(400).json({
+        error: 'visual_directive required',
+        detail: 'regenerar sin directriz devuelve el mismo defecto y cobra una generación por no cambiar nada. '
+          + 'Sólo una pieza que TODAVÍA no tiene imagen puede pedirla sin directriz: ahí no hay defecto que repetir.',
+      });
+    }
+
     const ef = await callEdgeFunction('content-run-stage', {
       action: 'recompose',
       piece_id: pieceId,
       // Explícito, aunque el motor ya lo deduzca de la directriz: quien lea este cuerpo en un log
       // tiene que poder saber que esto CUESTA una generación, sin ir a leer el motor.
       regenerate_image: true,
-      visual_directive: directive,
+      // SIN-IMAGEN-01 — `null`, no `''`. Sin directriz de pieza el motor compone la escena con la
+      // del DOMINIO y nada más, que es lo que el stage 3 habría hecho. Una cadena vacía viajaría
+      // como una directriz que no dice nada, y `normalizeSceneDirective` tendría que adivinar si
+      // alguien quiso borrar la del dominio o simplemente no escribió nada.
+      visual_directive: directive || null,
       edit_reason: editReason || null,
       edited_by: session.sub || 'sam',
     });
