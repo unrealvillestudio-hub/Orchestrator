@@ -399,7 +399,6 @@ export function actionsFor(piece: {
   if (piece?.discarded_at) return todas(NO(YA_DESCARTADA));
 
   const aprobada = piece?.status === 'scheduled';
-  const hayImagen = typeof piece?.assets?.image?.url === 'string' && !!piece.assets.image.url;
 
   return {
     // Aprobar es habilitar. Una pieza ya habilitada no se vuelve a habilitar.
@@ -410,9 +409,38 @@ export function actionsFor(piece: {
     fixable: SI,
     discard: SI,
     edit_text: SI,
-    recompose_image: hayImagen
-      ? SI
-      : NO('Esta pieza no tiene imagen: no hay nada que recomponer.'),
+    /**
+     * PEDIRLE UNA IMAGEN A LA PIEZA · SIN-IMAGEN-01 (2026-09-22)
+     *
+     * HASTA HOY ESTO SE NEGABA cuando la pieza no tenía imagen, con el motivo «no hay nada que
+     * recomponer». Era una NEGACIÓN FALSA, y el precio lo pagaba exactamente quien más necesitaba
+     * la acción: la única pieza que no puede conseguir una imagen es la que no tiene ninguna.
+     *
+     * Sam lo reportó el 2026-09-21 con una pieza delante: «dije que debía tener imagen pero el
+     * botón de generar imagen no lo permite».
+     *
+     * POR QUÉ LA NEGACIÓN ERA FALSA, medido en el motor el 2026-09-22:
+     *   · `api/recompose-image.ts` manda SIEMPRE `regenerate_image: true` — está escrito fijo en
+     *     el cuerpo de la llamada, no es una opción de quien pide.
+     *   · `content-run-stage`, en esa rama, NO lee la imagen anterior: arma la escena desde el
+     *     título y la cabeza del copy de la pieza más la directriz visual del dominio
+     *     (`index.ts:6848` y siguientes). La lectura de `prevImage.clean_url` vive en la rama
+     *     CONTRARIA, la de `regenerate_image:false`, que este repositorio nunca usa.
+     * Es decir: la operación que el botón dispara no necesitaba una imagen previa, y la puerta
+     * la pedía igual.
+     *
+     * LO QUE SÍ ES PRECONDICIÓN REAL es que la plataforma lleve imagen: un email no la lleva —y
+     * generarla además le daña la entregabilidad—. Esa regla vive en `CANAL_BY_PLATFORM`, en el
+     * motor, y el motor la hace cumplir con `RECOMPOSE_CANAL_NONE` ANTES de leer `lab_configs` y
+     * ANTES de gastar una generación.
+     *
+     * POR QUÉ NO SE COPIA ESA LISTA ACÁ. Porque una copia se queda vieja, y cuando se quede
+     * vieja fallará EN ESTA MISMA DIRECCIÓN: negándole la imagen a una plataforma nueva que sí la
+     * lleva. El costo de ofrecer de más es un 4xx barato con el motivo del motor —que esta ruta
+     * ya propaga sin traducir—; el de negar de menos es una pieza que no puede arreglarse nunca.
+     * Ante la duda, ofrecer y que hable quien tiene la regla.
+     */
+    recompose_image: SI,
   };
 }
 
@@ -490,6 +518,19 @@ export interface PieceContext {
   // firma contra el genoma. `null` = el llamador no resolvió los catálogos (el corpus,
   // por ejemplo, no los necesita): ausencia declarada, nunca un cero que parezca medido.
   metrics: PieceMetrics | null;
+  /**
+   * SIN-IMAGEN-01 — SI LA PIEZA YA TIENE IMAGEN.
+   *
+   * Desde que `recompose_image` está disponible en toda pieza viva, este booleano es lo que
+   * distingue las dos caras de la MISMA acción: sobre una pieza con imagen, CORRIGE una escena y
+   * la directriz es obligatoria; sobre una sin imagen, la PIDE por primera vez y la directriz
+   * sobra —el motor la arma con la del dominio—.
+   *
+   * Va como campo propio y no se deduce en la pantalla de la ausencia de `artifact_url` ni de
+   * ninguna otra cosa: el dato lo tiene el server, que lee `assets`, y una pantalla que lo
+   * adivinara acertaría hoy y fallaría el día que el artefacto y la imagen dejen de ir juntos.
+   */
+  has_image: boolean;
   /**
    * Aplazamiento: hasta cuándo y por qué. `null` en toda pieza no aplazada.
    *
@@ -573,6 +614,9 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     cutoff_label: gen.cutoff_label,
     cutoff_at: gen.cutoff_at,
     metrics: extras.metrics ?? null,
+    // SIN-IMAGEN-01 — mismo criterio que usaba `actionsFor` hasta hoy: una url vacía NO es una
+    // imagen. Se conserva al pie de la letra, sólo que ahora informa en vez de cerrar una puerta.
+    has_image: typeof a.image?.url === 'string' && !!a.image.url,
   };
 }
 

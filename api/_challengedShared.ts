@@ -92,6 +92,12 @@ export interface ChallengedRow {
      * acciones — no saber qué se puede hacer no es lo mismo que poder hacerlo todo.
      */
     actions: PieceActions;
+    /**
+     * SIN-IMAGEN-01 — si la pieza ya tiene imagen. Va acá por la misma razón que `actions`: lo
+     * que se puede hacer con la pieza lo decide su ESTADO, no la pantalla que la abre, y el verbo
+     * con que se ofrece tampoco puede cambiar según desde dónde se mire.
+     */
+    has_image: boolean;
     id: string;
     title: string | null;
     body: string | null;
@@ -290,6 +296,8 @@ export function toChallengedRow(
     piece: p
       ? {
           actions: actionsFor(p),
+          // Mismo criterio que `toContext`: una url vacía NO es una imagen.
+          has_image: typeof p.assets?.image?.url === 'string' && !!p.assets.image.url,
           id: p.id,
           title: pieceTitle(p),
           body: pieceBody(p),

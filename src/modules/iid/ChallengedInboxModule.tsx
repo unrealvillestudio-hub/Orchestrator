@@ -420,6 +420,8 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
                 piece={{
                   piece_id: piece.id,
                   actions: piece.actions,
+                  // SIN-IMAGEN-01 — el mismo dato que en las otras dos bandejas.
+                  has_image: piece.has_image,
                   // El texto EDITADO en esta pantalla, no el que llegó: si Sam acaba de
                   // corregirlo arriba, el panel de edición tiene que abrir con eso.
                   title: local.title,

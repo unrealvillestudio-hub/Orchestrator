@@ -73,19 +73,58 @@ describe('publicada Y sellada — un estado incoherente que el carril puede prod
   });
 });
 
-// ── La imagen ────────────────────────────────────────────────────────────────────
-describe('pieza sin imagen', () => {
-  it('sólo recompose_image se cierra, y con su motivo propio', () => {
+// ── La imagen · SIN-IMAGEN-01 ────────────────────────────────────────────────────
+//
+// LO QUE ESTE BLOQUE INVIERTE, Y POR QUÉ. Hasta el 2026-09-22 estas mismas comprobaciones exigían
+// lo contrario: que `recompose_image` se CERRARA en una pieza sin imagen, «porque no hay nada que
+// recomponer». La frase era cierta sobre el nombre de la acción y falsa sobre lo que la acción
+// hace, y el precio lo pagaba exactamente quien más la necesitaba — la única pieza que no podía
+// conseguir una imagen era la que no tenía ninguna.
+//
+// LA MEDICIÓN QUE LO DECIDIÓ (2026-09-22):
+//   · `api/recompose-image.ts` manda SIEMPRE `regenerate_image: true`, escrito fijo en el cuerpo.
+//   · En esa rama el motor no lee la imagen anterior: arma la escena desde el título y la cabeza
+//     del copy más la directriz del dominio (`content-run-stage/index.ts:6848`). La lectura de
+//     `prevImage.clean_url` está en la rama contraria, que este repositorio nunca usa.
+//   · 7 piezas vivas no tenían imagen, las 7 porque ImageLab devolvió 429 («Resource exhausted»).
+//     Ninguna era un caso raro: eran piezas normales a las que se les cayó un lab.
+//
+// La precondición REAL —que la plataforma lleve imagen— vive en el motor y la hace cumplir él,
+// fail-loud y antes de gastar una generación. Ver el docstring de `actionsFor`.
+describe('pieza sin imagen · puede pedir una', () => {
+  it('sin assets, las SEIS acciones siguen disponibles', () => {
     const a = actionsFor({ status: 'awaiting_approval', assets: null });
     expect(disponibles(a)).toEqual(
-      ['approve', 'discard', 'edit_text', 'fixable', 'reject'],
+      ['approve', 'discard', 'edit_text', 'fixable', 'recompose_image', 'reject'],
     );
-    expect(a.recompose_image.reason).toContain('no tiene imagen');
+    expect(a.recompose_image.reason).toBeNull();
   });
 
-  it('una url vacía no es una imagen', () => {
+  it('una url vacía tampoco la cierra: generar no necesita una imagen previa', () => {
     const a = actionsFor({ status: 'awaiting_approval', assets: { image: { url: '' } } });
-    expect(a.recompose_image.available).toBe(false);
+    expect(a.recompose_image.available).toBe(true);
+  });
+
+  it('las puertas de sellado SIGUEN cerrándola: generar sobre lo ya sellado no tiene destino', () => {
+    // Esto es lo que NO cambia, y es la mitad que importa: la acción se abrió por la razón
+    // correcta (la operación no necesita imagen previa), no porque se hayan aflojado las puertas.
+    expect(actionsFor({ status: 'published', assets: null }).recompose_image.available).toBe(false);
+    expect(actionsFor({ status: 'awaiting_approval', discarded_at: '2026-09-13T10:00:00Z', assets: null })
+      .recompose_image.available).toBe(false);
+  });
+
+  it('el motor sigue siendo quien decide si la plataforma lleva imagen', () => {
+    // Una copia de `CANAL_BY_PLATFORM` acá se quedaría vieja, y al quedarse vieja fallaría EN LA
+    // MISMA DIRECCIÓN que el defecto que este corte arregla: negándole la imagen a una plataforma
+    // nueva que sí la lleva. Este test fija que no hay ninguna lista de plataformas en el módulo.
+    const src = readFileSync(new URL('./_calibrationShared.ts', import.meta.url), 'utf8')
+      .replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    const bloque = src.slice(src.indexOf('export function actionsFor'),
+                             src.indexOf('export interface PieceContext'));
+    for (const plataforma of ['email', 'meta_ig', 'meta_fb', 'tiktok', 'linkedin', 'blog',
+                              'CANAL_NONE', 'INSTAGRAM_FEED']) {
+      expect(bloque, `actionsFor nombra la plataforma «${plataforma}»`).not.toContain(plataforma);
+    }
   });
 });
 
