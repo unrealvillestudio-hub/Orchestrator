@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   indexBrandTimezones, indexByPiece, indexNextFree, timezoneOf, slotOf, forecastFor,
-  releaseSlotsForPiece,
+  releaseSlotsForPiece, urgentChannels, isUrgentPiece,
   type PublishSlotRow,
 } from './_publishSlots.js';
 import type { ContentPiece } from './_calibrationShared.js';
@@ -293,5 +293,101 @@ describe('releaseSlotsForPiece — devolver la franja al pozo', () => {
       expect(r).toEqual({ ok: false, released: 0, slot_ids: [], error: 'piece_id vacío' });
       expect(d.llamadas).toHaveLength(0);
     } finally { d.restaurar(); }
+  });
+});
+
+// ── U-9 · LO URGENTE ES DEL CANAL, NO DE LA PIEZA ───────────────────────────────
+//
+// Sam definió urgente como «la franja cerca, las próximas 24-48 horas». La lectura literal era
+// filtrar por la PREVISIÓN de cada pieza, y esa previsión devuelve la MISMA franja para todas las
+// pendientes del canal: con 12 candidatas habría marcado las doce. Un filtro que marca todo no
+// filtra, y además dice «12 urgencias» cuando la decisión es una.
+//
+// Estas pruebas fijan el eje: una franja próxima hace urgente al CANAL, una vez.
+describe('urgentChannels · la urgencia es del canal', () => {
+  const AHORA = new Date('2026-09-22T12:00:00Z');
+  const fila = (marca: string, canal: string, iso: string): PublishSlotRow => ({
+    brand_id: marca, platform_key: canal, slot_at: iso, status: 'free', piece_id: null,
+  });
+
+  it('EL DEFECTO QUE EVITA: un canal con muchas candidatas aparece UNA vez', () => {
+    // `indexNextFree` ya deja una fila por canal; lo que se fija acá es que la urgencia no
+    // multiplique por pieza. El canal es uno, la franja es una, la decisión es una.
+    const idx = indexNextFree([
+      fila('Alfa', 'meta_ig', '2026-09-22T23:00:00Z'),
+      fila('Alfa', 'meta_ig', '2026-09-24T23:00:00Z'),
+    ]);
+    const u = urgentChannels(idx, 48, AHORA);
+    expect(u.size).toBe(1);
+    expect([...u.values()][0].slot_at).toBe('2026-09-22T23:00:00Z');
+  });
+
+  it('fuera de la ventana no es urgente', () => {
+    const idx = indexNextFree([fila('Alfa', 'blog', '2026-09-26T12:00:00Z')]);
+    expect(urgentChannels(idx, 48, AHORA).size).toBe(0);
+    expect(urgentChannels(idx, 168, AHORA).size).toBe(1);
+  });
+
+  it('una franja ya vencida tampoco: no queda nada que hacer con ella desde la bandeja', () => {
+    const idx = indexNextFree([fila('Alfa', 'x', '2026-09-22T11:00:00Z')]);
+    expect(urgentChannels(idx, 48, AHORA).size).toBe(0);
+  });
+
+  it('las horas que faltan se redondean HACIA ABAJO', () => {
+    // 3 h 55 min son «faltan 3», no «faltan 4»: redondear hacia arriba da más margen del que hay.
+    const idx = indexNextFree([fila('Alfa', 'meta_fb', '2026-09-22T15:55:00Z')]);
+    expect([...urgentChannels(idx, 48, AHORA).values()][0].hours_left).toBe(3);
+  });
+
+  it('si la lectura de franjas se cayó, NADA es urgente — no TODO', () => {
+    // Marcar de más enseña a ignorar el filtro, y un filtro ignorado no se recupera.
+    expect(urgentChannels(null, 48, AHORA).size).toBe(0);
+  });
+
+  it('una fecha ilegible no es urgente: es un dato roto', () => {
+    const idx = indexNextFree([fila('Alfa', 'blog', 'no-es-fecha')]);
+    expect(urgentChannels(idx, 48, AHORA).size).toBe(0);
+  });
+
+  it('la ventana se acota: ni cero ni un año', () => {
+    const idx = indexNextFree([fila('Alfa', 'blog', '2026-10-30T12:00:00Z')]);
+    expect(urgentChannels(idx, 100_000, AHORA).size).toBe(0); // se topa en una semana
+    const cerca = indexNextFree([fila('Alfa', 'blog', '2026-09-22T12:30:00Z')]);
+    expect(urgentChannels(cerca, 0, AHORA).size).toBe(1);     // el suelo es 1 h, no 0
+  });
+
+  it('cada canal de la misma marca cuenta por separado', () => {
+    const idx = indexNextFree([
+      fila('Alfa', 'meta_ig', '2026-09-22T23:00:00Z'),
+      fila('Alfa', 'meta_fb', '2026-09-23T13:00:00Z'),
+    ]);
+    expect(urgentChannels(idx, 48, AHORA).size).toBe(2);
+  });
+});
+
+describe('isUrgentPiece · la pieza hereda la urgencia de su canal', () => {
+  const AHORA = new Date('2026-09-22T12:00:00Z');
+  const idx = indexNextFree([{
+    brand_id: 'Alfa', platform_key: 'meta_ig', slot_at: '2026-09-22T23:00:00Z',
+    status: 'free', piece_id: null,
+  }]);
+  const urgentes = urgentChannels(idx, 48, AHORA);
+
+  it('dos piezas del mismo canal urgente lo son las dos: son candidatas, no urgencias distintas', () => {
+    expect(isUrgentPiece({ brand_id: 'Alfa', platform: 'meta_ig' }, urgentes)).toBe(true);
+    expect(isUrgentPiece({ brand_id: 'Alfa', platform: 'meta_ig' }, urgentes)).toBe(true);
+  });
+
+  it('otro canal de la misma marca no hereda nada', () => {
+    expect(isUrgentPiece({ brand_id: 'Alfa', platform: 'meta_fb' }, urgentes)).toBe(false);
+  });
+
+  it('otra marca en el mismo canal tampoco', () => {
+    expect(isUrgentPiece({ brand_id: 'Beta', platform: 'meta_ig' }, urgentes)).toBe(false);
+  });
+
+  it('una pieza sin marca o sin canal no es urgente por descarte', () => {
+    expect(isUrgentPiece({ brand_id: 'Alfa', platform: null }, urgentes)).toBe(false);
+    expect(isUrgentPiece({ brand_id: '', platform: 'meta_ig' }, urgentes)).toBe(false);
   });
 });

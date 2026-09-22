@@ -61,6 +61,7 @@ import { fetchBrandLanguages, readingLanguageOf } from './_brandLanguage.js';
 // en el server, en la misma pasada que arma la bandeja, y NO reserva nada.
 import {
   fetchBrandTimezones, fetchNextFreeSlots, forecastFor, type ForecastSlot,
+  urgentChannels, isUrgentPiece, URGENCY_HOURS_DEFAULT, URGENCY_HOURS_MAX, type UrgentChannel,
 } from './_publishSlots.js';
 
 /**
@@ -84,6 +85,13 @@ type VerdictFilter = (typeof VERDICT_FILTERS)[number];
 
 const GENERATION_FILTERS = ['all', 'current'] as const;
 type GenerationFilter = (typeof GENERATION_FILTERS)[number];
+
+// U-9 — LO URGENTE ES DEL CANAL, NO DE LA PIEZA. Ver el bloque de urgencia en `_publishSlots.ts`
+// para por qué: filtrar por la PREVISIÓN de cada pieza habría marcado como urgentes las doce
+// candidatas de un canal que sólo puede publicar una. Acá el eje es el mismo que el de `platform`
+// y `verdict`: un filtro transversal que se aplica ANTES de `by_brand`.
+const URGENCY_FILTERS = ['all', 'urgent'] as const;
+type UrgencyFilter = (typeof URGENCY_FILTERS)[number];
 
 function intParam(v: unknown, def: number, min: number, max: number): number {
   const n = Array.isArray(v) ? v[0] : v;
@@ -146,6 +154,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const order      = enumParam<Order>(req.query.order, ORDERS, 'recent');
   const verdict    = enumParam<VerdictFilter>(req.query.verdict, VERDICT_FILTERS, 'all');
   const generation = enumParam<GenerationFilter>(req.query.generation, GENERATION_FILTERS, 'all');
+  // U-9 — el filtro y su ventana viajan separados: `urgency=urgent` dice QUÉ se pide y
+  // `urgency_hours` CUÁNTO cuenta como cerca. Sam declaró 24-48 h; el defecto es el extremo ancho,
+  // porque un filtro que esconde una franja de mañana es peor que uno que muestra una de pasado.
+  const urgency = enumParam<UrgencyFilter>(req.query.urgency, URGENCY_FILTERS, 'all');
+  const urgencyHours = intParam(req.query.urgency_hours, URGENCY_HOURS_DEFAULT, 1, URGENCY_HOURS_MAX);
   // U-7 — la PLATAFORMA DE LA PIEZA. No confundir con el `channel` de `publish-queue`, que
   // filtra el CANAL OPERATIVO de la marca: son dos ejes distintos y por eso llevan nombres
   // distintos. Unificarlos a la fuerza haría que un filtro dijera lo que el otro hace.
@@ -218,6 +231,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (search) scoped = scoped.filter((p) => idMatchesSearch(p.id, search));
     if (platform) scoped = scoped.filter((p) => (p.platform ?? '') === platform);
 
+    // U-9 — los canales cuya próxima franja libre vence dentro de la ventana. Se calculan SIEMPRE,
+    // no sólo cuando el filtro está puesto: la bandeja los declara en la respuesta para que la
+    // interfaz pueda decir «este canal necesita 1 pieza» sin pedir nada más. Con `slots_source`
+    // caído el mapa viene vacío y el filtro no esconde nada por una lectura fallida — lo dice.
+    const urgentes = urgentChannels(freeSlots, urgencyHours);
+    if (urgency === 'urgent') scoped = scoped.filter((p) => isUrgentPiece(p, urgentes));
+
     // UNA MARCA NO DESAPARECE: DECLARA CERO. (Regla de Sam, 2026-09-18.)
     //
     // `by_brand` se contaba sólo sobre `scoped`, el conjunto YA filtrado, así que una marca cuyas
@@ -278,6 +298,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       order,
       verdict,
       generation,
+      urgency,
+      urgency_hours: urgencyHours,
+      /**
+       * U-9 — LOS CANALES QUE VENCEN, con cuántas candidatas tiene cada uno.
+       *
+       * `needs` es SIEMPRE 1: una franja la ocupa una pieza. Va explícito y no implícito porque es
+       * justo el número que se pierde al mirar una lista de doce tarjetas — y sin él la bandeja
+       * vuelve a decir «doce urgentes» cuando la decisión es una.
+       *
+       * `candidates` se cuenta sobre `perPiece` (todo lo pendiente), NO sobre `scoped`: si se
+       * contara sobre el conjunto ya filtrado, poner un filtro de marca cambiaría cuántas
+       * candidatas dice tener el canal, y eso no es cierto — el canal tiene las que tiene.
+       */
+      urgent_channels: [...urgentes.values()]
+        .sort((a, b) => a.hours_left - b.hours_left)
+        .map((c: UrgentChannel) => ({
+          ...c,
+          needs: 1,
+          candidates: perPiece.filter(
+            (p) => p.brand_id === c.brand_id && (p.platform ?? '') === c.platform).length,
+        })),
       platform: platform ?? '',
       // U-7 — las plataformas PRESENTES EN EL LOTE, para que el selector salga del dato.
       // Nunca una lista escrita en el código: una marca nueva con una plataforma nueva
