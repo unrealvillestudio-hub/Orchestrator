@@ -81,25 +81,27 @@ export async function initSequenceRun(
   language: string,
 ): Promise<string | null> {
   try {
-    // Llamar a la función Postgres que rota y crea la nueva secuencia
-    const res = await fetchWithTimeout('db',
-      `${SB_URL}/rest/v1/rpc/rotate_sequence_current`,
-      {
-        method: 'POST',
-        headers: SB_HEADERS,
-        body: JSON.stringify({
-          p_brand_id: brandId,
-          p_sequence_type: sequenceType,
-          p_language: language,
-        }),
-      }
-    );
+    // ── LA ROTACIÓN YA NO SE INVOCA DESDE ACÁ · 2026-09-25 ────────────────────
+    // `rotate_sequence_current` es SECURITY DEFINER —escribe en `content_sequences`— y se
+    // llamaba con `VITE_SUPABASE_ANON_KEY`, que viaja INCRUSTADA en el bundle. Cualquiera con
+    // el bundle podía rotar secuencias de cualquier marca sin pasar por esta aplicación.
+    // Ahora la invoca `api/rotate-sequence`, del lado del servidor y con la clave de servicio.
+    // La firma de esta función NO cambia: sus tres llamantes siguen igual.
+    const res = await fetchWithTimeout('own-api', '/api/rotate-sequence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brand_id: brandId,
+        sequence_type: sequenceType,
+        language: language,
+      }),
+    });
     if (!res.ok) {
       console.error('[sequenceBridge] initSequenceRun failed:', await res.text());
       return null;
     }
-    const uuid = await res.json(); // la función RETURNS UUID directamente
-    return typeof uuid === 'string' ? uuid : null;
+    const { sequence_id } = await res.json();
+    return typeof sequence_id === 'string' ? sequence_id : null;
   } catch (err) {
     console.error('[sequenceBridge] initSequenceRun error:', err);
     return null;
