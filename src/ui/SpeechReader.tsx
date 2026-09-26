@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Play, Pause, Square, Volume2 } from 'lucide-react';
 import { cn } from './components';
+import { splitForSpeech } from './speechChunks';
 
 /**
  * SpeechReader — lectura en voz alta de una pieza, con la síntesis nativa del navegador.
@@ -171,11 +172,16 @@ export function SpeechReader({ piece, suggestedLang, className }: SpeechReaderPr
   const [lang, setLang] = useState('');
   const [voiceUri, setVoiceUri] = useState('');
   const [playback, setPlayback] = useState<Playback>('idle');
+  /** Error de la síntesis, en palabras del navegador. Antes se tragaba y el botón parecía no hacer nada. */
+  const [speechError, setSpeechError] = useState<string | null>(null);
 
   const textRef = useRef<HTMLDivElement | null>(null);
   /** Si la voz que suena la inició ESTE lector. Sin esta marca, una tarjeta hermana que
    *  termina de cargar cortaría la lectura de la tarjeta que el operador está oyendo. */
   const owns = useRef(false);
+  /** Identidad de la lectura en curso. Cada tramo encadena el siguiente sólo si sigue siendo
+   *  la misma lectura: detener, volver a reproducir o cambiar de pieza la invalidan. */
+  const run = useRef(0);
   /** Qué sugerencia se aplicó ya. Si cambia la sugerencia se vuelve a resolver; si no cambia,
    *  manda el operador y ni las voces que llegan tarde le pisan la elección. */
   const appliedFor = useRef<string | null>(null);
@@ -241,6 +247,7 @@ export function SpeechReader({ piece, suggestedLang, className }: SpeechReaderPr
 
   const stop = useCallback(() => {
     if (!SUPPORTED) return;
+    run.current += 1;
     window.speechSynthesis.cancel();
     owns.current = false;
     setPlayback('idle');
@@ -254,7 +261,7 @@ export function SpeechReader({ piece, suggestedLang, className }: SpeechReaderPr
   useEffect(() => {
     if (!SUPPORTED) return undefined;
     return () => {
-      if (owns.current) { window.speechSynthesis.cancel(); owns.current = false; }
+      if (owns.current) { run.current += 1; window.speechSynthesis.cancel(); owns.current = false; }
     };
   }, [fullText]);
 
@@ -273,23 +280,44 @@ export function SpeechReader({ piece, suggestedLang, className }: SpeechReaderPr
     return () => window.clearInterval(id);
   }, [playback]);
 
+  /**
+   * Lee por TRAMOS, uno detrás de otro (`speechChunks.ts`). Una sola utterance con un artículo de
+   * blog entero se cortaba o no sonaba en Chromium; las piezas sociales, más cortas, no llegaban
+   * al límite y por eso el defecto sólo se veía en el blog.
+   */
   const speak = useCallback(() => {
     if (!SUPPORTED) return;
     const synth = window.speechSynthesis;
+    run.current += 1;
+    const id = run.current;
     synth.cancel();
     const text = selectionWithin(textRef.current) || fullText;
-    if (!text) return;
+    const chunks = splitForSpeech(text);
+    if (!chunks.length) return;
 
-    const utterance = new window.SpeechSynthesisUtterance(text);
     const voice = voices.find((v) => v.voiceURI === voiceUri);
-    if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
-    const settle = () => { owns.current = false; setPlayback('idle'); };
-    utterance.onend = settle;
-    utterance.onerror = settle;
+    const settle = () => { if (run.current !== id) return; owns.current = false; setPlayback('idle'); };
+    const next = (i: number) => {
+      if (run.current !== id) return;
+      if (i >= chunks.length) { settle(); return; }
+      const utterance = new window.SpeechSynthesisUtterance(chunks[i]);
+      if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
+      utterance.onend = () => next(i + 1);
+      utterance.onerror = (e: SpeechSynthesisErrorEvent) => {
+        if (run.current !== id) return;
+        // `interrupted` y `canceled` son el propio Detener o una lectura nueva: no son fallos.
+        if (e.error !== 'interrupted' && e.error !== 'canceled') {
+          setSpeechError(`La voz se detuvo en el tramo ${i + 1} de ${chunks.length} (${e.error}). Prueba con otra voz de lectura.`);
+        }
+        settle();
+      };
+      synth.speak(utterance);
+    };
 
     owns.current = true;
+    setSpeechError(null);
     setPlayback('speaking');
-    synth.speak(utterance);
+    next(0);
   }, [fullText, voiceUri, voices]);
 
   const togglePause = useCallback(() => {
@@ -412,6 +440,10 @@ export function SpeechReader({ piece, suggestedLang, className }: SpeechReaderPr
           ? <span className="text-zinc-600 italic">Esta pieza no trae texto que leer.</span>
           : fullText}
       </div>
+
+      {speechError && (
+        <p className="text-[10px] font-mono text-amber-500">{speechError}</p>
+      )}
 
       <p className="text-[10px] font-mono text-zinc-600">
         Sin selección se lee el título y después el cuerpo. Con una selección dentro de este
