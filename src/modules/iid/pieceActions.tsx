@@ -310,6 +310,18 @@ export const PANEL_COPY: Record<PanelKey, {
  *
  * PURA y exportada para que el test la ejecute tal cual, sin montar React.
  */
+/**
+ * BRIEF-IMG-01 fase 4 — LOS DOS BOTONES. Corregir sobre la imagen actual es el camino por defecto:
+ * cada instrucción continúa la anterior (la imagen vigente + el prompt entero + las directrices
+ * acumuladas). Repintar desde cero es la salida cuando la escena entera está mal.
+ */
+export const REGEN_MODES: ReadonlyArray<{ value: 'edit_from_current' | 'regenerate_full'; label: string; hint: string }> = [
+  { value: 'edit_from_current', label: 'Corregir sobre la imagen actual',
+    hint: 'Parte de la imagen vigente y aplica tu directriz, sumada a las anteriores. Mantiene lo que ya está bien.' },
+  { value: 'regenerate_full', label: 'Repintar desde cero',
+    hint: 'Genera la escena de nuevo con el prompt entero y todas las directrices. Para cuando la escena completa está mal.' },
+];
+
 export function panelCopyFor(panel: PanelKey, hasImage: boolean | undefined) {
   const base = PANEL_COPY[panel];
   if (panel !== 'regen' || hasImage !== false) return base;
@@ -411,6 +423,8 @@ export function PieceActionsBar({
   const [doneNote, setDoneNote] = useState<null | { tone: 'ok' | 'sealed'; text: string }>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [regenNote, setRegenNote] = useState<null | { compuesta: boolean; refrescado: boolean; posts: number }>(null);
+  // BRIEF-IMG-01 fase 4 — por defecto se CORRIGE sobre la imagen actual: da continuidad a lo pedido.
+  const [regenMode, setRegenMode] = useState<'edit_from_current' | 'regenerate_full'>('edit_from_current');
 
   // SIN-IMAGEN-01 — el verbo de la acción de imagen depende de si hay una. Ver `imageActionLabel`.
   const buttons = actionButtons(piece.actions).map((b) =>
@@ -490,7 +504,10 @@ export function PieceActionsBar({
   const submitRegen = async () => {
     setBusy('recompose_image'); setError(null); setRegenNote(null);
     try {
-      const r = await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: note.trim() });
+      const r = await recomposeImage(token, {
+        piece_id: piece.piece_id, visual_directive: note.trim(),
+        mode: piece.has_image === false ? 'regenerate_full' : regenMode,
+      });
       onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: r.composed, refreshed: r.artifact_refreshed, posts: r.scheduled_posts_updated });
       setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated });
       setNote(''); setPanel(null);
@@ -661,6 +678,29 @@ export function PieceActionsBar({
                 </button>
               ))}
             </div>
+
+            {/* BRIEF-IMG-01 fase 4 — los dos modos. Sólo con imagen: sin ella no hay de qué partir. */}
+            {panel === 'regen' && piece.has_image !== false && (
+              <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Modo de regeneración">
+                {REGEN_MODES.map((m) => (
+                  <button
+                    key={m.value}
+                    role="radio"
+                    aria-checked={regenMode === m.value}
+                    onClick={() => setRegenMode(m.value)}
+                    title={m.hint}
+                    className={cn(
+                      'text-[11px] px-2 py-1 rounded-lg border transition-colors',
+                      regenMode === m.value
+                        ? 'border-violet-500/60 bg-violet-500/15 text-violet-200'
+                        : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700',
+                    )}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {copy?.label && (
               <label className="block text-[11px] font-medium text-zinc-300">{copy.label}</label>

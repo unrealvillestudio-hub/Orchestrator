@@ -8,8 +8,17 @@
  * Body: {
  *   piece_id: string,
  *   visual_directive: string,      // la directriz redactada para el generador
- *   edit_reason?: string           // en palabras de quien la pide, si se quiere registrar
+ *   edit_reason?: string,          // en palabras de quien la pide, si se quiere registrar
+ *   mode?: 'edit_from_current' | 'regenerate_full'   // BRIEF-IMG-01 fase 4 (2026-09-27)
  * }
+ *
+ * ─── LOS DOS MODOS (BRIEF-IMG-01 fase 4) ─────────────────────────────────────────────
+ * `edit_from_current` CORRIGE SOBRE LA IMAGEN ACTUAL: el generador recibe la imagen limpia vigente
+ * como punto de partida y el prompt entero con todas las directrices acumuladas, así que cada
+ * corrección continúa la anterior en vez de empezar de cero. `regenerate_full` REPINTA la escena.
+ * Sin `mode`, el de siempre según el caso: con imagen, corregir sobre ella; sin imagen, repintar
+ * (no hay de qué partir). Hasta el 2026-09-27 esta ruta no mandaba modo y el motor repintaba
+ * siempre, aunque el modo de edición existía en ImageLab y en el carril desde la fase 3.
  * Returns 200: { ok, piece_id, image_url, artifact_url, html,
  *                visual_directive_domain, visual_directive_piece }
  *
@@ -45,6 +54,15 @@ import { callEdgeFunction } from './_challengedShared.js';
  */
 export const DIRECTIVE_MAX_CHARS = 600;
 
+export const IMAGE_MODES = ['edit_from_current', 'regenerate_full'] as const;
+export type ImageMode = (typeof IMAGE_MODES)[number];
+
+/** El modo que viaja al motor. Sin imagen no hay de qué partir: siempre se repinta. */
+export function resolveRecomposeMode(requested: string | null, hasImage: boolean): ImageMode {
+  if (!hasImage) return 'regenerate_full';
+  return requested === 'regenerate_full' ? 'regenerate_full' : 'edit_from_current';
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res, 'POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -52,6 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let body: {
     piece_id?: string; visual_directive?: string; edit_reason?: string; session_token?: string;
+    mode?: string;
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
@@ -109,6 +128,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    const modeRaw = typeof body.mode === 'string' ? body.mode.trim() : '';
+    if (modeRaw && !IMAGE_MODES.includes(modeRaw as ImageMode)) {
+      return res.status(400).json({ error: 'invalid mode', detail: `mode debe ser ${IMAGE_MODES.join(' o ')}` });
+    }
+    const mode = resolveRecomposeMode(modeRaw || null, tieneImagen);
+
     const ef = await callEdgeFunction('content-run-stage', {
       action: 'recompose',
       piece_id: pieceId,
@@ -122,6 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       visual_directive: directive || null,
       edit_reason: editReason || null,
       edited_by: session.sub || 'sam',
+      mode,
     });
 
     // El status de la EF se propaga sin traducir, igual que en `callEdgeFunction`: el motor ya

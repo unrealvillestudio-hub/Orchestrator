@@ -160,3 +160,23 @@ describe('ninguna marca en el carril', () => {
     }
   });
 });
+
+// ── BRIEF-IMG-01 fase 4 · los dos modos ─────────────────────────────────────────
+import { resolveRecomposeMode, IMAGE_MODES } from './recompose-image';
+
+describe('resolveRecomposeMode — corregir sobre la imagen actual por defecto', () => {
+  it('con imagen y sin modo pedido → corrige sobre la actual', () => {
+    expect(resolveRecomposeMode(null, true)).toBe('edit_from_current');
+  });
+  it('con imagen, respeta repintar si se pide', () => {
+    expect(resolveRecomposeMode('regenerate_full', true)).toBe('regenerate_full');
+    expect(resolveRecomposeMode('edit_from_current', true)).toBe('edit_from_current');
+  });
+  it('sin imagen no hay de qué partir: siempre repinta', () => {
+    expect(resolveRecomposeMode('edit_from_current', false)).toBe('regenerate_full');
+    expect(resolveRecomposeMode(null, false)).toBe('regenerate_full');
+  });
+  it('los modos son exactamente los que el motor entiende', () => {
+    expect([...IMAGE_MODES]).toEqual(['edit_from_current', 'regenerate_full']);
+  });
+});
