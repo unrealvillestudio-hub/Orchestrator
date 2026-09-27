@@ -526,7 +526,7 @@ export function renderArtifact(token: string, piece_id: string): Promise<{ ok: t
  */
 export function recomposeImage(
   token: string,
-  input: { piece_id: string; visual_directive: string; edit_reason?: string | null },
+  input: { piece_id: string; visual_directive: string; edit_reason?: string | null; mode?: 'edit_from_current' | 'regenerate_full' },
 ): Promise<{
   ok: true; piece_id: string; image_url: string | null; composed: boolean;
   visual_directive_domain: string | null; visual_directive_piece: string | null;
@@ -539,6 +539,7 @@ export function recomposeImage(
       piece_id: input.piece_id,
       visual_directive: input.visual_directive,
       edit_reason: input.edit_reason ?? null,
+      ...(input.mode ? { mode: input.mode } : {}),
     },
   });
 }
