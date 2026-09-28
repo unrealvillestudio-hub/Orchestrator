@@ -176,7 +176,9 @@ describe('ni un huso, ni un desfase, ni una marca en el código', () => {
   // Un POST, un DELETE, un segundo PATCH o un upsert siguen siendo fallo.
   it('la ÚNICA escritura es el PATCH de liberación: ni POST, ni DELETE, ni upsert', () => {
     const escrituras = SRC.match(/method:\s*'(POST|PATCH|PUT|DELETE)'/g) ?? [];
-    expect(escrituras).toEqual(["method: 'PATCH'"]);
+    // Dos PATCH, los dos dentro de `releaseSlotsForPiece`: la franja vuelve al pozo y la pieza
+    // suelta su fecha (FECHA-HUERFANA, 2026-09-28). Sigue sin haber POST, DELETE ni upsert.
+    expect(escrituras).toEqual(["method: 'PATCH'", "method: 'PATCH'"]);
     expect(SRC).not.toMatch(/\bupsert\b/i);
   });
 
@@ -226,7 +228,8 @@ describe('releaseSlotsForPiece — devolver la franja al pozo', () => {
     const d = doblarFetch(() => respuesta(200, [{ id: 'slot-1' }]));
     try {
       await releaseSlotsForPiece(PIEZA);
-      expect(d.llamadas).toHaveLength(1);
+      // Dos llamadas: la franja vuelve al pozo y la pieza suelta su fecha (FECHA-HUERFANA).
+      expect(d.llamadas).toHaveLength(2);
       const { url, init } = d.llamadas[0];
 
       expect(url).toContain(`piece_id=eq.${PIEZA}`);
@@ -249,7 +252,32 @@ describe('releaseSlotsForPiece — devolver la franja al pozo', () => {
     const d = doblarFetch(() => respuesta(200, [{ id: 'slot-1' }, { id: 'slot-2' }]));
     try {
       expect(await releaseSlotsForPiece(PIEZA))
-        .toEqual({ ok: true, released: 2, slot_ids: ['slot-1', 'slot-2'] });
+        .toEqual({ ok: true, released: 2, slot_ids: ['slot-1', 'slot-2'], scheduled_for_cleared: true });
+    } finally { d.restaurar(); }
+  });
+
+  it('FECHA-HUERFANA: la pieza suelta su scheduled_for en content, sólo si lo tenía', async () => {
+    const d = doblarFetch(() => respuesta(200, [{ id: 'slot-1' }]));
+    try {
+      await releaseSlotsForPiece(PIEZA);
+      const { url, init } = d.llamadas[1];
+      expect(url).toContain('/content_pieces?');
+      expect(url).toContain(`id=eq.${PIEZA}`);
+      expect(url).toContain('scheduled_for=not.is.null');
+      expect(init.method).toBe('PATCH');
+      expect((init.headers as Record<string, string>)['Content-Profile']).toBe('content');
+      expect(JSON.parse(String(init.body))).toEqual({ scheduled_for: null });
+    } finally { d.restaurar(); }
+  });
+
+  it('FECHA-HUERFANA: si soltar la fecha falla, la franja sigue liberada y se dice', async () => {
+    let n = 0;
+    const d = doblarFetch(() => (++n === 1 ? respuesta(200, [{ id: 'slot-1' }]) : respuesta(500, 'caída')));
+    try {
+      const r = await releaseSlotsForPiece(PIEZA);
+      expect(r.ok).toBe(true);
+      expect(r.released).toBe(1);
+      expect(r.scheduled_for_cleared).toBe(false);
     } finally { d.restaurar(); }
   });
 

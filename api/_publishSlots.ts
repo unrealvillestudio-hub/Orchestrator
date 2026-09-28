@@ -433,6 +433,9 @@ export interface SlotRelease {
   released: number;
   slot_ids: string[];
   error?: string;
+  // FECHA-HUERFANA (2026-09-28) — si la pieza soltó también su `scheduled_for`. `false` no deshace
+  // la liberación: la franja ya volvió al pozo; se dice para que la fecha huérfana no quede muda.
+  scheduled_for_cleared?: boolean;
 }
 
 export async function releaseSlotsForPiece(pieceId: string): Promise<SlotRelease> {
@@ -473,5 +476,36 @@ export async function releaseSlotsForPiece(pieceId: string): Promise<SlotRelease
   if (!slot_ids.length) {
     console.warn(`[slot-release] SLOT_RELEASE_NONE piece=${id} — no tenía franja reservada`);
   }
-  return { ok: true, released: slot_ids.length, slot_ids };
+
+  // FECHA-HUERFANA (2026-09-28) — LA PIEZA SUELTA TAMBIÉN SU FECHA. Medido el 2026-09-27: tres
+  // piezas re-aprobadas tras pasar por Arreglos conservaban el `scheduled_for` de la franja que ya
+  // habían perdido, y `publish-slot-reserver` sólo reparte piezas con `scheduled_for` nulo — «sin
+  // franja» en el vocabulario del ecosistema. Resultado: aprobadas y fuera del carril para siempre.
+  // Liberar la franja sin liberar la fecha deja una pieza que dice tener un sitio que no tiene.
+  const scheduled_for_cleared = await clearScheduledFor(id);
+  return { ok: true, released: slot_ids.length, slot_ids, scheduled_for_cleared };
+}
+
+async function clearScheduledFor(id: string): Promise<boolean> {
+  const url = `${SB_URL()}/rest/v1/content_pieces`
+    + `?id=eq.${encodeURIComponent(id)}&scheduled_for=not.is.null`;
+  try {
+    const res = await fetchWithTimeout('db', url, {
+      method: 'PATCH',
+      headers: {
+        apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`,
+        'Accept-Profile': 'content', 'Content-Profile': 'content',
+        'Content-Type': 'application/json', Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({ scheduled_for: null }),
+    });
+    if (!res.ok) {
+      console.error(`[slot-release] SCHEDULED_FOR_NOT_CLEARED piece=${id} ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error(`[slot-release] SCHEDULED_FOR_NOT_CLEARED piece=${id} red: ${String(err)}`);
+    return false;
+  }
 }
