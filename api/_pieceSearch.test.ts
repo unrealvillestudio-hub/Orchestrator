@@ -239,7 +239,11 @@ describe('el historial también busca, y es donde más falta hacía', () => {
 
   it('no necesita leer content_pieces para buscar', () => {
     // Si apareciera, buscar habría arrastrado el coste que U-4 §2.b reservó para las acciones.
-    expect(HISTORY).not.toMatch(/fetchLivePieces|fetchPiecesByIds|fetchCalibrationPieces/);
+    // 2026-09-30 («una pieza, una pestaña»): SIN búsqueda, el historial sí lee qué piezas siguen
+    // vivas en otra bandeja para no repetirlas. Con búsqueda esa lectura NO ocurre: la regla de
+    // este test sigue en pie, y ahora se fija en la forma exacta en que se salta.
+    expect(HISTORY).toMatch(/search \? Promise\.resolve\(\[\]\) : fetchLivePieces\(/);
+    expect(HISTORY).not.toMatch(/fetchPiecesByIds|fetchCalibrationPieces/);
   });
 
   it('busca DESPUÉS de contar las facetas: una faceta que refleja el filtro es un eco', () => {

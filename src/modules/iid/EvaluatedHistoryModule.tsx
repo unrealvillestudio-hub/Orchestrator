@@ -8,7 +8,7 @@ import {
   fetchEvaluatedHistory,
   type EvaluatedRow, type EvaluatedHistoryResult, type HistorySourceFilter,
 } from '../../services/evaluatedHistory';
-import { CountPill, Selector, Pager, CopyableId, fmtDate, PieceSearchBox, SearchNotice } from './pieceUi';
+import { CountPill, Selector, Pager, CopyableId, fmtDate, SearchNotice, FilterBar } from './pieceUi';
 // Lectura en voz alta. Mismo componente y mismo adaptador que las otras tres bandejas.
 import { SpeechReader } from '../../ui/SpeechReader';
 import { readableFromArtifactHtml } from './readablePiece';
@@ -124,12 +124,12 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
   const hayFiltro = Boolean(from || to || brand || channel || verdict || source !== 'all' || q);
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-2">
+    <div className="max-w-5xl mx-auto px-3 md:px-6 py-2">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-5">
-        <div>
+      <div className="flex items-start justify-between gap-4 mb-3 md:mb-5">
+        <div className="min-w-0">
           <h3 className="font-display text-lg font-bold text-white">Historial de evaluadas</h3>
-          <p className="text-sm text-zinc-500 mt-0.5">
+          <p className="hidden md:block text-sm text-zinc-500 mt-0.5">
             Las piezas que ya pasaron por la bandeja, con su veredicto y su nota.
             <span className="text-zinc-400"> Sólo lectura</span> — el id de cada pieza se copia de un clic.
           </p>
@@ -149,7 +149,11 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
       </div>
 
       {/* Rango de fechas + origen. El origen es el eje de generación de este tab. */}
-      <div className="flex items-end gap-4 flex-wrap mb-3">
+      <FilterBar
+        q={q} onSearch={(v) => apply({ q: v })}
+        active={[from !== '', to !== '', source !== 'all'].filter(Boolean).length}
+        className="flex-wrap items-end gap-4 md:mb-3"
+      >
         <label className="flex flex-col gap-1 text-[10px] font-mono text-zinc-600">
           Desde
           <input
@@ -184,12 +188,7 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
             Limpiar filtros
           </button>
         )}
-        {/* U-7 — el MISMO campo de las otras tres bandejas. Acá cierra el círculo: una pieza
-            sellada sale de las tres y sólo se la puede volver a encontrar aquí. */}
-        <div className="ml-auto pb-1">
-          <PieceSearchBox value={q} onSearch={(v) => apply({ q: v })} />
-        </div>
-      </div>
+      </FilterBar>
 
       {/* U-7 — «no hay» y «no lo pude mirar todo» son dos ceros distintos. */}
       <div className="mb-3">
@@ -198,7 +197,7 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
 
       {/* Facetas — las tres se descubren del dato */}
       {brands.length > 0 && (
-        <div className="flex items-center gap-1 flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-2">
+        <div className="flex items-center gap-1 overflow-x-auto md:flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-2 [&>*]:shrink-0">
           <CountPill label="Todas las marcas" count={Object.values(byBrand).reduce((a, b) => a + b, 0)} active={brand === ''} onClick={() => apply({ brand: '' })} />
           {brands.map((b) => (
             <CountPill key={b} label={b} count={byBrand[b]} active={brand === b} onClick={() => apply({ brand: b })} />
@@ -206,7 +205,7 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
         </div>
       )}
       {channels.length > 0 && (
-        <div className="flex items-center gap-1 flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-2">
+        <div className="flex items-center gap-1 overflow-x-auto md:flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-2 [&>*]:shrink-0">
           <CountPill label="Todos los canales" count={Object.values(byChannel).reduce((a, b) => a + b, 0)} active={channel === ''} onClick={() => apply({ channel: '' })} />
           {channels.map((c) => (
             <CountPill key={c} label={c} count={byChannel[c]} active={channel === c} onClick={() => apply({ channel: c })} />
@@ -214,7 +213,7 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
         </div>
       )}
       {verdicts.length > 0 && (
-        <div className="flex items-center gap-1 flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-5">
+        <div className="flex items-center gap-1 overflow-x-auto md:flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-5 [&>*]:shrink-0">
           <CountPill label="Todos los veredictos" count={Object.values(byVerdict).reduce((a, b) => a + b, 0)} active={verdict === ''} onClick={() => apply({ verdict: '' })} />
           {verdicts.map((v) => (
             <CountPill key={v} label={v} count={byVerdict[v]} active={verdict === v} onClick={() => apply({ verdict: v })} />
@@ -299,9 +298,10 @@ function HistoryRow({ row, token, open, onToggle }: {
       )}
     >
       {/* La fila cerrada tiene que bastar para ENCONTRAR y NOMBRAR una pieza. */}
-      <div className="flex items-center gap-3 flex-wrap px-3 py-2.5">
+      {/* En el teléfono toda la fila abre la pieza: una flecha de 14 px no es un blanco táctil. */}
+      <div className="flex items-center gap-x-3 gap-y-1.5 flex-wrap px-3 py-3 md:py-2.5 cursor-pointer md:cursor-auto" onClick={onToggle}>
         <button
-          onClick={onToggle}
+          onClick={(e) => { e.stopPropagation(); onToggle(); }}
           className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-200 transition-colors shrink-0"
           title={open ? 'Cerrar' : 'Ver la pieza'}
         >
@@ -326,7 +326,7 @@ function HistoryRow({ row, token, open, onToggle }: {
           </span>
         )}
 
-        <div className="ml-auto shrink-0">
+        <div className="ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>
           <CopyableId id={row.piece_id} title="id de la pieza" />
         </div>
       </div>
@@ -368,8 +368,8 @@ function HistoryRow({ row, token, open, onToggle }: {
                 srcDoc={artHtml}
                 title={`preview-${row.piece_id}`}
                 sandbox=""
-                className="w-full"
-                style={{ height: 420, border: 'none', background: '#050508' }}
+                className="w-full h-[70vh] md:h-[420px]"
+                style={{ border: 'none', background: '#050508' }}
               />
             )}
           </div>

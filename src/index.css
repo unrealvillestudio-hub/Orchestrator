@@ -36,6 +36,14 @@
   --hueco-inferior: calc(var(--pie-fijo) + env(safe-area-inset-bottom, 0px));
 }
 
+/* MOBILE-FIRST (2026-09-30). En el telefono lo que flota abajo ya no es el pie de 1.75rem sino la
+ * barra de bandejas (`h-14` en App.tsx). Se cambia EL MISMO numero, no se escribe otro: el contenido
+ * sigue reservando `--hueco-inferior`, que ahora mide la barra. Por debajo de `md` (768px), el
+ * mismo corte con el que App.tsx muestra una barra u otra. */
+@media (max-width: 767px) {
+  :root { --pie-fijo: 3.5rem; }
+}
+
 @layer base {
   * { box-sizing: border-box; }
 
@@ -93,3 +101,20 @@
 .font-display { font-family: "Syne", ui-sans-serif, sans-serif; }
 .font-body    { font-family: "DM Sans", ui-sans-serif, sans-serif; }
 .font-mono    { font-family: "DM Mono", ui-monospace, monospace; }
+
+/* ── LECTURA EN EL TELEFONO (2026-09-30) ─────────────────────────────────────────────────────────
+ *
+ * La interfaz se escribio para escritorio con textos de 9 a 11px (`text-[10px]` y compania, cientos
+ * de usos). En un telefono eso no se lee sin hacer zoom, que es exactamente lo que Sam pidio evitar.
+ * Reescribir cada clase dejaria el arreglo a medias en la primera pantalla que se olvide; se sube
+ * el piso de lectura en un solo sitio, solo por debajo de `md`, y el escritorio queda identico.
+ * Va fuera de `@layer` a proposito: una regla sin capa gana a las utilidades de Tailwind, que si
+ * viven en una capa.
+ */
+@media (max-width: 767px) {
+  .text-\[8px\], .text-\[9px\] { font-size: 11px; }
+  .text-\[10px\] { font-size: 12px; }
+  .text-\[11px\] { font-size: 13px; }
+  .text-\[12px\], .text-xs { font-size: 13.5px; }
+  .text-\[13px\], .text-sm { font-size: 15px; }
+}

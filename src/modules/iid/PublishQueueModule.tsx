@@ -11,7 +11,7 @@ import {
 } from '../../services/publishInbox';
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader,
-  SlotLine, SlotsNotice, PieceSearchBox, SearchNotice,
+  SlotLine, SlotsNotice, SearchNotice, PieceSummary, MobileDetails, FilterBar,
 } from './pieceUi';
 // U-5 — el ÚNICO componente de acciones del sistema, el mismo que monta calibración.
 import { PieceActionsBar } from './pieceActions';
@@ -118,12 +118,12 @@ export default function PublishQueueModule({ session }: { session: IidSession })
   const channels = useMemo(() => Object.keys(byChannel).sort(), [byChannel]);
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-2">
+    <div className="max-w-3xl mx-auto px-3 md:px-6 py-2">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-5">
-        <div>
+      <div className="flex items-start justify-between gap-4 mb-3 md:mb-5">
+        <div className="min-w-0">
           <h3 className="font-display text-lg font-bold text-white">Bandeja de publicación</h3>
-          <p className="text-sm text-zinc-500 mt-0.5">
+          <p className="hidden md:block text-sm text-zinc-500 mt-0.5">
             Piezas listas para salir: cuándo publica cada una, por qué canal y si ese canal está operativo.
             <span className="text-zinc-400"> Cada tarjeta dice qué se puede hacer con su pieza</span>, y por qué cuando no se puede.
           </p>
@@ -150,7 +150,7 @@ export default function PublishQueueModule({ session }: { session: IidSession })
 
       {/* Filtro por marca */}
       {brands.length > 0 && (
-        <div className="flex items-center gap-1 flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-2">
+        <div className="flex items-center gap-1 overflow-x-auto md:flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-2 [&>*]:shrink-0">
           <CountPill label="Todas" count={Object.values(byBrand).reduce((a, b) => a + b, 0)} active={brand === ''} onClick={() => apply({ brand: '' })} />
           {brands.map((b) => (
             <CountPill key={b} label={b} count={byBrand[b]} active={brand === b} onClick={() => apply({ brand: b })} />
@@ -160,7 +160,7 @@ export default function PublishQueueModule({ session }: { session: IidSession })
 
       {/* Filtro por canal */}
       {channels.length > 0 && (
-        <div className="flex items-center gap-1 flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-3">
+        <div className="flex items-center gap-1 overflow-x-auto md:flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-3 [&>*]:shrink-0">
           <CountPill label="Todos los canales" count={Object.values(byChannel).reduce((a, b) => a + b, 0)} active={channel === ''} onClick={() => apply({ channel: '' })} />
           {channels.map((c) => (
             <CountPill key={c} label={c} count={byChannel[c]} active={channel === c} onClick={() => apply({ channel: c })} />
@@ -168,8 +168,11 @@ export default function PublishQueueModule({ session }: { session: IidSession })
         </div>
       )}
 
-      {/* Filtros transversales */}
-      <div className="flex items-center gap-4 flex-wrap mb-5 text-[11px] font-mono text-zinc-600">
+      <FilterBar
+        q={q} onSearch={(v) => apply({ q: v })}
+        active={[chStatus !== 'all', gen !== 'all', status !== ''].filter(Boolean).length}
+        className="flex-col md:flex-row items-stretch md:items-center gap-3 md:gap-4 md:flex-wrap md:mb-5 text-[11px] font-mono text-zinc-600"
+      >
         <Selector
           label="Estado del canal"
           value={chStatus}
@@ -192,11 +195,7 @@ export default function PublishQueueModule({ session }: { session: IidSession })
           onChange={(v) => apply({ status: v })}
           options={[['', 'Todos'], ...(data?.statuses ?? []).map((s) => [s, s] as [string, string])]}
         />
-        {/* U-7 — el sitio donde pegar los 8 caracteres que pinta la tarjeta. */}
-        <div className="ml-auto">
-          <PieceSearchBox value={q} onSearch={(v) => apply({ q: v })} />
-        </div>
-      </div>
+      </FilterBar>
 
       {/* U-7 — «no hay» y «no lo pude mirar todo» son dos ceros distintos. */}
       <div className="mb-4">
@@ -291,11 +290,18 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
       className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden"
       style={{ borderLeftWidth: 3, borderLeftColor: blocked ? '#f43f5e' : '#FFAB00' }}
     >
-      <div className="p-4 space-y-4">
+      <div className="p-3 md:p-4 space-y-3 md:space-y-4">
+        {/* Móvil: marca, canal, formato y título arriba; lo técnico baja a «Detalles». */}
+        <PieceSummary
+          brand={piece.brand_id} platform={piece.platform} format={piece.format}
+          title={piece.title} pieceId={piece.piece_id}
+          badge={<span className="text-[11px] font-mono"><ChannelBadge channel={piece.channel} /></span>}
+        />
+
         {/* Cabecera (la MISMA que la bandeja de calibración) + canal + watcher + generación.
             FIX-CARD-06: identidad y conteos salen de `PieceHeader`; el canal es lo propio
             de esta bandeja y por eso se queda acá. */}
-        <div className="space-y-1.5">
+        <div className="hidden md:block space-y-1.5">
           <PieceHeader piece={piece} />
           <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono text-zinc-600">
             <ChannelBadge channel={piece.channel} />
@@ -316,7 +322,7 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
             de calibración y se llama distinto a propósito. */}
         <SlotLine slot={piece.slot} approvedAt={piece.approved_at} slotsRead={slotsRead} />
 
-        <Provenance piece={piece} />
+        <div className="hidden md:block"><Provenance piece={piece} /></div>
 
         {/* Artefacto embebido */}
         <div className="rounded-xl overflow-hidden border border-zinc-800 bg-[#050508]">
@@ -331,14 +337,14 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
               srcDoc={artHtml}
               title={`preview-${piece.piece_id}`}
               sandbox=""
-              className="w-full"
-              style={{ height: 480, border: 'none', background: '#050508' }}
+              className="w-full h-[70vh] md:h-[480px]"
+              style={{ border: 'none', background: '#050508' }}
             />
           )}
         </div>
         {artUrl && (
           <a href={artUrl} target="_blank" rel="noopener noreferrer"
-             className="block text-[10px] font-mono text-zinc-600 hover:text-zinc-400 transition-colors truncate">
+             className="hidden md:block text-[10px] font-mono text-zinc-600 hover:text-zinc-400 transition-colors truncate">
             {artUrl}
           </a>
         )}
@@ -346,7 +352,7 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
         {/* Lectura en voz alta. Va debajo de la vista previa porque se lee lo mismo que se
             ve, y su propio bloque de texto es donde ocurre la selección: dentro del
             `<iframe sandbox="">` de arriba, `getSelection()` no alcanza. */}
-        {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
+        {readable && <div className="hidden md:block"><SpeechReader piece={readable} suggestedLang={piece.reading_language} /></div>}
 
         {/* ESTADO DEL CANAL, y sólo eso.
             U-5 — la coletilla que remitía a la otra bandeja para aprobar se retiró: estaba
@@ -393,6 +399,33 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
             if (r.artifact_url) setArtUrl(r.artifact_url);
           }}
         />
+
+        {/* Móvil: lo técnico, plegado. En escritorio ya se pintó arriba. */}
+        <div className="md:hidden">
+          <MobileDetails>
+            <div className="space-y-1.5">
+              <PieceHeader piece={piece} />
+              <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono text-zinc-600">
+                <WatcherBadge
+                  verdict={piece.watcher_verdict}
+                  reason={piece.watcher_reason}
+                  failedRules={piece.watcher_failed_rules}
+                  rulesEvaluated={piece.watcher_rules_evaluated}
+                  passType={piece.pass_type}
+                />
+                <GenerationBadge generation={piece.generation} label={piece.cutoff_label} at={piece.cutoff_at} />
+              </div>
+            </div>
+            <Provenance piece={piece} />
+            {artUrl && (
+              <a href={artUrl} target="_blank" rel="noopener noreferrer"
+                className="block text-[10px] font-mono text-zinc-500 underline truncate">
+                Abrir la pieza en otra pestaña
+              </a>
+            )}
+            {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
+          </MobileDetails>
+        </div>
       </div>
     </motion.div>
   );

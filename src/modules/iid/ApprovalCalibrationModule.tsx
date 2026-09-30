@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { RefreshCw, Inbox, CheckCircle2, XCircle, AlertTriangle, Archive, Wrench } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import type { IidSession } from '../../services/iidInbound';
-import {
+import { CALIBRATION_TAB_STATES,
   fetchQueue, renderArtifact, CalibrationError,
   type CalibrationPiece, type QueueResult, type QueueOrder, type VerdictFilter,
   type GenerationFilter, type UrgencyFilter, type UrgentChannelInfo, type PendingState,
@@ -15,8 +15,8 @@ import { PieceActionsBar, type ActionOutcome } from './pieceActions';
 // en las dos vistas o no sirve para compararlas.
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader, shortId,
-  ForecastLine, SlotsNotice, PieceSearchBox, SearchNotice, PendingStateBadge, PENDING_STATE_UI,
-  DeferralNotice, FixNotice,
+  ForecastLine, SlotsNotice, SearchNotice, PendingStateBadge, PENDING_STATE_UI,
+  DeferralNotice, FixNotice, PieceSummary, MobileDetails, FilterBar,
 } from './pieceUi';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
 import { SpeechReader } from '../../ui/SpeechReader';
@@ -154,14 +154,15 @@ export default function ApprovalCalibrationModule(
   const brands   = useMemo(() => Object.keys(byBrand).sort(), [byBrand]);
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-2">
+    <div className="max-w-3xl mx-auto px-3 md:px-6 py-2">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-5">
-        <div>
+      <div className="flex items-start justify-between gap-4 mb-3 md:mb-5">
+        <div className="min-w-0">
           <h3 className="font-display text-lg font-bold text-white">
             {scope?.title ?? 'Bandeja de calibración'}
           </h3>
-          <p className="text-sm text-zinc-500 mt-0.5">
+          {/* Móvil: el subtítulo explica la bandeja, no la pieza — cede la pantalla a la pieza. */}
+          <p className="hidden md:block text-sm text-zinc-500 mt-0.5">
             {scope?.subtitle ?? (
               <>
                 Una tarjeta por pieza. Aprobar, rechazar, marcar como fixable o descartar — un clic.
@@ -186,7 +187,7 @@ export default function ApprovalCalibrationModule(
 
       {/* Filtro por marca — las marcas se descubren del dato, nunca se enumeran acá. */}
       {brands.length > 0 && (
-        <div className="flex items-center gap-1 flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-3">
+        <div className="flex items-center gap-1 overflow-x-auto md:flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-3 [&>*]:shrink-0">
           <CountPill label="Todas" count={Object.values(byBrand).reduce((a, b) => a + b, 0)} active={brand === ''} onClick={() => apply({ brand: '' })} />
           {brands.map((b) => (
             <CountPill key={b} label={b} count={byBrand[b]} active={brand === b} onClick={() => apply({ brand: b })} />
@@ -220,8 +221,12 @@ export default function ApprovalCalibrationModule(
         </div>
       )}
 
-      {/* Orden + filtros transversales */}
-      <div className="flex items-center gap-4 flex-wrap mb-5 text-[11px] font-mono text-zinc-600">
+      {/* Orden + filtros transversales. Móvil: búsqueda a la vista, filtros plegados. */}
+      <FilterBar
+        q={q} onSearch={(v) => apply({ q: v })}
+        active={[order !== 'recent', verdict !== 'all', gen !== 'all', urgency !== 'all', platform !== '', estado !== ''].filter(Boolean).length}
+        className="flex-col md:flex-row items-stretch md:items-center gap-3 md:gap-4 md:flex-wrap md:mb-5 text-[11px] font-mono text-zinc-600"
+      >
         <Selector
           label="Orden"
           value={order}
@@ -277,15 +282,13 @@ export default function ApprovalCalibrationModule(
             options={[
               ['', 'Todos'],
               ...(Object.entries(data?.by_state ?? {}) as [PendingState, number][])
+                // Sólo los ejes de ESTA pestaña: los demás tienen la suya.
+                .filter(([e]) => CALIBRATION_TAB_STATES.includes(e))
                 .map(([e, n]) => [e, `${PENDING_STATE_UI[e]?.label ?? e} (${n})`] as [string, string]),
             ]}
           />
         )}
-        {/* U-7 — el sitio donde pegar los 8 caracteres que pinta la tarjeta. */}
-        <div className="ml-auto">
-          <PieceSearchBox value={q} onSearch={(v) => apply({ q: v })} />
-        </div>
-      </div>
+      </FilterBar>
 
       {/* U-7 — «no hay» y «no lo pude mirar todo» son dos ceros distintos. */}
       <div className="mb-4">
@@ -385,30 +388,51 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
   // escondiéndolas.
   const estado = PENDING_STATE_UI[piece.pending_state];
 
+  // La cabecera técnica, UNA vez: escritorio la pinta arriba y el teléfono dentro de «Detalles».
+  const cabecera = (
+    <div className="space-y-1.5">
+      <PieceHeader piece={piece} />
+      <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono text-zinc-600">
+        {/* Primero el estado: es lo que decide qué hacer con la pieza. */}
+        <PendingStateBadge state={piece.pending_state} />
+        {piece.psycho_preset && <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">{piece.psycho_preset}</span>}
+        <WatcherBadge
+          verdict={piece.watcher_verdict}
+          reason={piece.watcher_reason}
+          failedRules={piece.watcher_failed_rules}
+          rulesEvaluated={piece.watcher_rules_evaluated}
+          passType={piece.pass_type}
+        />
+        <GenerationBadge generation={piece.generation} label={piece.cutoff_label} at={piece.cutoff_at} />
+      </div>
+    </div>
+  );
+  // DÓNDE CAERÍA SI SE APROBARA AHORA (PREVISIÓN, no compromiso) + la procedencia.
+  const tecnico = (<><ForecastLine forecast={piece.forecast_slot} slotsRead={slotsRead} /><Provenance piece={piece} /></>);
+  // El enlace al artefacto + la lectura en voz alta.
+  const lectura = (<>
+    {artUrl && <a href={artUrl} target="_blank" rel="noopener noreferrer"
+      className="block text-[10px] font-mono text-zinc-600 hover:text-zinc-400 transition-colors truncate">{artUrl}</a>}
+    {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
+  </>);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
       className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden"
       style={{ borderLeftWidth: 3, borderLeftColor: estado.color }}
     >
-      <div className="p-4 space-y-4">
-        {/* Cabecera (compartida con la bandeja de publicación) + veredicto + generación. */}
-        <div className="space-y-1.5">
-          <PieceHeader piece={piece} />
-          <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono text-zinc-600">
-            {/* Primero el estado: es lo que decide qué hacer con la pieza. */}
-            <PendingStateBadge state={piece.pending_state} />
-            {piece.psycho_preset && <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">{piece.psycho_preset}</span>}
-            <WatcherBadge
-              verdict={piece.watcher_verdict}
-              reason={piece.watcher_reason}
-              failedRules={piece.watcher_failed_rules}
-              rulesEvaluated={piece.watcher_rules_evaluated}
-              passType={piece.pass_type}
-            />
-            <GenerationBadge generation={piece.generation} label={piece.cutoff_label} at={piece.cutoff_at} />
-          </div>
-        </div>
+      <div className="p-3 md:p-4 space-y-3 md:space-y-4">
+        {/* MOBILE-FIRST — en el teléfono, primero QUÉ pieza es y en qué estado está. */}
+        <PieceSummary
+          brand={piece.brand_id} platform={piece.platform} format={piece.format}
+          title={piece.title} pieceId={piece.piece_id}
+          badge={<span className="text-[11px]"><PendingStateBadge state={piece.pending_state} /></span>}
+        />
+
+        {/* Cabecera (compartida con la bandeja de publicación) + veredicto + generación.
+            En escritorio va arriba, como siempre; en el teléfono baja a «Detalles». */}
+        <div className="hidden md:block">{cabecera}</div>
 
         {/* APARTADA POR EL SISTEMA: hasta cuándo y por qué. Va ANTES de la previsión porque
             cambia cómo se lee la previsión — la fecha prevista de una aplazada sólo ocurre si
@@ -418,12 +442,10 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
             convierte «apruebo si está bien» en una comparación y no en una impresión. */}
         <FixNotice state={piece.pending_state} fix={piece.fix} />
 
-        {/* DÓNDE CAERÍA SI SE APROBARA AHORA. PREVISIÓN, no compromiso. */}
-        <ForecastLine forecast={piece.forecast_slot} slotsRead={slotsRead} />
+        {/* Escritorio: en su sitio de siempre. Teléfono: en «Detalles». */}
+        <div className="hidden md:block space-y-4">{tecnico}</div>
 
-        <Provenance piece={piece} />
-
-        {/* Artefacto embebido */}
+        {/* Artefacto embebido — LA PIEZA. En el teléfono va antes que cualquier dato técnico. */}
         <div className="rounded-xl overflow-hidden border border-zinc-800 bg-[#050508]">
           {artErr ? (
             <div className="p-4 text-[11px] text-rose-400/90 font-mono flex items-center gap-2">
@@ -436,20 +458,12 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
               srcDoc={artHtml}
               title={`preview-${piece.piece_id}`}
               sandbox=""
-              className="w-full"
-              style={{ height: 480, border: 'none', background: '#050508' }}
+              className="w-full h-[70vh] md:h-[480px]"
+              style={{ border: 'none', background: '#050508' }}
             />
           )}
         </div>
-        {artUrl && (
-          <a href={artUrl} target="_blank" rel="noopener noreferrer"
-            className="block text-[10px] font-mono text-zinc-600 hover:text-zinc-400 transition-colors truncate">
-            {artUrl}
-          </a>
-        )}
-
-        {/* Lectura en voz alta. */}
-        {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
+        <div className="hidden md:block space-y-4">{lectura}</div>
 
         {/* U-5 — LAS ACCIONES. El MISMO componente que monta la bandeja de publicación: si
             dos pantallas pueden divergir, divergirán, y acá no pueden. Esta bandeja no
@@ -472,6 +486,10 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
             if (r.artifact_url) setArtUrl(r.artifact_url);
           }}
         />
+
+        {/* MOBILE-FIRST — todo lo técnico, a un toque. Sólo existe en el teléfono: en escritorio
+            cada bloque ya está en su sitio de siempre, arriba. */}
+        <div className="md:hidden"><MobileDetails>{cabecera}{tecnico}{lectura}</MobileDetails></div>
       </div>
     </motion.div>
   );

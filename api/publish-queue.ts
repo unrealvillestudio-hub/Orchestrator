@@ -56,7 +56,7 @@ import {
   type ContentPiece, type PipelineCutoff, type GenerationInfo, type PieceSearch,
 } from './_calibrationShared.js';
 import {
-  RESOLVED_STATUSES, fetchPublishChannels, channelOf, channelBlocks,
+  PUBLISH_STATUSES, fetchPublishChannels, channelOf, channelBlocks,
   type ChannelInfo, type PublishablePiece,
 } from './_publishShared.js';
 // FIX-CARD-06 — misma cabecera que la bandeja de calibración, mismos catálogos leídos en
@@ -156,7 +156,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Sin filtro de marca en la lectura: by_brand tiene que ser global y estable aunque
     // venga filtro. Los cortes se leen en runtime (cero fechas de corte en el código).
     const [allPieces, cutoffsRaw, channels, limits, closers, brandLangs, brandZones] = await Promise.all([
-      fetchLivePieces({ excludeStatuses: RESOLVED_STATUSES }),
+      fetchLivePieces({ onlyStatuses: PUBLISH_STATUSES }),
       fetchPipelineCutoffs(),
       fetchPublishChannels(),
       fetchPlatformLimits(),
