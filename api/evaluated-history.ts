@@ -42,8 +42,10 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   applyCors, extractToken, requireAdmin, SB_URL, SB_KEY,
   parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
+  fetchLivePieces, CALIBRATION_STATUSES,
   type PieceSearch,
 } from './_calibrationShared.js';
+import { PUBLISH_STATUSES } from './_publishShared.js';
 // El lector en voz alta necesita saber en qué idioma leer. Mismo catálogo y misma resolución
 // que las otras tres bandejas: una marca nueva entra sembrando su fila, no editando código.
 import { fetchBrandLanguages, readingLanguageOf } from './_brandLanguage.js';
@@ -243,13 +245,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const [live, archived, brandLangs] = await Promise.all([
+    const [live, archived, brandLangs, enCurso] = await Promise.all([
       source === 'archived' ? Promise.resolve([]) : fetchCorpusRows('approval_calibration', 'live', { from, to }),
       source === 'live' ? Promise.resolve([]) : fetchCorpusRows('approval_calibration_archive', 'archived', { from, to }),
       fetchBrandLanguages(),
+      // UNA PIEZA, UNA PESTAÑA (2026-09-30). Lo que sigue vivo en otra bandeja —pendiente de juicio,
+      // en arreglo, retenido o aprobado esperando salir— se ve ALLÍ, con sus botones. Historial es lo
+      // que ya terminó: publicado, rechazado o descartado.
+      search ? Promise.resolve([]) : fetchLivePieces({ onlyStatuses: [...CALIBRATION_STATUSES, ...PUBLISH_STATUSES] }),
     ]);
+    const vivasEnOtraBandeja = new Set(enCurso.map((p) => p.id));
 
-    const enScope = [...live, ...archived].map((r) => ({
+    // Una pieza, UNA fila: la de su veredicto más reciente. El corpus vivo y el archivo guardan
+    // cada juicio (por ejemplo, «fixable» y después «aprobada»), y sin esto la misma pieza salía
+    // dos o tres veces seguidas. Buscando por id se ve todo: ahí sí se quiere el rastro completo.
+    const porPieza = new Map<string, EvaluatedRow>();
+    for (const r of [...live, ...archived].sort((a, b) => ms(b.created_at) - ms(a.created_at))) {
+      if (!porPieza.has(r.piece_id)) porPieza.set(r.piece_id, r);
+    }
+    const base = search
+      ? [...live, ...archived]
+      : [...porPieza.values()].filter((r) => !vivasEnOtraBandeja.has(r.piece_id));
+
+    const enScope = base.map((r) => ({
       ...r,
       reading_language: readingLanguageOf(r.brand_id, brandLangs),
     }));

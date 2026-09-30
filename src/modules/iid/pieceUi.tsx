@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   ChevronLeft, ChevronRight, ShieldCheck, ShieldAlert, ShieldQuestion, Copy, Check, Clock, GitBranch, History,
   CalendarCheck, CalendarClock, CalendarOff, CalendarX, Search, X, AlertTriangle, Wrench, HelpCircle,
+  ChevronDown, SlidersHorizontal,
 } from 'lucide-react';
 import { cn } from '../../ui/components';
 import type {
@@ -325,7 +326,7 @@ export function PieceSearchBox({ value, onSearch, placeholder = 'Pegar id de pie
   const buscando = !!value;
   return (
     <div className="flex items-center gap-1.5">
-      <div className="relative">
+      <div className="relative flex-1 md:flex-none">
         <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
         <input
           value={draft}
@@ -334,7 +335,7 @@ export function PieceSearchBox({ value, onSearch, placeholder = 'Pegar id de pie
           placeholder={placeholder}
           spellCheck={false}
           className={cn(
-            'w-[190px] bg-zinc-900 border rounded-lg pl-7 pr-2 py-1 text-zinc-300 font-mono',
+            'w-full md:w-[190px] bg-zinc-900 border rounded-lg pl-7 pr-2 py-2 md:py-1 text-zinc-300 font-mono',
             'outline-none transition-colors placeholder:text-zinc-700 placeholder:font-sans',
             buscando ? 'border-accent/50' : 'border-zinc-800 focus:border-accent/50',
           )}
@@ -964,7 +965,7 @@ export function FixNotice({ state, fix }: { state: PendingState; fix: FixFlow | 
           <span className={suave}>
             {volvio ? 'Volvió corregida. Pediste:' : 'Marcada para arreglar. Pediste:'}
           </span>{' '}
-          <span className="font-semibold">{fix.challenge_reason ?? 'sin propuesta escrita'}</span>
+          <span className="font-semibold font-sans">{fix.challenge_reason ?? 'sin propuesta escrita'}</span>
           {fix.challenged_at && (
             <span className={suave}> · {fmtDate(fix.challenged_at)}</span>
           )}
@@ -1014,6 +1015,118 @@ function FixVersionLine({ fix, suave }: { fix: FixFlow; suave: string }) {
             </span>
           : <span> · sin cambios registrados desde el reto</span>}
       </span>
+    </div>
+  );
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * MOBILE-FIRST (Sam, 2026-09-30: «revisa la UI del Orchestrator para que sea mobile-first … deberás
+ * hacer un gran trabajo de estructuración y facilitarme la lectura de las tarjetas»).
+ *
+ * Medido ese día con la bandeja de Arreglos a 390px: cada tarjeta medía ~4.000px de alto y la pieza
+ * —lo que Sam juzga— quedaba en el medio, debajo de la firma, el watcher, la procedencia y la
+ * previsión. En el teléfono el orden es el de la decisión: QUÉ pieza es, QUÉ pediste (si vuelve de
+ * un arreglo), LA PIEZA y LOS BOTONES. Todo lo demás sigue ahí, a un toque, en «Detalles».
+ *
+ * NADA DE ESTO CAMBIA EL ESCRITORIO: cada componente se apaga a partir de `md` o, al revés, se
+ * enciende solo en `md`. Nada se esconde para siempre: lo que el teléfono pliega, se despliega.
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+/** Lo que una tarjeta dice ANTES de nada en el teléfono: marca, canal, formato, estado y título. */
+export function PieceSummary({ brand, platform, format, title, pieceId, badge }: {
+  brand: string;
+  platform: string | null;
+  format: string | null;
+  title: string | null;
+  pieceId: string;
+  /** La píldora de estado de cada bandeja (pendiente, retenida, franja…). */
+  badge?: React.ReactNode;
+}) {
+  return (
+    <div className="md:hidden space-y-1.5">
+      <div className="flex items-center gap-x-2 gap-y-1 flex-wrap text-[11px] font-mono text-zinc-500">
+        <span className="text-accent font-semibold">{brand}</span>
+        <span>· {platform ?? 'sin canal'}</span>
+        {format && <span>· {format}</span>}
+        <span className="ml-auto flex items-center gap-2">
+          {badge}
+          <span className="text-zinc-600">{shortId(pieceId)}</span>
+        </span>
+      </div>
+      {title && <h4 className="text-[16px] leading-snug font-semibold text-zinc-100">{title}</h4>}
+    </div>
+  );
+}
+
+/**
+ * «Detalles»: plegado en el teléfono, abierto (y sin botón) en escritorio. En escritorio el
+ * contenido se pinta tal cual, en el mismo sitio de siempre.
+ */
+export function MobileDetails({ children, label = 'Detalles' }: { children: React.ReactNode; label?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="space-y-4">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="md:hidden w-full flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-3 text-[13px] font-medium text-zinc-400 active:bg-zinc-800"
+      >
+        <span>{label}</span>
+        <ChevronDown size={16} className={cn('transition-transform', open && 'rotate-180')} />
+      </button>
+      <div className={cn(open ? 'block' : 'hidden', 'md:block space-y-4')}>{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Los filtros de una bandeja: en el teléfono, detrás de un botón «Filtros» con cuántos están
+ * puestos; en escritorio, la fila de siempre. Medido el 2026-09-30: sin plegar, los filtros
+ * ocupaban la primera pantalla entera del teléfono antes de la primera tarjeta.
+ */
+/**
+ * La barra de filtros de las bandejas, con su búsqueda. En el teléfono la búsqueda queda a la
+ * vista (pegar los 8 caracteres de una pieza es la operación más frecuente) y los filtros se
+ * pliegan tras «Filtros · n»; en escritorio la búsqueda cierra la fila, como siempre.
+ */
+export function FilterBar({ q, onSearch, active, className, children }: {
+  q: string; onSearch: (v: string) => void; active: number; className?: string; children: React.ReactNode;
+}) {
+  return (
+    <>
+      <div className="md:hidden mb-3"><PieceSearchBox value={q} onSearch={onSearch} /></div>
+      <MobileFilters active={active} className={className}>
+        {children}
+        <div className="ml-auto hidden md:block"><PieceSearchBox value={q} onSearch={onSearch} /></div>
+      </MobileFilters>
+    </>
+  );
+}
+
+export function MobileFilters({ children, active = 0, className }: {
+  children: React.ReactNode;
+  /** Cuántos filtros NO están en su valor por defecto. Se dice en el botón. */
+  active?: number;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-4 md:mb-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="md:hidden w-full flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/80 px-3 py-2.5 text-[13px] font-medium text-zinc-300 active:bg-zinc-800"
+      >
+        <span className="flex items-center gap-2">
+          <SlidersHorizontal size={15} />
+          Filtros{active > 0 && <span className="text-accent"> · {active}</span>}
+        </span>
+        <ChevronDown size={16} className={cn('transition-transform', open && 'rotate-180')} />
+      </button>
+      <div className={cn(open ? 'flex' : 'hidden', 'md:flex mt-3 md:mt-0', className)}>{children}</div>
     </div>
   );
 }

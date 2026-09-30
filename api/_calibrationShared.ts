@@ -915,6 +915,17 @@ export const PENDING_STATES: readonly PendingState[] =
   ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida'];
 
 /**
+ * UNA PIEZA, UNA PESTAÑA (Sam, 2026-09-30: «las mismas piezas —awaiting_approval, arreglos, retadas,
+ * aprobadas y publicadas— salen en cualquiera de esos tabs; corrígelo para que muestre lo correcto»).
+ *
+ * La bandeja de Calibración se montaba sin alcance, y sin alcance el server devolvía los SEIS ejes:
+ * lo retenido (que es de Retenidas) y el circuito de arreglos (que es de Arreglos) salían también
+ * acá, con el mismo botón de aprobar. Ésos son los ejes que SÓLO le tocan a Calibración: lo que
+ * espera un primer juicio, lo que hay que volver a juzgar y lo que el sistema apartó.
+ */
+export const CALIBRATION_TAB_STATES: readonly PendingState[] = ['esperando', 'recalibrar', 'aplazada'];
+
+/**
  * `retada` es el TERCER argumento y es OBLIGATORIO a propósito, aunque darle un valor por omisión
  * habría dejado compilar todo lo que ya existía. Un parámetro opcional que decide un eje se olvida
  * en el primer llamante nuevo y falla en silencio: la pieza sale como `recalibrar` y nadie ve el
@@ -1440,7 +1451,14 @@ export async function applyVerdictToPiece(
   pieceId: string, verdict: CalibrationVerdict, by: string, reason: string | null,
   fixProposal: string | null = null,
 ): Promise<ContentPiece | null> {
-  const url = `${SB_URL()}/rest/v1/content_pieces?id=eq.${encodeURIComponent(pieceId)}&discarded_at=is.null`;
+  // APROBAR SÓLO LO QUE TODAVÍA ESPERA (2026-09-30). El endpoint ya lo comprueba antes con
+  // `actionsFor`, pero entre la lectura y esta escritura otra mano puede haberla aprobado o
+  // publicado. El ancla de estado hace la aprobación segura ante dos pestañas a la vez: sobre una
+  // pieza que ya no está pendiente no escribe nada y devuelve `null`, igual que con el descarte.
+  const soloPendiente = verdict === 'approved'
+    ? `&status=in.(${CALIBRATION_STATUSES.map((st) => `"${st}"`).join(',')})`
+    : '';
+  const url = `${SB_URL()}/rest/v1/content_pieces?id=eq.${encodeURIComponent(pieceId)}&discarded_at=is.null${soloPendiente}`;
   const res = await fetchWithTimeout('db', url, {
     method: 'PATCH',
     headers: {

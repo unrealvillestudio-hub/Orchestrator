@@ -148,12 +148,12 @@ export default function ChallengedInboxModule({ session }: { session: IidSession
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-2">
+    <div className="max-w-3xl mx-auto px-3 md:px-6 py-2">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-5">
-        <div>
+      <div className="flex items-start justify-between gap-4 mb-3 md:mb-5">
+        <div className="min-w-0">
           <h3 className="font-display text-lg font-bold text-white">Retenidas</h3>
-          <p className="text-sm text-zinc-500 mt-0.5">
+          <p className="hidden md:block text-sm text-zinc-500 mt-0.5">
             Piezas que el juez marcó y cuya verificación determinista lo contradice.
             <span className="text-zinc-400"> No se destruyeron</span> — esperan tu arbitraje.
           </p>
@@ -188,7 +188,7 @@ export default function ChallengedInboxModule({ session }: { session: IidSession
       {(brands.length > 1 || rules.length > 1) && (
         <div className="space-y-2 mb-5">
           {brands.length > 1 && (
-            <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center gap-1.5 overflow-x-auto md:flex-wrap [&>*]:shrink-0">
               <CountPill label="Todas" count={total} active={!brand} onClick={() => apply({ brand: '' })} />
               {brands.map((b) => (
                 <CountPill key={b} label={b} count={byBrand[b]} active={brand === b} onClick={() => apply({ brand: b })} />
@@ -196,7 +196,7 @@ export default function ChallengedInboxModule({ session }: { session: IidSession
             </div>
           )}
           {rules.length > 1 && (
-            <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center gap-1.5 overflow-x-auto md:flex-wrap [&>*]:shrink-0">
               <CountPill label="Toda regla" count={total} active={!rule} onClick={() => apply({ rule: '' })} />
               {rules.map((r) => (
                 <CountPill key={r} label={r} count={byRule[r]} active={rule === r} onClick={() => apply({ rule: r })} />
@@ -210,7 +210,7 @@ export default function ChallengedInboxModule({ session }: { session: IidSession
           retenida: una fila de arbitraje sin pieza nunca cae en una búsqueda por id, porque
           no hay id contra el que comparar. */}
       {available && (
-        <div className="flex items-center justify-end mb-4 text-[11px] font-mono">
+        <div className="flex items-center md:justify-end mb-4 text-[11px] font-mono [&>*]:w-full md:[&>*]:w-auto">
           <PieceSearchBox value={q} onSearch={(v) => apply({ q: v })} />
         </div>
       )}
@@ -297,7 +297,7 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        'rounded-2xl border p-4 transition-colors',
+        'rounded-2xl border p-3 md:p-4 transition-colors',
         decided ? 'border-zinc-800/60 bg-zinc-900/30' : 'border-zinc-800 bg-zinc-900/60',
       )}
     >
@@ -319,7 +319,7 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
           {/* La razón, redactada por el server: una sola fuente para la explicación. */}
           <p className="text-[12px] text-amber-300/80 mt-1.5 leading-relaxed">{row.reason}</p>
           {row.verify_pattern && (
-            <p className="text-[11px] font-mono text-zinc-600 mt-1 break-all">patrón: {row.verify_pattern}</p>
+            <p className="hidden md:block text-[11px] font-mono text-zinc-600 mt-1 break-all">patrón: {row.verify_pattern}</p>
           )}
         </div>
       </div>
@@ -351,7 +351,7 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
             field="body"
             token={token}
           />
-          <div className="flex items-center gap-3 mt-3 pt-3 border-t border-zinc-800/60 text-[10px] font-mono text-zinc-600">
+          <div className="flex items-center gap-x-3 gap-y-1 flex-wrap mt-3 pt-3 border-t border-zinc-800/60 text-[10px] font-mono text-zinc-600">
             <CopyableId id={piece.id} title="id de la pieza" />
             {piece.pass_type && <span>pass_type: {piece.pass_type}</span>}
             {piece.edited_at && <span className="text-zinc-500">editada {fmtDate(piece.edited_at)}{piece.edited_by ? ` · ${piece.edited_by}` : ''}</span>}
@@ -382,7 +382,7 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
         </div>
       ) : (
         <div className="space-y-2">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex flex-col md:flex-row md:items-center gap-2 md:flex-wrap">
             <VerdictButton
               onClick={() => onDecide('judge_was_right')}
               disabled={busy}
@@ -405,7 +405,7 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
               <button
                 onClick={() => setShowActions((v) => !v)}
                 title="Las mismas acciones que ofrecen Calibración y Publicación para esta pieza"
-                className="ml-auto flex items-center gap-1.5 text-[12px] text-zinc-600 hover:text-zinc-400 transition-colors"
+                className="md:ml-auto self-start flex items-center gap-1.5 py-2 md:py-0 text-[12px] text-zinc-600 hover:text-zinc-400 transition-colors"
               >
                 <Pencil size={12} /> {showActions ? 'Ocultar acciones' : 'Editar la pieza'}
               </button>
@@ -456,7 +456,7 @@ function VerdictButton({ onClick, disabled, icon, label, hint, tone }: {
       disabled={disabled}
       title={hint}
       className={cn(
-        'flex flex-col items-start gap-0.5 px-3.5 py-2 rounded-xl border font-semibold text-[13px] transition-all disabled:opacity-50 disabled:cursor-not-allowed',
+        'w-full md:w-auto flex flex-col items-start gap-0.5 px-3.5 py-3 md:py-2 rounded-xl border font-semibold text-[13px] transition-all disabled:opacity-50 disabled:cursor-not-allowed',
         tone === 'amber'
           ? 'border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20'
           : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20',

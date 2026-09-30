@@ -354,6 +354,13 @@ export type PendingState =
   'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida';
 
 /** Los seis, en orden. Un selector sale de acá y nunca de una lista escrita a mano. */
+/**
+ * Los ejes de la pestaña Calibración (2026-09-30, «una pieza, una pestaña»). Espejo de
+ * `CALIBRATION_TAB_STATES` en `api/_calibrationShared.ts`: lo retenido es de Retenidas y el
+ * circuito de arreglos es de Arreglos, así que el selector de esta pestaña no los ofrece.
+ */
+export const CALIBRATION_TAB_STATES: readonly PendingState[] = ['esperando', 'recalibrar', 'aplazada'];
+
 export const PENDING_STATES: readonly PendingState[] =
   ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida'];
 

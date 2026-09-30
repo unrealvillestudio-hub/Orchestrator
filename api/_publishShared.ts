@@ -64,6 +64,16 @@ import { fetchWithTimeout } from './_fetchWithTimeout.js';
  */
 export const RESOLVED_STATUSES = ['published', 'rejected', 'failed'];
 
+/**
+ * LO QUE LA PESTAÑA DE PUBLICACIÓN ENSEÑA (2026-09-30, «una pieza, una pestaña»).
+ *
+ * La bandeja leía «todo lo que no se resolvió» (`not in RESOLVED_STATUSES`), así que lo pendiente de
+ * aprobar —que ya está en Calibración, Arreglos o Retenidas— salía también acá, con el mismo botón
+ * de aprobar. Sam lo leyó como piezas repetidas y como aprobaciones que no se quedaban. Publicación
+ * es lo que YA se aprobó y espera salir: `scheduled`. Lo que no se aprobó tiene su pestaña.
+ */
+export const PUBLISH_STATUSES = ['scheduled'];
+
 // ── Canal de destino ─────────────────────────────────────────────────────────────
 /**
  * Un canal operativo de una marca. La fila manda: un canal nuevo se habilita sembrando

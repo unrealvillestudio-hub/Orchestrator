@@ -32,7 +32,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import {
+import { CALIBRATION_TAB_STATES,
   applyCors, extractToken, requireAdmin,
   fetchCalibrationPieces, fetchEvaluatedIds, fetchPipelineCutoffs,
   fetchWatcherTraces, fetchAttemptsByQueue,
@@ -128,7 +128,10 @@ type UrgencyFilter = (typeof URGENCY_FILTERS)[number];
  */
 function parseStates(v: unknown): PendingState[] {
   const raw = strParam(v);
-  if (!raw || raw === 'all') return [];
+  // UNA PIEZA, UNA PESTAÑA (2026-09-30): SIN `state` se pide la pestaña de Calibración, no la
+  // bandeja entera. `state=all` sigue siendo el conjunto completo, pedido a propósito.
+  if (!raw) return [...CALIBRATION_TAB_STATES];
+  if (raw === 'all') return [];
   const pedidos = raw.split(',').map((x) => x.trim()).filter(Boolean);
   const validos = pedidos.filter((x): x is PendingState =>
     (PENDING_STATES as readonly string[]).includes(x));

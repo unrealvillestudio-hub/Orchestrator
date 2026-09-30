@@ -25,6 +25,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   applyCors, extractToken, requireAdmin,
   parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
+  fetchLivePieces, fetchEvaluatedIds, pendingStateOf,
   type PieceSearch,
 } from './_calibrationShared.js';
 import { fetchBrandLanguages } from './_brandLanguage.js';
@@ -82,8 +83,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Se lee SIN filtro de marca para que los contadores sean estables aunque haya filtro
     // puesto — mismo criterio que calibration-queue con `by_brand`.
-    const all = await fetchPendingChallenges();
-    if (all === null) {
+    const abiertas = await fetchPendingChallenges();
+    if (abiertas === null) {
       return res.status(200).json({
         total: 0, by_brand: {}, by_rule: {}, limit, offset, rows: [],
         contract: {
@@ -92,6 +93,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
       });
     }
+
+    // UNA PIEZA, UNA PESTAÑA (2026-09-30). Un arbitraje abierto se enseñaba aunque su pieza ya no
+    // estuviera retenida: aprobada, publicada, descartada o ya juzgada por Sam (entonces es de
+    // Arreglos). Retenidas es la pieza que HOY está `challenged`, viva y sin juicio de Sam — el eje
+    // `retenida` de `pendingStateOf`. Se filtra ANTES de contar, para que las pastillas digan lo
+    // mismo que la lista.
+    const [retenidas, evaluadas] = await Promise.all([
+      fetchLivePieces({ onlyStatuses: ['challenged'] }),
+      fetchEvaluatedIds(),
+    ]);
+    const vivas = new Set(
+      retenidas
+        .filter((p) => pendingStateOf(p.status, evaluadas.ids.has(p.id), Boolean(p.challenged_at)) === 'retenida')
+        .map((p) => p.id),
+    );
+    const all = abiertas.filter((r) => !!r.piece_id && vivas.has(r.piece_id));
 
     const by_brand: Record<string, number> = {};
     const by_rule: Record<string, number> = {};
@@ -119,7 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const brandLangs = await fetchBrandLanguages();
     const rows = page.map((r) => toChallengedRow(r, pieces, statements, brandLangs));
 
-    const truncated = all.length >= CHALLENGED_CAP;
+    const truncated = abiertas.length >= CHALLENGED_CAP;
     if (truncated) console.warn(`[challenged-queue] judge_calibration hit cap ${CHALLENGED_CAP} — la bandeja puede estar truncada`);
 
     return res.status(200).json({

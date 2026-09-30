@@ -50,7 +50,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import {
+import { actionsFor,
   applyCors, extractToken, requireAdmin,
   ensureArtifact, toContext, watcherRulesForCorpus, upsertVerdict, applyVerdictToPiece, PieceNotFound,
   CorpusColumnMissing, type CalibrationVerdict,
@@ -105,6 +105,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Garantiza el artefacto y trae la pieza (fail-loud si no existe).
     const { artifact_url, piece } = await ensureArtifact(pieceId);
+
+    // LA PANTALLA NO ES LA ÚNICA PUERTA (2026-09-30). Sam: «tengo la sensación de haber aprobado
+    // varias veces las mismas piezas». Hasta hoy sólo la interfaz impedía aprobar lo ya aprobado:
+    // el endpoint reescribía `approved_at` y el corpus en cada llamada, y sobre una pieza
+    // PUBLICADA la devolvía a `scheduled`. El contrato de acciones ya dice qué se puede hacer con
+    // cada pieza; ahora el server lo cumple también, con el mismo motivo que pinta la tarjeta.
+    const accion = verdict === 'approved' ? 'approve' : verdict === 'rejected' ? 'reject' : 'fixable';
+    const permitida = actionsFor(piece)[accion];
+    if (!permitida.available) {
+      return res.status(409).json({
+        error: 'action_not_available',
+        action: accion,
+        detail: permitida.reason ?? 'La pieza ya no admite esta acción.',
+        status: piece.status ?? null,
+      });
+    }
+
     const ctx = toContext(piece); // ya incluye artifact_url determinística (coincide con el garantizado)
     // Nivel de regla, en forma nullable para el corpus (NULL si el bloque no lo trae; nunca []).
     const corpusRules = watcherRulesForCorpus(piece);

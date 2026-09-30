@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send, ShieldQuestion, Archive, Wrench } from 'lucide-react';
+import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send, ShieldQuestion, Archive, Wrench, MoreHorizontal, X } from 'lucide-react';
 import { useFlowStore } from './store/useFlowStore';
 import { cn, GlowDot } from './ui/components';
 import HubModule from './modules/hub/HubModule';
@@ -74,6 +74,17 @@ const NAV_ITEMS = [
   { id: "history" as View,     label: "Historial",    icon: Archive },
 ];
 
+/**
+ * MOBILE-FIRST (Sam, 2026-09-30: «revisa la UI para que sea mobile-first, así aprovecho cuando estoy
+ * en el móvil»). En el teléfono la barra de nueve botones de arriba no cabía: se cortaba o empujaba
+ * el resto de la cabecera. Abajo van LAS BANDEJAS —lo que Sam revisa desde el móvil—, al alcance del
+ * pulgar; las herramientas de flujo quedan en «Más». En escritorio no cambia nada: la barra de
+ * arriba sigue siendo la misma.
+ */
+const BANDEJAS: View[] = ['calibration', 'fixes', 'challenged', 'publish', 'history'];
+const MOBILE_TABS = NAV_ITEMS.filter((i) => BANDEJAS.includes(i.id));
+const MOBILE_MORE = NAV_ITEMS.filter((i) => !BANDEJAS.includes(i.id));
+
 // Deep-link ?view=calibration → abre la bandeja directo (botón del email despertador).
 function initialView(): View {
   try {
@@ -106,6 +117,7 @@ const Logo = () => (
 export default function App() {
   const [view, setView] = useState<View>(initialView);
   const [session, setSession] = useState<IidSession | null>(null);
+  const [masAbierto, setMasAbierto] = useState(false);
   const { activePlan, completedFlows, isInterpreting } = useFlowStore();
 
   const logout = () => { setSession(null); setView("hub"); };
@@ -143,11 +155,13 @@ export default function App() {
     <div className="min-h-screen bg-[#050508] text-zinc-200 selection:bg-accent/30 pb-hueco-inferior">
 
       {/* ── TOP NAV ── */}
-      <header className="h-14 border-b border-zinc-800/60 px-5 flex items-center justify-between sticky top-0 bg-[#050508]/95 backdrop-blur-xl z-50">
-        <div className="flex items-center gap-6">
-          <button onClick={goHub} className="hover:opacity-80 transition-opacity">
+      <header className="h-14 border-b border-zinc-800/60 px-4 md:px-5 flex items-center justify-between gap-3 sticky top-0 bg-[#050508]/95 backdrop-blur-xl z-50">
+        <div className="flex items-center gap-3 md:gap-6 min-w-0">
+          <button onClick={goHub} className="hover:opacity-80 transition-opacity shrink-0">
             <Logo />
           </button>
+          {/* En el teléfono la barra de navegación vive abajo: la cabecera dice DÓNDE estás. */}
+          <span className="md:hidden text-sm font-semibold text-zinc-200 truncate">{breadcrumb[view]}</span>
 
           <div className="hidden md:flex items-center gap-1 text-[10px] font-mono text-zinc-700">
             {view !== "hub" && (
@@ -159,14 +173,14 @@ export default function App() {
           </div>
         </div>
 
-        {/* Center nav */}
-        <nav className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800 rounded-xl p-1">
+        {/* Center nav — escritorio. En el teléfono la reemplaza la barra inferior. */}
+        <nav className="hidden md:flex items-center gap-1 bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 overflow-x-auto max-w-[70vw]">
           {NAV_ITEMS.map(item => (
             <button
               key={item.id}
               onClick={() => setView(item.id)}
               className={cn(
-                "flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all font-body",
+                "flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all font-body shrink-0 whitespace-nowrap",
                 view === item.id || (item.id === "hub" && ["hub","planner","executor"].includes(view))
                   ? "bg-accent text-black shadow-md shadow-accent/20"
                   : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800"
@@ -187,7 +201,7 @@ export default function App() {
         </nav>
 
         {/* Right controls */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 md:gap-3 shrink-0">
           {activePlan && (view === "hub" || view === "launchpad" || view === "monitor" || view === "intel") && (
             <button
               onClick={() => setView(activePlan.status === 'running' ? 'executor' : 'planner')}
@@ -203,7 +217,7 @@ export default function App() {
               Interpretando...
             </div>
           )}
-          <button className="p-2 hover:bg-zinc-800 rounded-xl transition-colors">
+          <button className="hidden md:block p-2 hover:bg-zinc-800 rounded-xl transition-colors">
             <Bell size={15} className="text-zinc-600" />
           </button>
           <SessionControl session={session} onLogout={logout} />
@@ -245,8 +259,75 @@ export default function App() {
         </motion.div>
       </AnimatePresence>
 
-      {/* ── STATUS BAR ── */}
-      <footer className="fixed bottom-0 left-0 right-0 min-h-7 border-t border-zinc-800/40 px-5 flex items-center justify-between bg-[#050508]/80 backdrop-blur-sm z-50 pie-sobre-la-barra">
+      {/* ── BARRA DE BANDEJAS (teléfono) ── al alcance del pulgar. Mismo `--pie-fijo` que el pie de
+          escritorio (ver index.css): el contenido reserva exactamente lo que esta barra ocupa. */}
+      <nav
+        aria-label="Bandejas"
+        className="md:hidden fixed bottom-0 left-0 right-0 min-h-7 border-t border-zinc-800 bg-[#050508]/95 backdrop-blur-xl z-50 pie-sobre-la-barra"
+      >
+        <div className="grid grid-cols-6 h-14">
+          {MOBILE_TABS.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => { setView(item.id); setMasAbierto(false); }}
+              aria-current={view === item.id ? 'page' : undefined}
+              className={cn(
+                'flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold leading-none',
+                view === item.id ? 'text-accent' : 'text-zinc-500 active:text-zinc-200',
+              )}
+            >
+              <item.icon size={19} />
+              <span className="truncate max-w-full px-0.5" style={{ fontSize: 10.5 }}>{item.label}</span>
+            </button>
+          ))}
+          <button
+            onClick={() => setMasAbierto((v) => !v)}
+            aria-expanded={masAbierto}
+            className={cn(
+              'flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold leading-none',
+              masAbierto || !BANDEJAS.includes(view) ? 'text-accent' : 'text-zinc-500',
+            )}
+          >
+            <MoreHorizontal size={19} />
+            <span>Más</span>
+          </button>
+        </div>
+      </nav>
+
+      {/* «Más» — las herramientas de flujo, en una hoja que sube desde la barra. */}
+      {masAbierto && (
+        <div className="md:hidden fixed inset-0 z-40" onClick={() => setMasAbierto(false)}>
+          <div className="absolute inset-0 bg-black/60" />
+          <div
+            className="absolute left-0 right-0 bg-zinc-900 border-t border-zinc-800 rounded-t-2xl p-2"
+            style={{ bottom: 'var(--hueco-inferior)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-3 py-2">
+              <span className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">Más</span>
+              <button onClick={() => setMasAbierto(false)} className="p-2 text-zinc-500" aria-label="Cerrar">
+                <X size={18} />
+              </button>
+            </div>
+            {MOBILE_MORE.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => { setView(item.id); setMasAbierto(false); }}
+                className={cn(
+                  'w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-[15px] font-medium',
+                  view === item.id ? 'bg-accent/10 text-accent' : 'text-zinc-300 active:bg-zinc-800',
+                )}
+              >
+                <item.icon size={18} />
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── STATUS BAR (escritorio) ── */}
+      <footer className="hidden md:flex fixed bottom-0 left-0 right-0 min-h-7 border-t border-zinc-800/40 px-5 items-center justify-between bg-[#050508]/80 backdrop-blur-sm z-50 pie-sobre-la-barra">
         <div className="flex items-center gap-5 text-[9px] font-mono text-zinc-800 uppercase tracking-widest">
           <div className="flex items-center gap-1.5">
             <GlowDot color="#22c55e" pulse={false} />
