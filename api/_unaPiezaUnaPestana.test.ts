@@ -24,9 +24,9 @@ import { PUBLISH_STATUSES } from './_publishShared';
  */
 const src = (f: string) => readFileSync(new URL(`./${f}`, import.meta.url), 'utf8');
 
-describe('Calibración sólo trae sus tres ejes', () => {
-  it('los ejes de la pestaña son esperando, recalibrar y aplazada', () => {
-    expect([...CALIBRATION_TAB_STATES]).toEqual(['esperando', 'recalibrar', 'aplazada']);
+describe('Calibración sólo trae sus ejes', () => {
+  it('los ejes de la pestaña son esperando, recalibrar, aplazada y retenida', () => {
+    expect([...CALIBRATION_TAB_STATES]).toEqual(['esperando', 'recalibrar', 'aplazada', 'retenida']);
     for (const e of CALIBRATION_TAB_STATES) expect(PENDING_STATES).toContain(e);
   });
 
@@ -36,7 +36,17 @@ describe('Calibración sólo trae sus tres ejes', () => {
 
   it('el espejo del cliente dice lo mismo que el server', () => {
     const cliente = readFileSync(new URL('../src/services/calibrationInbox.ts', import.meta.url), 'utf8');
-    expect(cliente).toMatch(/CALIBRATION_TAB_STATES: readonly PendingState\[\] = \['esperando', 'recalibrar', 'aplazada'\]/);
+    expect(cliente).toMatch(/CALIBRATION_TAB_STATES: readonly PendingState\[\] = \['esperando', 'recalibrar', 'aplazada', 'retenida'\]/);
+  });
+
+  // 2026-09-30 — la pieza SIN IMAGEN queda `challenged` sin arbitraje: sin esto no sale en ninguna
+  // pestaña (17 medidas). Calibración la muestra y sólo cede a Retenidas la que tiene arbitraje abierto.
+  it('la retenida sin arbitraje se queda en Calibración; la que tiene arbitraje abierto, no', () => {
+    const q = src('calibration-queue.ts');
+    expect(q).toMatch(/fetchPendingChallenges\(\)/);
+    expect(q).toMatch(/stateById\.get\(p\.id\) === 'retenida' && enArbitraje\.has\(p\.id\)/);
+    // Antes de contar marcas y de paginar: si no, las pastillas contarían piezas que no se ven.
+    expect(q.indexOf('enArbitraje.has')).toBeLessThan(q.indexOf('const by_brand'));
   });
 });
 
