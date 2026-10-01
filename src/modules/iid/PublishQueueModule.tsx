@@ -18,6 +18,7 @@ import { PieceActionsBar } from './pieceActions';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
 import { SpeechReader } from '../../ui/SpeechReader';
 import { readableFromArtifactHtml } from './readablePiece';
+import ManualPublishModule from './ManualPublishModule';
 
 const PAGE = 20;
 
@@ -43,6 +44,38 @@ const PAGE = 20;
  * pieza, el diálogo repite esa fecha y avisa de que la franja se libera.
  */
 export default function PublishQueueModule({ session }: { session: IidSession }) {
+  // Pestaña «Manual» (Sam, 2026-10-01): lo que se publica a mano vive DENTRO de Publicación.
+  // `?view=publish&tab=manual` abre directo en ella.
+  const [tab, setTab] = useState<'scheduled' | 'manual'>(() => {
+    try { return new URLSearchParams(window.location.search).get('tab') === 'manual' ? 'manual' : 'scheduled'; }
+    catch { return 'scheduled'; }
+  });
+  return (
+    <div className="max-w-3xl mx-auto px-3 md:px-6 py-2">
+      <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-3 w-fit">
+        <SubTab label="Programadas" active={tab === 'scheduled'} onClick={() => setTab('scheduled')} />
+        <SubTab label="Manual" active={tab === 'manual'} onClick={() => setTab('manual')} />
+      </div>
+      {tab === 'manual' ? <ManualPublishModule session={session} /> : <ScheduledQueue session={session} />}
+    </div>
+  );
+}
+
+function SubTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'px-3 py-1.5 rounded-lg text-xs font-semibold transition-all font-body',
+        active ? 'bg-accent text-black shadow' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+function ScheduledQueue({ session }: { session: IidSession }) {
   const token = session.session_token;
 
   const [data, setData]       = useState<PublishQueueResult | null>(null);
@@ -118,7 +151,7 @@ export default function PublishQueueModule({ session }: { session: IidSession })
   const channels = useMemo(() => Object.keys(byChannel).sort(), [byChannel]);
 
   return (
-    <div className="max-w-3xl mx-auto px-3 md:px-6 py-2">
+    <div>
       {/* Header */}
       <div className="flex items-start justify-between gap-4 mb-3 md:mb-5">
         <div className="min-w-0">

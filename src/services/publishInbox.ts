@@ -222,3 +222,38 @@ export function fetchPublishQueue(
   const qs = q.toString();
   return req<PublishQueueResult>(`/api/publish-queue${qs ? `?${qs}` : ''}`, token);
 }
+
+// ── Publicación manual ───────────────────────────────────────────────────────────
+/**
+ * Una pieza que Sam publica A MANO: su franja, el texto completo (título + cuerpo + hashtags +
+ * firma, en un bloque) y las fotos en orden. Lo arma el server — `api/_manualShared.ts`.
+ */
+export interface ManualItem {
+  slot_id: string;
+  piece_id: string;
+  brand_id: string;
+  platform_key: string;
+  slot_at: string;
+  timezone: string | null;
+  /** La hora ya pasó: le toca ahora. */
+  due: boolean;
+  format: string | null;
+  text: string;
+  images: string[];
+}
+
+export interface ManualQueueResult {
+  total: number;
+  by_brand: Record<string, number>;
+  by_channel: Record<string, number>;
+  items: ManualItem[];
+}
+
+/** Lo que hay que publicar a mano. Marca y canal son filtros opcionales. */
+export function fetchManualQueue(token: string, opts: { brand?: string; channel?: string } = {}): Promise<ManualQueueResult> {
+  const q = new URLSearchParams();
+  if (opts.brand) q.set('brand', opts.brand);
+  if (opts.channel) q.set('channel', opts.channel);
+  const qs = q.toString();
+  return req<ManualQueueResult>(`/api/manual-queue${qs ? `?${qs}` : ''}`, token);
+}
