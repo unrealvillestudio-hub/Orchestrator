@@ -411,11 +411,10 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
   );
   // DÓNDE CAERÍA SI SE APROBARA AHORA (PREVISIÓN, no compromiso) + la procedencia.
   const tecnico = (<><ForecastLine forecast={piece.forecast_slot} slotsRead={slotsRead} /><Provenance piece={piece} /></>);
-  // El enlace al artefacto + la lectura en voz alta.
+  // El enlace al artefacto. La lectura en voz alta ya no va aquí: sale fuera de «Detalles» (Sam, 2026-10-01).
   const lectura = (<>
     {artUrl && <a href={artUrl} target="_blank" rel="noopener noreferrer"
       className="block text-[10px] font-mono text-zinc-600 hover:text-zinc-400 transition-colors truncate">{artUrl}</a>}
-    {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
   </>);
 
   return (
@@ -471,6 +470,7 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
             dos pantallas pueden divergir, divergirán, y acá no pueden. Esta bandeja no
             entrega `slot` porque lo suyo es una PREVISIÓN, no un compromiso — y una
             previsión no se puede prometer liberar. */}
+        {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
         <PieceActionsBar
           piece={{
             piece_id: piece.piece_id,
