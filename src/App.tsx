@@ -47,7 +47,8 @@ type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" |
 const FIX_SCOPE: CalibrationScope = {
   // 2026-10-01 — `sin_imagen` entra acá por decisión de Sam: no espera un veredicto, espera
   // «Generar imagen», que es un arreglo. Al tener imagen pasa a Calibración como `retenida`.
-  states: ['por_arreglar', 'corregida', 'sin_imagen'],
+  // 2026-10-01 — y lo que el carril auto-fix no pudo resolver: es trabajo de arreglo (decisión de Sam).
+  states: ['por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo'],
   title: 'Arreglos',
   subtitle: (
     <>

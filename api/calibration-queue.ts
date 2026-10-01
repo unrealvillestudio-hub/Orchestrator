@@ -38,7 +38,7 @@ import { CALIBRATION_TAB_STATES,
   fetchWatcherTraces, fetchAttemptsByQueue,
   latestPerQueue, generationOf, watcherOf, toContext, PIECES_CAP,
   parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
-  pendingStateOf, PENDING_STATES, tieneImagen, type PendingState,
+  pendingStateOf, PENDING_STATES, tieneImagen, autofixResiduo, type PendingState,
   type ContentPiece, type PieceContext, type PipelineCutoff, type GenerationInfo,
   type PieceSearch,
 } from './_calibrationShared.js';
@@ -312,6 +312,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // es precisamente lo que permite reconocer una pieza corregida meses después.
         Boolean(p.challenged_at),
         tieneImagen(p),
+        // CARRIL AUTO-FIX — lo que el carril no pudo resolver es de Arreglos, no de Calibración.
+        autofixResiduo(p),
       ));
     }
 

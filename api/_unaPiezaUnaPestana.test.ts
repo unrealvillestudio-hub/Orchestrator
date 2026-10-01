@@ -103,7 +103,8 @@ describe('las bandejas tras la decisión del 2026-10-01', () => {
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 
   it('4 · Arreglos incluye `sin_imagen`: no espera un veredicto, espera «Generar imagen»', () => {
-    expect(app).toMatch(/states: \['por_arreglar', 'corregida', 'sin_imagen'\]/);
+    // 2026-10-01 (carril auto-fix) — y el residuo del carril, que también es trabajo de arreglo.
+    expect(app).toMatch(/states: \['por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo'\]/);
   });
 
   it('5 · Retenidas sale de la barra del teléfono, y Calibración avisa si hay arbitrajes', () => {
