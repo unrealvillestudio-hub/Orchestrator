@@ -74,7 +74,11 @@ describe('A2 · aprobar y rechazar TOCAN la pieza', () => {
 
   it('quien firma sale de la SESIÓN, no del body', () => {
     // `evaluated_by` cae a session.sub; un sello firmable con el nombre de otro no es auditable.
-    expect(VERDICT).toMatch(/session\.sub \|\| 'sam'/);
+    // Desde la revisión por marca (2026-10-01) la regla vive en `signerOf`, y es más estricta: un
+    // revisor que no es admin firma SIEMPRE con su sesión (ver `_revisionPorMarca.test.ts`).
+    expect(VERDICT).toMatch(/signerOf\(session, body\.evaluated_by\)/);
+    const SCOPE = readFileSync(new URL('./_reviewScope.ts', import.meta.url), 'utf8');
+    expect(SCOPE).toMatch(/session\.sub \|\| 'sam'/);
     expect(VERDICT).toMatch(/applyVerdictToPiece\(pieceId, verdict, evaluated_by/);
   });
 

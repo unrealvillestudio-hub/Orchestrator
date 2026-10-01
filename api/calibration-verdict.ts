@@ -51,10 +51,12 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { actionsFor,
-  applyCors, extractToken, requireAdmin,
+  applyCors, extractToken,
   ensureArtifact, toContext, watcherRulesForCorpus, upsertVerdict, applyVerdictToPiece, PieceNotFound,
   CorpusColumnMissing, type CalibrationVerdict,
 } from './_calibrationShared.js';
+// Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
+import { requireReviewer, guardPiece, signerOf } from './_reviewScope.js';
 import { releaseSlotsForPiece, type SlotRelease } from './_publishSlots.js';
 
 const VERDICTS: readonly CalibrationVerdict[] = ['approved', 'rejected', 'fixable'];
@@ -70,11 +72,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
-  const session = requireAdmin(req, res, extractToken(req, body));
-  if (!session) return; // requireAdmin ya respondió
+  const session = await requireReviewer(req, res, extractToken(req, body));
+  if (!session) return; // requireReviewer ya respondió
 
   const pieceId = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';
   if (!pieceId) return res.status(400).json({ error: 'piece_id required' });
+  // ALCANCE DE REVISIÓN — la pieza tiene que ser de una de sus marcas. Admin pasa sin leer nada.
+  if (!(await guardPiece(res, session, pieceId))) return;
 
   const verdict = body.verdict as CalibrationVerdict;
   if (!VERDICTS.includes(verdict)) {
@@ -98,9 +102,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // una fila sin criterio a una con relleno. Lo escribe Claude desde el chat, después.
   const criterion = typeof body.criterion === 'string' ? body.criterion.trim() : '';
 
-  const evaluated_by = (typeof body.evaluated_by === 'string' && body.evaluated_by.trim())
-    ? body.evaluated_by.trim()
-    : (session.sub || 'sam');
+  // Quién firma: un admin puede declarar el evaluador (como antes); un revisor firma con su sesión.
+  const evaluated_by = signerOf(session, body.evaluated_by);
 
   try {
     // Garantiza el artefacto y trae la pieza (fail-loud si no existe).

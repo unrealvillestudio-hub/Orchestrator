@@ -33,7 +33,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { CALIBRATION_TAB_STATES,
-  applyCors, extractToken, requireAdmin,
+  applyCors, extractToken,
   fetchCalibrationPieces, fetchEvaluatedIds, fetchPipelineCutoffs,
   fetchWatcherTraces, fetchAttemptsByQueue,
   latestPerQueue, generationOf, watcherOf, toContext, PIECES_CAP,
@@ -42,6 +42,8 @@ import { CALIBRATION_TAB_STATES,
   type ContentPiece, type PieceContext, type PipelineCutoff, type GenerationInfo,
   type PieceSearch,
 } from './_calibrationShared.js';
+// Quién puede ver esta bandeja y de qué marcas: admin todo; un revisor, sólo las suyas.
+import { requireReviewer, filterByReviewScope } from './_reviewScope.js';
 // UNA PIEZA, UNA PESTAÑA — la retenida CON arbitraje abierto es de Retenidas; la que no lo tiene
 // (p. ej. sin imagen) se queda acá, porque no hay otra pestaña que la muestre.
 import { fetchPendingChallenges } from './_challengedShared.js';
@@ -212,8 +214,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
 
-  const session = requireAdmin(req, res, extractToken(req));
-  if (!session) return; // requireAdmin ya respondió
+  const session = await requireReviewer(req, res, extractToken(req));
+  if (!session) return; // requireReviewer ya respondió
 
   const limit      = intParam(req.query.limit, 20, 1, 200);
   const offset     = intParam(req.query.offset, 0, 0, 10_000_000);
@@ -286,7 +288,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     //
     // «Ya calibrada» es historia de la pieza, no su estado actual. Viaja como eje —`pendingStateOf`—
     // y la tarjeta la distingue por color; no la borra de la lista.
-    const perPiece = latestPerQueue(allPieces);
+    // ALCANCE DE REVISIÓN — antes que nada más: lo que no es de sus marcas no existe para esta
+    // sesión, ni en la lista ni en las cuentas. Para admin es el mismo array.
+    const perPiece = latestPerQueue(filterByReviewScope(allPieces, session.review));
     const yaCalibrada = (id: string) => evaluated.ids.has(id);
 
     // Generación de cada pieza (se calcula una vez: filtra, ordena y viaja a la tarjeta).

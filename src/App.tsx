@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send, ShieldQuestion, Archive, Wrench, MoreHorizontal, X } from 'lucide-react';
 import { useFlowStore } from './store/useFlowStore';
@@ -17,6 +17,7 @@ import PublishQueueModule from './modules/iid/PublishQueueModule';
 import ChallengedInboxModule from './modules/iid/ChallengedInboxModule';
 import EvaluatedHistoryModule from './modules/iid/EvaluatedHistoryModule';
 import type { IidSession } from './services/iidInbound';
+import { fetchReviewScope } from './services/calibrationInbox';
 
 /**
  * La versión sale de `package.json` y el commit de la plataforma; los inyecta
@@ -377,14 +378,37 @@ function SessionControl({ session, onLogout }: { session: IidSession; onLogout: 
 // dentro del mismo shell vía toggle de estado (no router). El enlace gold de
 // IidSeedsUnified salta directo acá (onGoCalibrate). Header "IID SEEDS / Sembrador"
 // se mantiene.
-type SeederView = 'capture' | 'calibrate';
+//
+// REVISIÓN POR MARCA (2026-10-01): si el sembrador tiene marcas asignadas para revisar
+// (`intel.operator_review_scope`), el mismo shell suma las cuatro bandejas de Sam —los MISMOS
+// módulos, no copias—, y el servidor sólo le sirve piezas de esas marcas. Sin marcas asignadas,
+// el shell es el de siempre.
+type SeederView = 'capture' | 'calibrate' | 'calibration' | 'fixes' | 'challenged' | 'publish';
+
+const REVIEW_TABS: { id: SeederView; label: string; icon: typeof Sprout }[] = [
+  { id: 'calibration', label: 'Calibración', icon: ClipboardCheck },
+  { id: 'fixes',       label: 'Arreglos',    icon: Wrench },
+  { id: 'challenged',  label: 'Retenidas',   icon: ShieldQuestion },
+  { id: 'publish',     label: 'Publicación', icon: Send },
+];
 
 function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () => void }) {
   const [seederView, setSeederView] = useState<SeederView>('capture');
+  // null = no revisa ninguna marca (o todavía no se sabe): el shell de siempre.
+  const [review, setReview] = useState<'*' | string[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetchReviewScope(session.session_token)
+      .then((r) => { if (alive) setReview(r); })
+      .catch(() => { if (alive) setReview(null); });
+    return () => { alive = false; };
+  }, [session.session_token]);
 
   const tabs: { id: SeederView; label: string; icon: typeof Sprout }[] = [
     { id: 'capture',   label: 'Capturar',    icon: Sprout },
     { id: 'calibrate', label: 'Calibrar voz', icon: Dna },
+    ...(review ? REVIEW_TABS : []),
   ];
 
   return (
@@ -406,14 +430,14 @@ function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () 
       </header>
 
       {/* Toggle de vista (patrón pill-tabs — igual que la nav del admin) */}
-      <div className="flex justify-center pt-6">
-        <nav className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800 rounded-xl p-1">
+      <div className="flex flex-col items-center gap-2 pt-6 px-4">
+        <nav className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 max-w-full overflow-x-auto">
           {tabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setSeederView(t.id)}
               className={cn(
-                'flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all font-body',
+                'flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all font-body shrink-0 whitespace-nowrap',
                 seederView === t.id
                   ? 'bg-accent text-black shadow-md shadow-accent/20'
                   : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800'
@@ -424,6 +448,9 @@ function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () 
             </button>
           ))}
         </nav>
+        {review && review !== '*' && (
+          <span className="text-[10px] font-mono text-zinc-600">Revisas: {review.join(' · ')}</span>
+        )}
       </div>
 
       <AnimatePresence mode="wait">
@@ -434,9 +461,12 @@ function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () 
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
         >
-          {seederView === 'capture'
-            ? <IidSeedsUnified session={session} onGoCalibrate={() => setSeederView('calibrate')} />
-            : <CalibrationConsole session={session} />}
+          {seederView === 'capture'     && <IidSeedsUnified session={session} onGoCalibrate={() => setSeederView('calibrate')} />}
+          {seederView === 'calibrate'   && <CalibrationConsole session={session} />}
+          {seederView === 'calibration' && <ApprovalCalibrationModule session={session} />}
+          {seederView === 'fixes'       && <ApprovalCalibrationModule session={session} scope={FIX_SCOPE} />}
+          {seederView === 'challenged'  && <ChallengedInboxModule session={session} />}
+          {seederView === 'publish'     && <PublishQueueModule session={session} />}
         </motion.div>
       </AnimatePresence>
 

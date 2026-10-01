@@ -23,9 +23,11 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
-  applyCors, extractToken, requireAdmin,
+  applyCors, extractToken,
   discardPiece, PieceNotFound, AlreadyDiscarded,
 } from './_calibrationShared.js';
+// Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
+import { requireReviewer, guardPiece } from './_reviewScope.js';
 import { releaseSlotsForPiece } from './_publishSlots.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -36,11 +38,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let body: { piece_id?: string; reason?: string; session_token?: string } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
-  const session = requireAdmin(req, res, extractToken(req, body));
-  if (!session) return; // requireAdmin ya respondió
+  const session = await requireReviewer(req, res, extractToken(req, body));
+  if (!session) return; // requireReviewer ya respondió
 
   const pieceId = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';
   if (!pieceId) return res.status(400).json({ error: 'piece_id required' });
+  // ALCANCE DE REVISIÓN — la pieza tiene que ser de una de sus marcas. Admin pasa sin leer nada.
+  if (!(await guardPiece(res, session, pieceId))) return;
 
   // Motivo opcional: obligar a escribir empuja a poner cualquier cosa para avanzar.
   const reason = typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : null;
