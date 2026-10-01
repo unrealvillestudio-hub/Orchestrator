@@ -923,7 +923,12 @@ export const PENDING_STATES: readonly PendingState[] =
  * acá, con el mismo botón de aprobar. Ésos son los ejes que SÓLO le tocan a Calibración: lo que
  * espera un primer juicio, lo que hay que volver a juzgar y lo que el sistema apartó.
  */
-export const CALIBRATION_TAB_STATES: readonly PendingState[] = ['esperando', 'recalibrar', 'aplazada'];
+export const CALIBRATION_TAB_STATES: readonly PendingState[] = ['esperando', 'recalibrar', 'aplazada', 'retenida'];
+// ⛔ NO OPERATIVO (2026-09-30, PR #56) — `['esperando', 'recalibrar', 'aplazada']`. Sacaba `retenida`
+// de Calibración suponiendo que toda retenida tiene un arbitraje abierto en Retenidas. No es así:
+// la pieza que el carril deja SIN IMAGEN queda en `challenged` sin veredicto y SIN arbitraje, y con
+// ese valor no salía en ninguna pestaña. Medido el 2026-09-30: 17 piezas. Ahora `retenida` vuelve a
+// Calibración y `calibration-queue` excluye sólo la que tiene arbitraje abierto (ésa es de Retenidas).
 
 /**
  * `retada` es el TERCER argumento y es OBLIGATORIO a propósito, aunque darle un valor por omisión

@@ -42,6 +42,9 @@ import { CALIBRATION_TAB_STATES,
   type ContentPiece, type PieceContext, type PipelineCutoff, type GenerationInfo,
   type PieceSearch,
 } from './_calibrationShared.js';
+// UNA PIEZA, UNA PESTAÑA — la retenida CON arbitraje abierto es de Retenidas; la que no lo tiene
+// (p. ej. sin imagen) se queda acá, porque no hay otra pestaña que la muestre.
+import { fetchPendingChallenges } from './_challengedShared.js';
 // LO-CORREGIDO-01 — el circuito de arreglos: qué pidió Sam, qué se hizo desde entonces y por qué
 // versión va. Enriquece la tarjeta; nunca decide si la pieza aparece. Ver `_fixFlow.ts`.
 import { fetchPieceEdits, fixFlowOf, type FixFlow } from './_fixFlow.js';
@@ -236,7 +239,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Se lee sin filtro de marca para que by_brand sea global y estable aunque venga
     // filtro; los cortes se leen en runtime (nunca hay fechas de corte en este código).
-    const [allPieces, evaluated, cutoffsRaw, limits, closers, brandLangs, brandZones, freeSlots] = await Promise.all([
+    const [allPieces, evaluated, cutoffsRaw, limits, closers, brandLangs, brandZones, freeSlots, abiertas] = await Promise.all([
       fetchCalibrationPieces(),
       fetchEvaluatedIds(),
       fetchPipelineCutoffs(),
@@ -247,6 +250,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Las franjas LIBRES futuras: son el horizonte sembrado (decenas de filas), no una
       // tabla de piezas, así que se traen enteras una vez y se indexan por (marca, canal).
       fetchNextFreeSlots(),
+      // Sólo hace falta si la pestaña pide `retenida`. Una lectura fallida no esconde nada: sin
+      // saber qué está en arbitraje, la retenida se muestra acá antes que en ningún sitio.
+      states.some((e) => e === 'retenida') ? fetchPendingChallenges().catch(() => null) : Promise.resolve(null),
     ]);
     const cutoffs: PipelineCutoff[] = cutoffsRaw ?? [];
 
@@ -306,6 +312,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // las pastillas de marca tienen que contar lo que esta pestaña daría, no lo que daría la bandeja
     // entera. Es el mismo orden que ya siguen el veredicto, la plataforma y la urgencia.
     if (states.length) scoped = scoped.filter((p) => states.includes(stateById.get(p.id)!));
+    if (abiertas?.length) {
+      const enArbitraje = new Set(abiertas.map((a) => a.piece_id).filter(Boolean));
+      scoped = scoped.filter((p) => !(stateById.get(p.id) === 'retenida' && enArbitraje.has(p.id)));
+    }
 
     // UNA MARCA NO DESAPARECE: DECLARA CERO. (Regla de Sam, 2026-09-18.)
     //
