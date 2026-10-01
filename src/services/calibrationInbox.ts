@@ -304,6 +304,20 @@ export interface CalibrationPiece {
    * separa las dos caras de la acción de imagen: corregir una escena, o pedir la primera.
    */
   has_image: boolean;
+  /**
+   * CARRIL AUTO-FIX — qué corrigió el carril antes de que la pieza naciera, y qué quedó. `null` = el
+   * carril no corrió sobre ella. Espejo de `AutofixSummary` en `api/_calibrationShared.ts`.
+   */
+  autofix: AutofixSummary | null;
+}
+
+/** Espejo de `AutofixSummary` en `api/_calibrationShared.ts`. */
+export interface AutofixSummary {
+  outcome: 'clean' | 'residual';
+  attempts: number;
+  resolved: string[];
+  residual: string[];
+  cost_usd: number | null;
 }
 
 /** Un cambio registrado sobre la pieza. Espejo de `FixChange` en `api/_fixFlow.ts`. */
@@ -351,7 +365,8 @@ export interface FixFlow {
  * que tienen que decir lo mismo sólo lo siguen diciendo si algo lo comprueba.
  */
 export type PendingState =
-  'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida' | 'sin_imagen';
+  'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida' | 'sin_imagen'
+  | 'autofix_residuo';
 
 /** Los seis, en orden. Un selector sale de acá y nunca de una lista escrita a mano. */
 /**
@@ -362,7 +377,7 @@ export type PendingState =
 export const CALIBRATION_TAB_STATES: readonly PendingState[] = ['esperando', 'recalibrar', 'aplazada', 'retenida'];
 
 export const PENDING_STATES: readonly PendingState[] =
-  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen'];
+  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo'];
 
 export interface QueueResult {
   total_pending: number;

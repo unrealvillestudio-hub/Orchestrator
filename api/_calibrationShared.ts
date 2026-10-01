@@ -134,6 +134,13 @@ export function publicArtifactUrl(brandId: string, pieceId: string): string {
 export interface PieceAssets {
   copy?: { aife_filtered?: string; raw?: string; title?: string };
   image?: { url?: string };
+  // CARRIL AUTO-FIX (2026-10-01) — lo que el carril hizo con la pieza antes de que naciera. Lo escribe
+  // `content-run-stage` (bloque AUTOFIX); acá sólo se lee. `enabled:false` = el carril estaba apagado
+  // y la clave sólo anota lo que HABRÍA entrado: no es una corrección y no se enseña como tal.
+  autofix?: {
+    enabled?: boolean; ran?: boolean; outcome?: string; attempts?: number; reason?: string;
+    entered?: string[]; resolved?: string[]; residual?: string[]; applied?: boolean; cost_usd?: number;
+  } | null;
   // Las láminas de un carrusel, cada una con su imagen (`n` = posición; la 1 es la portada).
   carousel?: { slides?: Array<{ n?: number | null; url?: string | null }> | null } | null;
   // Texto adaptado POR CANAL (content-run-stage). Es el que ese canal recibe de verdad,
@@ -535,6 +542,8 @@ export interface PieceContext {
    * adivinara acertaría hoy y fallaría el día que el artefacto y la imagen dejen de ir juntos.
    */
   has_image: boolean;
+  /** CARRIL AUTO-FIX — qué corrigió el carril antes de que naciera la pieza. `null` = no corrió. */
+  autofix: AutofixSummary | null;
   /**
    * Aplazamiento: hasta cuándo y por qué. `null` en toda pieza no aplazada.
    *
@@ -621,6 +630,8 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     // SIN-IMAGEN-01 — mismo criterio que usaba `actionsFor` hasta hoy: una url vacía NO es una
     // imagen. Se conserva al pie de la letra, sólo que ahora informa en vez de cerrar una puerta.
     has_image: tieneImagen(piece),
+    // CARRIL AUTO-FIX — qué corrigió el carril antes de que la pieza naciera, y qué quedó.
+    autofix: autofixOf(piece),
   };
 }
 
@@ -628,6 +639,35 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
  * ¿La pieza tiene imagen? Una url vacía NO es una imagen (SIN-IMAGEN-01). Único criterio del
  * servidor: lo usan `has_image` de la tarjeta y el eje `sin_imagen` de `pendingStateOf`.
  */
+/**
+ * CARRIL AUTO-FIX — lo que la tarjeta cuenta del carril. `null` si el carril no corrió sobre esta
+ * pieza (apagado, sin defectos o sin tiempo): una pieza que nadie corrigió no lleva el aviso.
+ */
+export interface AutofixSummary {
+  outcome: 'clean' | 'residual';
+  attempts: number;
+  resolved: string[];
+  residual: string[];
+  cost_usd: number | null;
+}
+export function autofixOf(piece: { assets?: unknown } | null | undefined): AutofixSummary | null {
+  const af = (piece?.assets as PieceAssets | null | undefined)?.autofix;
+  if (!af || af.enabled !== true || af.ran !== true) return null;
+  if (af.outcome !== 'clean' && af.outcome !== 'residual') return null;
+  const lista = (x: unknown) => (Array.isArray(x) ? x.filter((c): c is string => typeof c === 'string') : []);
+  return {
+    outcome: af.outcome,
+    attempts: Number.isFinite(af.attempts) ? Number(af.attempts) : 0,
+    resolved: lista(af.resolved),
+    residual: lista(af.residual),
+    cost_usd: typeof af.cost_usd === 'number' ? af.cost_usd : null,
+  };
+}
+/** La señal del eje `autofix_residuo`, con el mismo criterio que la tarjeta: un único lector. */
+export function autofixResiduo(piece: { assets?: unknown } | null | undefined): boolean {
+  return autofixOf(piece)?.outcome === 'residual';
+}
+
 export function tieneImagen(piece: { assets?: unknown } | null | undefined): boolean {
   const url = (piece?.assets as { image?: { url?: unknown } } | null | undefined)?.image?.url;
   return typeof url === 'string' && !!url;
@@ -948,11 +988,14 @@ export const CALIBRATION_STATUSES = ['awaiting_approval', 'deferred', 'challenge
  * eje, que es lo que las dos mitades comparten.
  */
 export type PendingState =
-  'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida' | 'sin_imagen';
+  'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida' | 'sin_imagen'
+  // CARRIL AUTO-FIX (2026-10-01) — el carril corrió y no pudo resolverlo todo: la pieza nació
+  // `challenged` con el residuo escrito. Es trabajo de Arreglos (decisión de Sam), no de Calibración.
+  | 'autofix_residuo';
 
 /** Todos los ejes, para que un selector salga de acá y no de una lista escrita a mano. */
 export const PENDING_STATES: readonly PendingState[] =
-  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen'];
+  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo'];
 
 /**
  * UNA PIEZA, UNA PESTAÑA (Sam, 2026-09-30: «las mismas piezas —awaiting_approval, arreglos, retadas,
@@ -983,12 +1026,17 @@ export function pendingStateOf(
   // OBLIGATORIO por lo mismo que `retada`. Se lee con `tieneImagen()`, el mismo criterio que
   // `has_image`: dos criterios distintos para «tiene imagen» acabarían discrepando en una tarjeta.
   conImagen: boolean,
+  // CARRIL AUTO-FIX — OBLIGATORIO por lo mismo que los dos anteriores. Se lee con `autofixResiduo()`.
+  // Sólo distingue entre las `challenged` sin juicio de Sam y CON imagen: sin imagen manda la imagen
+  // (`sin_imagen`, el arreglo que hay que hacer primero), y con juicio de Sam manda su `fixable`.
+  autofixResiduoSenal: boolean,
 ): PendingState {
   const s = String(status ?? '').trim().toLowerCase();
   if (s === 'deferred') return 'aplazada';
   if (s === 'challenged') {
     if (yaCalibrada) return 'por_arreglar';
-    return conImagen ? 'retenida' : 'sin_imagen';
+    if (!conImagen) return 'sin_imagen';
+    return autofixResiduoSenal ? 'autofix_residuo' : 'retenida';
   }
   // VIVA Y CON UN RETO EN SU HISTORIA = volvió del arreglo. Va ANTES del corpus porque es más
   // específico: toda pieza retada por Sam tiene fila en `approval_calibration` —el fixable es un

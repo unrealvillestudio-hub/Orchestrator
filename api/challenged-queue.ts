@@ -25,7 +25,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   applyCors, extractToken,
   parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
-  fetchLivePieces, fetchEvaluatedIds, pendingStateOf, tieneImagen,
+  fetchLivePieces, fetchEvaluatedIds, pendingStateOf, tieneImagen, autofixResiduo,
   type PieceSearch,
 } from './_calibrationShared.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
@@ -109,7 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       retenidas
         // `retenida` o `sin_imagen`: con arbitraje abierto decide el juez primero, falte o no la imagen.
         .filter((p) => {
-          const e = pendingStateOf(p.status, evaluadas.ids.has(p.id), Boolean(p.challenged_at), tieneImagen(p));
+          const e = pendingStateOf(p.status, evaluadas.ids.has(p.id), Boolean(p.challenged_at), tieneImagen(p), autofixResiduo(p));
           return e === 'retenida' || e === 'sin_imagen';
         })
         .map((p) => p.id),

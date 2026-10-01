@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 import {
   ChevronLeft, ChevronRight, ShieldCheck, ShieldAlert, ShieldQuestion, Copy, Check, Clock, GitBranch, History,
   CalendarCheck, CalendarClock, CalendarOff, CalendarX, Search, X, AlertTriangle, Wrench, HelpCircle,
-  ChevronDown, SlidersHorizontal,
+  ChevronDown, SlidersHorizontal, Wand2,
 } from 'lucide-react';
 import { cn } from '../../ui/components';
 import type {
-  FlowGeneration, PieceMetrics, CountAgainstLimit, SignatureCheck, PendingState, FixFlow,
+  FlowGeneration, PieceMetrics, CountAgainstLimit, SignatureCheck, PendingState, FixFlow, AutofixSummary,
 } from '../../services/calibrationInbox';
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -874,6 +874,10 @@ export const PENDING_STATE_UI: Record<PendingState, { color: string; label: stri
   // dos azules siguen siendo los dos `challenged` y este no es uno de ellos — ya volvió.
   corregida:  { color: '#34D399', label: 'corregida',
                 hint: 'Se marcó como fixable, se arregló y volvió. Espera el visto bueno: la propuesta original está debajo, para comparar contra ella.' },
+  // CARRIL AUTO-FIX (2026-10-01) — el carril corrigió lo que pudo y esto quedó. Rosa: no es un
+  // fixable tuyo (celeste) ni un desacuerdo del juez (violeta); es lo que el sistema no supo arreglar.
+  autofix_residuo: { color: '#F472B6', label: 'auto-fix: residuo',
+                hint: 'El carril auto-fix la corrigió antes de que naciera y no pudo con todo. Lo que quedó está en la tarjeta. Si la regla pedía material que el brief no traía, no se inventó.' },
 };
 
 /** La píldora que nombra el estado. El color lo pone la misma tabla que pinta el borde. */
@@ -962,6 +966,37 @@ export function DeferralNotice({ state, until, reason }: {
 //
 // LO QUE NO HACE: no juzga. No dice si la corrección cumple la propuesta —eso lo decide Sam, que
 // es de quien es la propuesta—. Pone las dos cosas juntas y se aparta.
+// ── CARRIL AUTO-FIX, DICHO EN LA TARJETA (2026-10-01) ─────────────────────────────
+//
+// Una pieza que el carril tocó no puede llegar igual que una que nadie tocó: Sam aprueba lo que ve,
+// y tiene que saber que lo que ve ya pasó por una corrección automática y de qué. Dos casos:
+//   · limpia — «Auto-fix corrigió X, Y». Informativo, va con el veredicto limpio.
+//   · residuo — «no pudo resolver Z», con el motivo escrito. Es el trabajo de Arreglos.
+// Sin carril (`autofix: null`) no se pinta nada: un recuadro vacío en cien tarjetas enseña a saltarse
+// el recuadro lleno.
+export function AutofixNotice({ autofix, reason }: { autofix: AutofixSummary | null | undefined; reason?: string | null }) {
+  if (!autofix) return null;
+  const residuo = autofix.outcome === 'residual';
+  const intentos = `${autofix.attempts} intento${autofix.attempts === 1 ? '' : 's'}`;
+  return (
+    <div
+      className={cn(DATE_ROW, 'border-dashed',
+        residuo ? 'bg-pink-500/[0.07] border-pink-400/40 text-pink-100/90' : 'bg-emerald-500/[0.06] border-emerald-400/30 text-emerald-100/90')}
+      title="assets.autofix — lo que el carril auto-fix corrigió antes de que la pieza naciera. El detalle de cada intento está en intel.autofix_attempts."
+    >
+      <Wand2 size={13} className="shrink-0 mt-0.5" />
+      <span>
+        <span className={residuo ? 'text-pink-300/70' : 'text-emerald-300/70'}>Auto-fix ({intentos}):</span>{' '}
+        {autofix.resolved.length > 0 && <span className="font-sans">corrigió {autofix.resolved.join(', ')}</span>}
+        {autofix.resolved.length > 0 && residuo && <span>; </span>}
+        {residuo && <span className="font-semibold font-sans">no pudo resolver {autofix.residual.join(', ')}</span>}
+        {residuo && reason && <span className="text-pink-300/70"> · {reason}</span>}
+        {autofix.cost_usd != null && <span className={residuo ? 'text-pink-300/50' : 'text-emerald-300/50'}> · ${autofix.cost_usd.toFixed(3)}</span>}
+      </span>
+    </div>
+  );
+}
+
 export function FixNotice({ state, fix }: { state: PendingState; fix: FixFlow | null | undefined }) {
   // Las dos mitades del circuito, y sólo ellas. En una pieza sin reto este aviso no tiene nada que
   // decir, y un recuadro vacío en cien tarjetas enseña a saltarse el recuadro lleno.
