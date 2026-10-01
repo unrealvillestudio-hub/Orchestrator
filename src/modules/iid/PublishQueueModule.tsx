@@ -352,7 +352,8 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
         {/* Lectura en voz alta. Va debajo de la vista previa porque se lee lo mismo que se
             ve, y su propio bloque de texto es donde ocurre la selección: dentro del
             `<iframe sandbox="">` de arriba, `getSelection()` no alcanza. */}
-        {readable && <div className="hidden md:block"><SpeechReader piece={readable} suggestedLang={piece.reading_language} /></div>}
+        {/* Lectura en voz alta: visible en el teléfono también (Sam, 2026-10-01). */}
+        {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
 
         {/* ESTADO DEL CANAL, y sólo eso.
             U-5 — la coletilla que remitía a la otra bandeja para aprobar se retiró: estaba
@@ -423,7 +424,6 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
                 Abrir la pieza en otra pestaña
               </a>
             )}
-            {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
           </MobileDetails>
         </div>
       </div>

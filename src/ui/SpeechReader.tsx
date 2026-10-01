@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Play, Pause, Square, Volume2 } from 'lucide-react';
+import { Play, Pause, Square, Volume2, Settings2 } from 'lucide-react';
 import { cn } from './components';
 import { splitForSpeech } from './speechChunks';
 
@@ -13,7 +13,12 @@ import { splitForSpeech } from './speechChunks';
  * HTML para poder usarlo, y la que mañana lo traiga de una cuarta forma obligaría a editar
  * este archivo.
  *
- * LA SELECCIÓN SE HACE SOBRE EL TEXTO QUE ESTE COMPONENTE RENDERIZA, no dentro de la vista
+ * 2026-10-01 — SIN BLOQUE DE TEXTO NI LECTURA POR SELECCIÓN, y con VELOCIDAD (decisión de Sam: «el
+ * texto que usa el tts no me hace falta verlo mientras lo lea y no uso texto seleccionado, escucho
+ * toda la pieza siempre»; pidió 1,5× y 2×). El lector queda en una fila de controles que cabe fuera
+ * de «Detalles»; idioma y voz se pliegan tras un botón. Lo de abajo es el diseño anterior.
+ *
+ * ⛔ NO OPERATIVO — LA SELECCIÓN SE HACE SOBRE EL TEXTO QUE ESTE COMPONENTE RENDERIZA, no dentro de la vista
  * previa de la superficie que lo monta. Motivo medido: las vistas previas de este repo
  * embeben el artefacto en un `<iframe srcdoc sandbox="">`
  * (`ApprovalCalibrationModule.tsx`, `PublishQueueModule.tsx`), y con `sandbox` vacío el
@@ -149,18 +154,19 @@ function useSystemVoices(): SpeechSynthesisVoice[] {
 // ── Selección ────────────────────────────────────────────────────────────────────
 
 /**
- * Texto seleccionado SÓLO si toda la selección cae dentro de `el`. Una selección que
- * empieza fuera del bloque del lector no es una petición de leer un fragmento de la pieza:
- * es una selección de otra cosa que quedó viva en la página.
+ * Velocidades de lectura. 1× es la del sistema; 1,5× y 2× las pidió Sam el 2026-10-01. La elegida
+ * se recuerda en el navegador (sólo comodidad: si el almacenamiento falla, vuelve a 1×).
  */
-function selectionWithin(el: HTMLElement | null): string {
-  if (!el || typeof window === 'undefined') return '';
-  const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return '';
-  for (let i = 0; i < sel.rangeCount; i++) {
-    if (!el.contains(sel.getRangeAt(i).commonAncestorContainer)) return '';
-  }
-  return sel.toString().trim();
+export const SPEECH_RATES = [1, 1.5, 2] as const;
+const RATE_KEY = 'speechReader.rate';
+function loadRate(): number {
+  try {
+    const v = Number(window.localStorage.getItem(RATE_KEY));
+    return (SPEECH_RATES as readonly number[]).includes(v) ? v : 1;
+  } catch { return 1; }
+}
+function saveRate(v: number) {
+  try { window.localStorage.setItem(RATE_KEY, String(v)); } catch { /* sin almacenamiento: no pasa nada */ }
 }
 
 // ── Componente ───────────────────────────────────────────────────────────────────
@@ -175,7 +181,11 @@ export function SpeechReader({ piece, suggestedLang, className }: SpeechReaderPr
   /** Error de la síntesis, en palabras del navegador. Antes se tragaba y el botón parecía no hacer nada. */
   const [speechError, setSpeechError] = useState<string | null>(null);
 
-  const textRef = useRef<HTMLDivElement | null>(null);
+  const [rate, setRateState] = useState<number>(() => (typeof window === 'undefined' ? 1 : loadRate()));
+  /** La velocidad la lee cada TRAMO al empezar: cambiarla durante la lectura afecta al siguiente. */
+  const rateRef = useRef(rate);
+  const setRate = (v: number) => { rateRef.current = v; setRateState(v); saveRate(v); };
+  const [ajustes, setAjustes] = useState(false);
   /** Si la voz que suena la inició ESTE lector. Sin esta marca, una tarjeta hermana que
    *  termina de cargar cortaría la lectura de la tarjeta que el operador está oyendo. */
   const owns = useRef(false);
@@ -291,8 +301,7 @@ export function SpeechReader({ piece, suggestedLang, className }: SpeechReaderPr
     run.current += 1;
     const id = run.current;
     synth.cancel();
-    const text = selectionWithin(textRef.current) || fullText;
-    const chunks = splitForSpeech(text);
+    const chunks = splitForSpeech(fullText);
     if (!chunks.length) return;
 
     const voice = voices.find((v) => v.voiceURI === voiceUri);
@@ -302,6 +311,7 @@ export function SpeechReader({ piece, suggestedLang, className }: SpeechReaderPr
       if (i >= chunks.length) { settle(); return; }
       const utterance = new window.SpeechSynthesisUtterance(chunks[i]);
       if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
+      utterance.rate = rateRef.current;
       utterance.onend = () => next(i + 1);
       utterance.onerror = (e: SpeechSynthesisErrorEvent) => {
         if (run.current !== id) return;
@@ -348,57 +358,73 @@ export function SpeechReader({ piece, suggestedLang, className }: SpeechReaderPr
   const nothingToRead = fullText.length === 0;
   const idle = playback === 'idle';
 
+  const boton = 'inline-flex items-center justify-center gap-1.5 text-[12px] px-3 py-2 md:px-2 md:py-1 rounded-lg border transition-colors';
   return (
-    <div className={cn('rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 space-y-2.5', className)}>
-      {/* Controles + selectores. Las etiquetas dicen "de lectura" a propósito: en estas
-          tarjetas ya se muestra la voz DE MARCA de la pieza, y son dos cosas distintas. */}
+    <div className={cn('rounded-xl border border-zinc-800 bg-zinc-900/40 p-2.5 space-y-2', className)}>
       <div className="flex items-center gap-2 flex-wrap">
-        <Volume2 size={13} className="text-zinc-600 shrink-0" />
+        <Volume2 size={14} className="text-zinc-600 shrink-0" />
 
         <button
           type="button"
           onClick={speak}
           disabled={nothingToRead}
-          title="Lee la selección si la hay; si no, el título y después el cuerpo"
-          className={cn(
-            'inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-lg border transition-colors',
-            nothingToRead
-              ? 'border-zinc-800 text-zinc-700 cursor-not-allowed'
-              : 'border-accent/40 bg-accent/10 text-accent hover:bg-accent/20',
-          )}
+          title="Lee la pieza entera: el título y después el cuerpo"
+          className={cn(boton, nothingToRead
+            ? 'border-zinc-800 text-zinc-700 cursor-not-allowed'
+            : 'border-accent/40 bg-accent/10 text-accent hover:bg-accent/20')}
         >
-          <Play size={11} /> Reproducir
+          <Play size={12} /> Reproducir
         </button>
 
         <button
           type="button"
           onClick={togglePause}
           disabled={idle}
-          className={cn(
-            'inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-lg border transition-colors',
-            idle
-              ? 'border-zinc-800 text-zinc-700 cursor-not-allowed'
-              : 'border-zinc-700 text-zinc-300 hover:border-zinc-600',
-          )}
+          aria-label={playback === 'paused' ? 'Reanudar' : 'Pausar'}
+          className={cn(boton, idle ? 'border-zinc-800 text-zinc-700 cursor-not-allowed' : 'border-zinc-700 text-zinc-300 hover:border-zinc-600')}
         >
-          <Pause size={11} /> {playback === 'paused' ? 'Reanudar' : 'Pausar'}
+          <Pause size={12} /> <span className="hidden sm:inline">{playback === 'paused' ? 'Reanudar' : 'Pausar'}</span>
         </button>
 
         <button
           type="button"
           onClick={stop}
           disabled={idle}
-          className={cn(
-            'inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-lg border transition-colors',
-            idle
-              ? 'border-zinc-800 text-zinc-700 cursor-not-allowed'
-              : 'border-zinc-700 text-zinc-300 hover:border-zinc-600',
-          )}
+          aria-label="Detener"
+          className={cn(boton, idle ? 'border-zinc-800 text-zinc-700 cursor-not-allowed' : 'border-zinc-700 text-zinc-300 hover:border-zinc-600')}
         >
-          <Square size={11} /> Detener
+          <Square size={12} /> <span className="hidden sm:inline">Detener</span>
         </button>
 
-        <div className="flex items-center gap-2 flex-wrap ml-auto">
+        {/* Velocidad: se aplica desde el próximo tramo si ya está sonando. */}
+        <div className="flex items-center rounded-lg border border-zinc-800 overflow-hidden" role="group" aria-label="Velocidad de lectura">
+          {SPEECH_RATES.map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => setRate(r)}
+              aria-pressed={rate === r}
+              className={cn('px-2.5 py-2 md:py-1 text-[12px] font-mono transition-colors',
+                rate === r ? 'bg-accent/20 text-accent' : 'text-zinc-500 hover:text-zinc-300')}
+            >
+              {String(r).replace('.', ',')}×
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setAjustes((v) => !v)}
+          aria-expanded={ajustes}
+          title="Idioma y voz de lectura"
+          className={cn(boton, 'ml-auto border-zinc-800 text-zinc-500 hover:text-zinc-300')}
+        >
+          <Settings2 size={12} />
+        </button>
+      </div>
+
+      {ajustes && (
+        <div className="flex items-center gap-2 flex-wrap">
           <label className="flex items-center gap-1.5 text-[10px] font-mono text-zinc-600">
             Idioma de lectura
             <select
@@ -427,28 +453,12 @@ export function SpeechReader({ piece, suggestedLang, className }: SpeechReaderPr
             </select>
           </label>
         </div>
-      </div>
+      )}
 
-      {/* El texto que se lee, visible y seleccionable. Es el mismo bloque sobre el que
-          `window.getSelection()` opera: lo que se ve es lo que se puede oír en parte. */}
-      <div
-        ref={textRef}
-        className="max-h-44 overflow-y-auto rounded-lg bg-black/30 border border-zinc-800/70 px-3 py-2 text-[12px] leading-relaxed text-zinc-300 select-text"
-        style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-      >
-        {nothingToRead
-          ? <span className="text-zinc-600 italic">Esta pieza no trae texto que leer.</span>
-          : fullText}
-      </div>
-
+      {nothingToRead && <p className="text-[11px] text-zinc-600 italic">Esta pieza no trae texto que leer.</p>}
       {speechError && (
         <p className="text-[10px] font-mono text-amber-500">{speechError}</p>
       )}
-
-      <p className="text-[10px] font-mono text-zinc-600">
-        Sin selección se lee el título y después el cuerpo. Con una selección dentro de este
-        bloque se lee sólo esa selección.
-      </p>
     </div>
   );
 }

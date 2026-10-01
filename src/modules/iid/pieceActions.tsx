@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle2, XCircle, Archive, Wrench, ImagePlay, PenLine } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import {
-  saveVerdict, discardPiece, recomposeImage, CalibrationError,
+  saveVerdict, discardPiece, recomposeImage, renderArtifact, CalibrationError,
   REJECT_REASONS, buildCriterion,
   type PieceActionKey, type PieceActions, type SlotRelease, type Verdict,
 } from '../../services/calibrationInbox';
@@ -422,6 +422,16 @@ export function PieceActionsBar({
   const [slotNote, setSlotNote] = useState<null | { tone: 'ok' | 'alert'; text: string }>(null);
   const [doneNote, setDoneNote] = useState<null | { tone: 'ok' | 'sealed'; text: string }>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  /**
+   * EL TEXTO VIGENTE DE LA PIEZA, del lado de la tarjeta (2026-10-01). Hasta hoy el panel se
+   * rellenaba siempre con `piece.body`, el texto con que la bandeja CARGÓ la tarjeta: tras guardar,
+   * reabrir el editor mostraba el texto viejo y la vista previa no se rehacía. La edición SÍ se
+   * guardaba (medido: `1f81a727` y `3c1fa264`), pero en pantalla «volvía como estaba». Sam lo
+   * reportó dos veces el mismo día.
+   */
+  const [vigente, setVigente] = useState<{ title: string | null; body: string | null }>({ title: piece.title, body: piece.body });
+  const [editTitle, setEditTitle] = useState('');
+  const [editNote, setEditNote] = useState<null | { avisos: string[]; refrescado: boolean }>(null);
   const [regenNote, setRegenNote] = useState<null | { compuesta: boolean; refrescado: boolean; posts: number }>(null);
   // BRIEF-IMG-01 fase 4 — por defecto se CORRIGE sobre la imagen actual: da continuidad a lo pedido.
   const [regenMode, setRegenMode] = useState<'edit_from_current' | 'regenerate_full'>('edit_from_current');
@@ -444,7 +454,9 @@ export function PieceActionsBar({
     setPanel(p); setError(null); setWarnings([]);
     // El panel de edición arranca con el texto ACTUAL: editar es corregir lo que hay, no
     // escribir de cero sobre un campo que no se ve.
-    setNote(p === 'edit' ? (piece.body ?? '') : '');
+    setNote(p === 'edit' ? (vigente.body ?? '') : '');
+    setEditTitle(p === 'edit' ? (vigente.title ?? '') : '');
+    setEditNote(null);
   };
 
   /** Tras una acción que sella: se dice qué pasó con la franja y se saca la pieza. */
@@ -523,20 +535,40 @@ export function PieceActionsBar({
    * quiere publicar en su propia marca está roto.
    */
   const submitEdit = async (acknowledge: boolean) => {
+    // Título y cuerpo, cada uno sólo si cambió: guardar sin tocar no es una edición (la EF lo poda).
+    const cambios: Array<{ field: 'title' | 'body'; after: string }> = [];
+    if (editTitle !== (vigente.title ?? '')) cambios.push({ field: 'title', after: editTitle });
+    if (note !== (vigente.body ?? '')) cambios.push({ field: 'body', after: note });
+    if (!cambios.length) { setError({ message: 'No hay cambios que guardar.', detail: null }); return; }
+
     setBusy('edit_text'); setError(null);
     try {
-      const r = await savePieceEdit(token, {
-        piece_id: piece.piece_id,
-        field: 'body',
-        after_text: note,
-        edit_reason: reason || null,
-        acknowledge_warnings: acknowledge,
-      }) as { guard?: { warnings?: Array<{ message?: string } | string> } };
-      const avisos = (r?.guard?.warnings ?? [])
-        .map((w) => (typeof w === 'string' ? w : w?.message ?? ''))
-        .filter(Boolean);
-      if (avisos.length && !acknowledge) { setWarnings(avisos); setBusy(null); return; }
-      onEdited?.(note);
+      const avisos: string[] = [];
+      for (const c of cambios) {
+        const r = await savePieceEdit(token, {
+          piece_id: piece.piece_id, field: c.field, after_text: c.after,
+          edit_reason: reason || null, acknowledge_warnings: acknowledge,
+        }) as { guard?: { hits?: Array<{ code?: string; fragment?: string; field?: string }>; warnings?: Array<{ message?: string } | string> } };
+        // La EF devuelve `guard.hits`; `warnings` era el nombre que esta pantalla esperaba y nunca
+        // llegó, así que los avisos de la guarda no se veían. Se leen los dos.
+        for (const h of r?.guard?.hits ?? []) avisos.push(`${h.code ?? 'regla'}: «${h.fragment ?? ''}» en ${h.field ?? c.field}`);
+        for (const w of r?.guard?.warnings ?? []) avisos.push(typeof w === 'string' ? w : w?.message ?? '');
+      }
+      const nuevo = {
+        title: cambios.find((c) => c.field === 'title')?.after ?? vigente.title,
+        body: cambios.find((c) => c.field === 'body')?.after ?? vigente.body,
+      };
+      setVigente(nuevo);
+      if (nuevo.body !== vigente.body) onEdited?.(nuevo.body ?? '');
+      // LA VISTA PREVIA SE REHACE con lo guardado: el artefacto se reconstruye desde la pieza.
+      let refrescado = false;
+      try {
+        const art = await renderArtifact(token, piece.piece_id);
+        onRegenerated?.({ html: art.html, artifact_url: art.artifact_url, composed: true, refreshed: true, posts: 0 });
+        refrescado = true;
+      } catch { /* se dice abajo: guardado, pero la vista puede ser la anterior */ }
+      // La guarda AVISA Y NO BLOQUEA, y la EF ya guardó cuando avisa: se informa, no se pide insistir.
+      setEditNote({ avisos: avisos.filter(Boolean), refrescado });
       setWarnings([]); setPanel(null); setBusy(null);
     } catch (err) {
       setError(cardError(err, 'No se pudo guardar el texto.'));
@@ -637,6 +669,19 @@ export function PieceActionsBar({
         </div>
       )}
 
+      {editNote && (
+        <div className="text-[11px] font-mono leading-snug text-emerald-300/85 bg-emerald-500/[0.06] border border-emerald-500/25 rounded-xl px-3 py-2 space-y-0.5">
+          <p>Texto guardado.{editNote.refrescado ? ' La vista previa ya muestra la versión nueva.' : ''}</p>
+          {!editNote.refrescado && <p className="text-amber-300/80">Se guardó, pero la vista previa no se pudo rehacer: puede seguir mostrando la anterior.</p>}
+          {editNote.avisos.length > 0 && (
+            <div className="text-amber-200/90">
+              <p>La guarda de la marca avisa (se guardó igual):</p>
+              <ul className="list-disc pl-4">{editNote.avisos.map((w, i) => <li key={i}>{w}</li>)}</ul>
+            </div>
+          )}
+        </div>
+      )}
+
       {error && (
         <div className="text-xs text-rose-400 font-mono leading-snug space-y-1">
           <p>{error.message}</p>
@@ -702,6 +747,18 @@ export function PieceActionsBar({
               </div>
             )}
 
+            {/* El TÍTULO también se edita (2026-10-01: «ni body, ni hashtags, ni title»). Los
+                hashtags viven dentro del cuerpo, así que se corrigen en el cuadro de abajo. */}
+            {panel === 'edit' && (
+              <>
+                <label className="block text-[11px] font-medium text-zinc-300">Título</label>
+                <input
+                  value={editTitle}
+                  onChange={(e) => { setEditTitle(e.target.value); setError(null); }}
+                  className="w-full bg-[#050508] border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-accent/50"
+                />
+              </>
+            )}
             {copy?.label && (
               <label className="block text-[11px] font-medium text-zinc-300">{copy.label}</label>
             )}
