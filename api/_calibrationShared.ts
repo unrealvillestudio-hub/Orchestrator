@@ -33,6 +33,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { PieceMetrics } from './_pieceMetrics.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
+// Las láminas en el orden en que se publican: el mismo criterio que la publicación manual y el drenaje.
+import { manualImagesOf } from './_manualShared.js';
 
 export const BUCKET = 'unrlvl-media';
 // Calibración = gate admin (igual que las aprobaciones legacy).
@@ -132,6 +134,8 @@ export function publicArtifactUrl(brandId: string, pieceId: string): string {
 export interface PieceAssets {
   copy?: { aife_filtered?: string; raw?: string; title?: string };
   image?: { url?: string };
+  // Las láminas de un carrusel, cada una con su imagen (`n` = posición; la 1 es la portada).
+  carousel?: { slides?: Array<{ n?: number | null; url?: string | null }> | null } | null;
   // Texto adaptado POR CANAL (content-run-stage). Es el que ese canal recibe de verdad,
   // y por eso es el que la cabecera mide contra el tope del canal (ver _pieceMetrics.ts).
   // El artefacto sigue mostrando el maestro: son dos cosas distintas y se declaran.
@@ -710,9 +714,19 @@ export function buildHtml(piece: ContentPiece): string {
   const platform = piece.platform ?? '';
   const format = piece.format ?? '';
 
-  const imageBlock = imageUrl
-    ? `<div class="media"><img src="${esc(imageUrl)}" alt="preview" /></div>`
-    : `<div class="media media--none">Sin imagen (canal solo-texto)</div>`;
+  // CARRUSEL (2026-10-01): hasta hoy el artefacto pintaba sólo `assets.image.url`, la portada, y Sam
+  // aprobó carruseles sin ver sus láminas. Ahora se ven TODAS, en el orden en que se publican
+  // (`manualImagesOf`, el mismo criterio que el drenaje), en una tira que se desliza. Sin JS: el
+  // artefacto se pinta en un <iframe sandbox="">.
+  const laminas = manualImagesOf({ id: piece.id, brand_id: piece.brand_id, format: piece.format, assets });
+  const imageBlock = laminas.length >= 2
+    ? `<div class="media carousel" aria-label="Carrusel de ${laminas.length} láminas">
+      <div class="strip">${laminas.map((u, i) => `<figure class="slide"><img src="${esc(u)}" alt="lámina ${i + 1}" /><figcaption>${i + 1} / ${laminas.length}</figcaption></figure>`).join('')}</div>
+      <div class="carousel-note">Carrusel · ${laminas.length} láminas — desliza para verlas todas</div>
+    </div>`
+    : imageUrl
+      ? `<div class="media"><img src="${esc(imageUrl)}" alt="preview" /></div>`
+      : `<div class="media media--none">Sin imagen (canal solo-texto)</div>`;
 
   return `<!doctype html>
 <html lang="es">
@@ -733,6 +747,13 @@ export function buildHtml(piece: ContentPiece): string {
   .head .brand { color: #FFAB00; font-weight: 700; }
   .head .sep { color: #3f3f46; }
   .media img { display: block; width: 100%; height: auto; }
+  .carousel .strip { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 6px; background: #08080c; }
+  .carousel .slide { position: relative; flex: 0 0 92%; margin: 0; scroll-snap-align: center; }
+  .carousel .slide:only-child { flex-basis: 100%; }
+  .carousel figcaption { position: absolute; top: 8px; right: 8px; padding: 2px 8px; border-radius: 999px;
+    background: rgba(0,0,0,.65); color: #fafafa; font: 600 11px ui-monospace, monospace; }
+  .carousel-note { padding: 6px 12px; font: 11px ui-monospace, monospace; color: #a1a1aa; background: #08080c;
+    border-top: 1px solid #1c1c22; }
   .media--none { padding: 40px 16px; text-align: center; color: #52525b; font-size: 12px;
     font-family: ui-monospace, monospace; background: #08080c; }
   .body { padding: 18px 18px 22px; }
