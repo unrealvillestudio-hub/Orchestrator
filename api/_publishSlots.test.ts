@@ -233,8 +233,10 @@ describe('releaseSlotsForPiece — devolver la franja al pozo', () => {
       const { url, init } = d.llamadas[0];
 
       expect(url).toContain(`piece_id=eq.${PIEZA}`);
-      // El filtro por `reserved` es lo que impide pisar una franja ya publicada.
-      expect(url).toContain('status=eq.reserved');
+      // El filtro por estado es lo que impide pisar una franja ya publicada: libera `reserved` y
+      // `manual_pending` (las dos tienen pieza y no salieron), nunca `published`.
+      expect(url).toContain('status=in.(reserved,manual_pending)');
+      expect(url).not.toContain('published');
       expect(init.method).toBe('PATCH');
 
       // `Accept-Profile` gobierna la lectura; una ESCRITURA contra `intel` necesita además

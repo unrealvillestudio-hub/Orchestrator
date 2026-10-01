@@ -44,13 +44,16 @@ type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" |
  * mismos botones, mismo contrato — ver `CalibrationScope`.
  */
 const FIX_SCOPE: CalibrationScope = {
-  states: ['por_arreglar', 'corregida'],
+  // 2026-10-01 — `sin_imagen` entra acá por decisión de Sam: no espera un veredicto, espera
+  // «Generar imagen», que es un arreglo. Al tener imagen pasa a Calibración como `retenida`.
+  states: ['por_arreglar', 'corregida', 'sin_imagen'],
   title: 'Arreglos',
   subtitle: (
     <>
       Lo que marcaste como fixable y lo que ya volvió corregido. Cada tarjeta lleva{' '}
       <span className="text-zinc-400">tu propuesta original</span> al lado, que es el criterio
-      contra el que se aprueba — y por qué versión va.
+      contra el que se aprueba — y por qué versión va. También las que el carril dejó{' '}
+      <span className="text-zinc-400">sin imagen</span>: les falta generarla.
     </>
   ),
   empty: 'Nada en el circuito de arreglos: ni pendiente de arreglar, ni esperando tu visto bueno.',
@@ -81,7 +84,9 @@ const NAV_ITEMS = [
  * pulgar; las herramientas de flujo quedan en «Más». En escritorio no cambia nada: la barra de
  * arriba sigue siendo la misma.
  */
-const BANDEJAS: View[] = ['calibration', 'fixes', 'challenged', 'publish', 'history'];
+// 2026-10-01 — Retenidas pasa a «Más» (decisión de Sam): un mes sin casos. Calibración avisa con
+// `OpenChallengesNotice` cuando hay uno. En escritorio no cambia nada.
+const BANDEJAS: View[] = ['calibration', 'fixes', 'publish', 'history'];
 const MOBILE_TABS = NAV_ITEMS.filter((i) => BANDEJAS.includes(i.id));
 const MOBILE_MORE = NAV_ITEMS.filter((i) => !BANDEJAS.includes(i.id));
 
@@ -265,7 +270,7 @@ export default function App() {
         aria-label="Bandejas"
         className="md:hidden fixed bottom-0 left-0 right-0 min-h-7 border-t border-zinc-800 bg-[#050508]/95 backdrop-blur-xl z-50 pie-sobre-la-barra"
       >
-        <div className="grid grid-cols-6 h-14">
+        <div className="grid grid-cols-5 h-14">
           {MOBILE_TABS.map((item) => (
             <button
               key={item.id}

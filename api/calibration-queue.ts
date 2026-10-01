@@ -18,7 +18,7 @@
  * GET /api/calibration-queue?limit=50&offset=0&brand=&order=&verdict=&generation=
  *   Auth: admin JWT vía `Authorization: Bearer <session_token>` (NO en query — privacidad).
  *
- *   order      recent (default) | oldest | brand | verdict
+ *   order      slot (default) | recent | oldest | brand | verdict
  *   verdict    all (default) | PASS | REJECT     — primera opinión del watcher
  *   generation all (default) | current           — sólo piezas posteriores al último corte
  *
@@ -38,7 +38,7 @@ import { CALIBRATION_TAB_STATES,
   fetchWatcherTraces, fetchAttemptsByQueue,
   latestPerQueue, generationOf, watcherOf, toContext, PIECES_CAP,
   parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
-  pendingStateOf, PENDING_STATES, type PendingState,
+  pendingStateOf, PENDING_STATES, tieneImagen, type PendingState,
   type ContentPiece, type PieceContext, type PipelineCutoff, type GenerationInfo,
   type PieceSearch,
 } from './_calibrationShared.js';
@@ -90,7 +90,10 @@ type CalibrationInboxPiece = PieceContext & {
 
 // Ejes de orden y filtro. Son del SISTEMA (una pieza tiene fecha, marca y veredicto en
 // cualquier marca), no de ningún caso particular.
-const ORDERS = ['recent', 'oldest', 'brand', 'verdict'] as const;
+// `slot` (2026-10-01, decisión de Sam): primero la pieza cuyo canal tiene la franja libre más
+// próxima. Medido ese día: el cuello de botella es la capacidad de publicar, no la aprobación, así
+// que lo que conviene juzgar antes es lo que ocuparía la próxima franja. Es el orden por defecto.
+const ORDERS = ['slot', 'recent', 'oldest', 'brand', 'verdict'] as const;
 type Order = (typeof ORDERS)[number];
 
 const VERDICT_FILTERS = ['all', 'PASS', 'REJECT'] as const;
@@ -171,9 +174,25 @@ function verdictRank(p: ContentPiece): number {
   return r ? VERDICT_RANK[r] : 2;
 }
 
-function sortPieces(pieces: ContentPiece[], order: Order): ContentPiece[] {
+function sortPieces(
+  pieces: ContentPiece[], order: Order,
+  /** Sólo para `slot`: el instante de la próxima franja libre del canal de cada pieza, o null. */
+  nextSlotMs: (p: ContentPiece) => number | null = () => null,
+): ContentPiece[] {
   const out = pieces.slice();
   switch (order) {
+    case 'slot':
+      // Franja más próxima primero; dentro del mismo canal, la más ANTIGUA primero —el mismo orden
+      // en que el reservador reparte franjas—. Sin franja (canal lleno o sin política) al final.
+      return out.sort((a, b) => {
+        const fa = nextSlotMs(a), fb = nextSlotMs(b);
+        if (fa !== fb) {
+          if (fa === null) return 1;
+          if (fb === null) return -1;
+          return fa - fb;
+        }
+        return ms(a.created_at) - ms(b.created_at);
+      });
     case 'oldest':
       return out.sort((a, b) => ms(a.created_at) - ms(b.created_at));
     case 'brand':
@@ -199,7 +218,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const limit      = intParam(req.query.limit, 20, 1, 200);
   const offset     = intParam(req.query.offset, 0, 0, 10_000_000);
   const brand      = strParam(req.query.brand);
-  const order      = enumParam<Order>(req.query.order, ORDERS, 'recent');
+  const order      = enumParam<Order>(req.query.order, ORDERS, 'slot');
   const verdict    = enumParam<VerdictFilter>(req.query.verdict, VERDICT_FILTERS, 'all');
   const generation = enumParam<GenerationFilter>(req.query.generation, GENERATION_FILTERS, 'all');
   // U-9 — el filtro y su ventana viajan separados: `urgency=urgent` dice QUÉ se pide y
@@ -252,7 +271,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       fetchNextFreeSlots(),
       // Sólo hace falta si la pestaña pide `retenida`. Una lectura fallida no esconde nada: sin
       // saber qué está en arbitraje, la retenida se muestra acá antes que en ningún sitio.
-      states.some((e) => e === 'retenida') ? fetchPendingChallenges().catch(() => null) : Promise.resolve(null),
+      states.some((e) => e === 'retenida' || e === 'sin_imagen') ? fetchPendingChallenges().catch(() => null) : Promise.resolve(null),
     ]);
     const cutoffs: PipelineCutoff[] = cutoffsRaw ?? [];
 
@@ -288,6 +307,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // RETADA = lleva la marca del reto en su historia. La marca no se borra al volver, y eso
         // es precisamente lo que permite reconocer una pieza corregida meses después.
         Boolean(p.challenged_at),
+        tieneImagen(p),
       ));
     }
 
@@ -314,7 +334,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (states.length) scoped = scoped.filter((p) => states.includes(stateById.get(p.id)!));
     if (abiertas?.length) {
       const enArbitraje = new Set(abiertas.map((a) => a.piece_id).filter(Boolean));
-      scoped = scoped.filter((p) => !(stateById.get(p.id) === 'retenida' && enArbitraje.has(p.id)));
+      // La pieza con arbitraje abierto es de Retenidas, tenga imagen o no: el juez decide primero.
+      const ejeDelJuez = (e: PendingState | undefined) => e === 'retenida' || e === 'sin_imagen';
+      scoped = scoped.filter((p) => !(ejeDelJuez(stateById.get(p.id)) && enArbitraje.has(p.id)));
     }
 
     // UNA MARCA NO DESAPARECE: DECLARA CERO. (Regla de Sam, 2026-09-18.)
@@ -345,7 +367,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Filtro de marca (si vino) y orden.
     const inBrand = brand ? scoped.filter((p) => p.brand_id === brand) : scoped;
-    const ordered = sortPieces(inBrand, order);
+    const ordered = sortPieces(inBrand, order, (p) => {
+      const f = forecastFor(p, freeSlots, brandZones);
+      const t = f ? Date.parse(f.slot_at) : NaN;
+      return Number.isFinite(t) ? t : null;
+    });
     const page    = ordered.slice(offset, offset + limit);
 
     // Procedencia: sólo para la página visible (el `in.()` de PostgREST crece con la lista).
@@ -387,7 +413,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.warn(`[calibration-queue] content_pieces hit cap ${PIECES_CAP} — la cola puede estar truncada`);
     }
 
+    // 2026-10-01 — Retenidas salió de la barra del teléfono (lleva un mes sin casos). Para que un
+    // arbitraje nuevo no pase inadvertido, Calibración lo cuenta: los abiertos cuya pieza sigue en
+    // un eje del juez, que es exactamente lo que Retenidas muestra. `null` = no se leyó.
+    const vivasDelJuez = new Set(perPiece
+      .filter((p) => { const e = stateById.get(p.id); return e === 'retenida' || e === 'sin_imagen'; })
+      .map((p) => p.id));
+    const open_challenges = abiertas === null
+      ? null
+      : abiertas.filter((a) => !!a.piece_id && vivasDelJuez.has(a.piece_id)).length;
+
     return res.status(200).json({
+      open_challenges,
       total_pending: ordered.length,
       by_brand,
       limit,

@@ -44,7 +44,8 @@ describe('Calibración sólo trae sus ejes', () => {
   it('la retenida sin arbitraje se queda en Calibración; la que tiene arbitraje abierto, no', () => {
     const q = src('calibration-queue.ts');
     expect(q).toMatch(/fetchPendingChallenges\(\)/);
-    expect(q).toMatch(/stateById\.get\(p\.id\) === 'retenida' && enArbitraje\.has\(p\.id\)/);
+    expect(q).toMatch(/ejeDelJuez\(stateById\.get\(p\.id\)\) && enArbitraje\.has\(p\.id\)/);
+    expect(q).toMatch(/e === 'retenida' \|\| e === 'sin_imagen'/);
     // Antes de contar marcas y de paginar: si no, las pastillas contarían piezas que no se ven.
     expect(q.indexOf('enArbitraje.has')).toBeLessThan(q.indexOf('const by_brand'));
   });
@@ -94,5 +95,28 @@ describe('aprobar dos veces no es posible, tampoco desde el server', () => {
     expect(src('_calibrationShared.ts')).toMatch(/verdict === 'approved'\s*\n\s*\? `&status=in\.\(\$\{CALIBRATION_STATUSES/);
     expect(CALIBRATION_STATUSES).not.toContain('scheduled');
     expect(CALIBRATION_STATUSES).not.toContain('published');
+  });
+});
+
+// ── Decisiones de Sam del 2026-10-01 sobre las bandejas ─────────────────────────────────────
+describe('las bandejas tras la decisión del 2026-10-01', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+
+  it('4 · Arreglos incluye `sin_imagen`: no espera un veredicto, espera «Generar imagen»', () => {
+    expect(app).toMatch(/states: \['por_arreglar', 'corregida', 'sin_imagen'\]/);
+  });
+
+  it('5 · Retenidas sale de la barra del teléfono, y Calibración avisa si hay arbitrajes', () => {
+    expect(app).toMatch(/const BANDEJAS: View\[\] = \['calibration', 'fixes', 'publish', 'history'\];/);
+    expect(src('calibration-queue.ts')).toMatch(/open_challenges,/);
+    const mod = readFileSync(new URL('../src/modules/iid/ApprovalCalibrationModule.tsx', import.meta.url), 'utf8');
+    expect(mod).toMatch(/<OpenChallengesNotice count=\{data\?\.open_challenges\} \/>/);
+  });
+
+  it('6 · el orden por defecto es la próxima franja del canal', () => {
+    const q = src('calibration-queue.ts');
+    expect(q).toMatch(/enumParam<Order>\(req\.query\.order, ORDERS, 'slot'\)/);
+    const mod = readFileSync(new URL('../src/modules/iid/ApprovalCalibrationModule.tsx', import.meta.url), 'utf8');
+    expect(mod).toMatch(/useState<QueueOrder>\('slot'\)/);
   });
 });

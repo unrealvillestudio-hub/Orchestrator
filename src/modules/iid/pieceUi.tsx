@@ -128,6 +128,22 @@ const DATE_ROW = 'flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] font-m
  * forma más rápida de enseñar a ignorar la alarma verdadera. Con él, las tarjetas callan y
  * la pantalla dice que las fechas FALTAN, no que estén vacías.
  */
+/**
+ * ARBITRAJES ABIERTOS (2026-10-01). Retenidas salió de la barra del teléfono porque llevaba un mes
+ * sin casos; este aviso es lo que impide que uno nuevo pase inadvertido. Sólo sale con casos.
+ */
+export function OpenChallengesNotice({ count }: { count: number | null | undefined }) {
+  if (!count) return null;
+  return (
+    <a href="?view=challenged"
+      className="flex items-center gap-2 mb-4 rounded-xl border border-violet-400/40 bg-violet-500/[0.07] px-3 py-2.5 text-[12px] text-violet-200 hover:bg-violet-500/15">
+      <AlertTriangle size={14} className="shrink-0" />
+      <span>{count} arbitraje{count === 1 ? '' : 's'} abierto{count === 1 ? '' : 's'} en Retenidas: el juez y la verificación no coinciden.</span>
+      <span className="ml-auto font-semibold">Abrir →</span>
+    </a>
+  );
+}
+
 export function SlotsNotice({ source }: { source: 'ok' | 'unavailable' | undefined }) {
   if (source !== 'unavailable') return null;
   return (
@@ -846,7 +862,11 @@ export const PENDING_STATE_UI: Record<PendingState, { color: string; label: stri
   aplazada:   { color: '#7C8CF8', label: 'aplazada',
                 hint: 'El sistema la apartó por duplicación hasta una fecha. Nadie la devuelve solo: sin verla, la fecha pasa y no ocurre nada.' },
   retenida:   { color: '#C084FC', label: 'retenida',
-                hint: 'Retenida por desacuerdo entre el juez y el arbitraje (CALIB-01). Se arbitra, no se arregla.' },
+                hint: 'Retenida con imagen y sin tu veredicto: la marcó el juez o la apartó el carril. El motivo está en la tarjeta. Con arbitraje abierto vive en Retenidas.' },
+  // 2026-10-01 — el carril no pudo generar la imagen. No es un desacuerdo del juez ni un fixable
+  // tuyo: espera «Generar imagen». Ámbar oscuro: es trabajo pendiente, no una alarma.
+  sin_imagen: { color: '#F59E0B', label: 'sin imagen',
+                hint: 'El carril no pudo generar la imagen (tope de la ventana, cuota o fallo del proveedor). El texto está completo: falta generar la imagen.' },
   por_arreglar: { color: '#38BDF8', label: 'por arreglar',
                 hint: 'Marcada como fixable: tiene defecto declarado y tiene futuro. Espera una sesión de arreglos, no un veredicto. La propuesta está en el motivo del reto.' },
   // LO-CORREGIDO-01 — la otra mitad del circuito de arreglos, y la única cuyo trabajo es COMPARAR:
@@ -945,8 +965,24 @@ export function DeferralNotice({ state, until, reason }: {
 export function FixNotice({ state, fix }: { state: PendingState; fix: FixFlow | null | undefined }) {
   // Las dos mitades del circuito, y sólo ellas. En una pieza sin reto este aviso no tiene nada que
   // decir, y un recuadro vacío en cien tarjetas enseña a saltarse el recuadro lleno.
-  if (!fix || (state !== 'corregida' && state !== 'por_arreglar')) return null;
+  if (!fix || (state !== 'corregida' && state !== 'por_arreglar' && state !== 'sin_imagen' && state !== 'retenida')) return null;
   if (!fix.challenge_reason && !fix.challenged_at) return null;
+
+  // 2026-10-01 — el motivo de una pieza retenida por el SISTEMA no es una propuesta tuya: se dice
+  // «Motivo», no «Pediste». Sin esto, las piezas sin imagen se veían sin explicación.
+  if (state === 'sin_imagen' || state === 'retenida') {
+    return (
+      <div className={cn(DATE_ROW, 'bg-amber-500/[0.07] border-amber-400/40 text-amber-100/90 border-dashed')}
+        title="content_pieces.challenged_reason — el motivo con que se apartó la pieza.">
+        <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+        <span>
+          <span className="text-amber-300/70">{state === 'sin_imagen' ? 'Sin imagen. Motivo:' : 'Retenida. Motivo:'}</span>{' '}
+          <span className="font-semibold font-sans">{fix.challenge_reason ?? 'sin motivo escrito'}</span>
+          {fix.challenged_at && <span className="text-amber-300/70"> · {fmtDate(fix.challenged_at)}</span>}
+        </span>
+      </div>
+    );
+  }
 
   const volvio = state === 'corregida';
   const tono = volvio
