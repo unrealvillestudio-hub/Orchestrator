@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   canonicalizeSignature, manualTextOf, manualImagesOf, buildManualItems, manualChannelKey,
+  cleanPostLink, manualDrainRow,
   type ManualPieceInput, type ManualSlotRow,
 } from './_manualShared.js';
 
@@ -90,5 +91,26 @@ describe('buildManualItems — sólo canales manuales, lo atrasado primero', () 
   });
   it('lleva el huso de la marca', () => {
     expect(items[0].timezone).toBe('America/New_York');
+  });
+});
+
+describe('«Publicada» — el link es la prueba', () => {
+  it('acepta un enlace http(s) y lo devuelve limpio', () => {
+    expect(cleanPostLink('  https://surface.example/p/123  ')).toBe('https://surface.example/p/123');
+  });
+  it('rechaza lo que no es un enlace', () => {
+    for (const v of ['', '   ', 'publicado', 'ftp://x/y', 'https://a b', null, undefined, 42]) {
+      expect(cleanPostLink(v)).toBeNull();
+    }
+  });
+  it('la fila de bitácora cumple la prueba del efecto: PUBLISHED con post y fecha', () => {
+    const row = manualDrainRow(
+      { id: 's-1', brand_id: BRAND, platform_key: MANUAL, slot_at: '2026-10-01T00:00:00Z', piece_id: 'p-1' },
+      'https://surface.example/p/1', 'run-1', '2026-10-01T10:00:00Z');
+    expect(row.outcome).toBe('PUBLISHED');
+    expect(row.platform_post_id).toBe('https://surface.example/p/1');
+    expect(row.published_at).toBe('2026-10-01T10:00:00Z');
+    expect(row.slot_id).toBe('s-1');
+    expect(row.piece_id).toBe('p-1');
   });
 });

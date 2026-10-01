@@ -257,3 +257,33 @@ export function fetchManualQueue(token: string, opts: { brand?: string; channel?
   const qs = q.toString();
   return req<ManualQueueResult>(`/api/manual-queue${qs ? `?${qs}` : ''}`, token);
 }
+
+export interface ManualPublishedResult {
+  ok: true;
+  slot_id: string;
+  piece_id: string;
+  published_at: string;
+  /** Pasos secundarios que no se pudieron completar (la franja sí quedó publicada). */
+  warnings: string[];
+}
+
+/** «Publicada»: Sam publicó a mano esta franja. El link del post es obligatorio: es la prueba. */
+export async function markManualPublished(token: string, slotId: string, link: string): Promise<ManualPublishedResult> {
+  let res: Response;
+  try {
+    res = await fetchWithTimeout('own-api', '/api/manual-published', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slot_id: slotId, link }),
+    });
+  } catch (err) {
+    // Una escritura que no respondió NO es segura de repetir a ciegas: `mensajeDeFallo` lo dice.
+    throw new CalibrationError(mensajeDeFallo(err, true), 0, { cause: String(err) });
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const d = data as { detail?: unknown; message?: unknown; error?: unknown };
+    throw new CalibrationError(String(d?.detail || d?.message || d?.error || `Error ${res.status}`), res.status, data);
+  }
+  return data as ManualPublishedResult;
+}

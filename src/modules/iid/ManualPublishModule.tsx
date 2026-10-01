@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Inbox, AlertTriangle, Copy, Check, Download } from 'lucide-react';
+import { RefreshCw, Inbox, AlertTriangle, Copy, Check, Download, CheckCircle2 } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import type { IidSession } from '../../services/iidInbound';
 import {
-  fetchManualQueue, CalibrationError,
+  fetchManualQueue, markManualPublished, CalibrationError,
   type ManualItem, type ManualQueueResult,
 } from '../../services/publishInbox';
 import { CountPill, fmtInZone } from './pieceUi';
@@ -15,7 +15,8 @@ import { CountPill, fmtInZone } from './pieceUi';
  * URL y UN bloque de texto —título, cuerpo, hashtags y firma juntos— listo para copiar y pegar.
  * Filtrable por marca y por canal; los dos filtros salen del dato, ninguna lista vive acá.
  *
- * Solo lectura: esta pestaña no marca nada como publicado.
+ * «Publicada» (Sam, 2026-10-01): con el link del post como prueba, marca la franja y la pieza
+ * publicadas, deja la fila en la bitácora del drenaje y cierra el aviso. La tarjeta sale de la lista.
  */
 export default function ManualPublishModule({ session }: { session: IidSession }) {
   const token = session.session_token;
@@ -40,6 +41,23 @@ export default function ManualPublishModule({ session }: { session: IidSession }
   useEffect(() => { load(brand, channel); /* eslint-disable-next-line */ }, []);
 
   const apply = (b: string, c: string) => { setBrand(b); setChannel(c); load(b, c); };
+
+  // La pieza publicada sale de la lista y de los conteos, sin recargar todo.
+  const onPublished = (it: ManualItem) => {
+    setData((prev) => {
+      if (!prev) return prev;
+      const dec = (m: Record<string, number>, k: string) => {
+        const n = (m[k] ?? 0) - 1; const out = { ...m }; if (n > 0) out[k] = n; else delete out[k]; return out;
+      };
+      return {
+        ...prev,
+        total: Math.max(0, prev.total - 1),
+        by_brand: dec(prev.by_brand, it.brand_id),
+        by_channel: dec(prev.by_channel, it.platform_key),
+        items: prev.items.filter((x) => x.slot_id !== it.slot_id),
+      };
+    });
+  };
 
   const byBrand = data?.by_brand ?? {};
   const byChannel = data?.by_channel ?? {};
@@ -94,7 +112,7 @@ export default function ManualPublishModule({ session }: { session: IidSession }
         </div>
       ) : (
         <div className="space-y-4">
-          {items.map((it) => <ManualCard key={it.slot_id} item={it} />)}
+          {items.map((it) => <ManualCard key={it.slot_id} item={it} token={token} onPublished={onPublished} />)}
         </div>
       )}
     </div>
@@ -119,8 +137,25 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
-function ManualCard({ item }: { item: ManualItem }) {
+function ManualCard({ item, token, onPublished }: {
+  item: ManualItem; token: string; onPublished: (it: ManualItem) => void;
+}) {
   const z = fmtInZone(item.slot_at, item.timezone);
+  const [link, setLink] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const linkOk = /^https?:\/\/\S+$/.test(link.trim());
+
+  const publicar = async () => {
+    setSaving(true); setErr(null);
+    try {
+      await markManualPublished(token, item.slot_id, link.trim());
+      onPublished(item);
+    } catch (e) {
+      setErr(e instanceof CalibrationError ? e.message : 'No se pudo marcar como publicada.');
+      setSaving(false);
+    }
+  };
   return (
     <div
       className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 md:p-4 space-y-3"
@@ -168,6 +203,28 @@ function ManualCard({ item }: { item: ManualItem }) {
         {item.text || '—'}
       </pre>
       <CopyButton text={item.text} label="Copiar texto" />
+
+      <div className="flex flex-col md:flex-row gap-2 pt-2 border-t border-zinc-800">
+        <input
+          type="url" inputMode="url" value={link} onChange={(e) => setLink(e.target.value)}
+          placeholder="Link del post publicado (https://…)"
+          className="flex-1 min-w-0 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-[12px] font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
+        />
+        <button
+          onClick={publicar} disabled={!linkOk || saving}
+          title={linkOk ? 'Marcar como publicada' : 'Pega primero el link del post: es la prueba de que salió'}
+          className={cn(
+            'inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
+            linkOk && !saving
+              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+              : 'bg-zinc-900 border-zinc-800 text-zinc-600 cursor-not-allowed'
+          )}
+        >
+          {saving ? <Spinner size={13} /> : <CheckCircle2 size={13} />}
+          Publicada
+        </button>
+      </div>
+      {err && <p className="text-[11px] text-rose-400/90">{err}</p>}
     </div>
   );
 }

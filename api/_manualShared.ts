@@ -179,3 +179,47 @@ export function buildManualItems(
 export function manualChannelKey(brandId: string, platformKey: string): string {
   return `${brandId}\u0000${platformKey}`;
 }
+
+// ── «Publicada» ──────────────────────────────────────────────────────────────────
+/**
+ * La prueba de que salió: el link del post. La base no acepta una publicación sin ella
+ * (`brand_publish_drain_log_prueba_del_efecto` exige `platform_post_id` no vacío cuando el
+ * desenlace es `PUBLISHED`), y la pantalla tampoco: marcar sin link sería afirmar sin medir.
+ * Devuelve el link limpio, o `null` si no es un enlace http(s).
+ */
+export function cleanPostLink(v: unknown): string | null {
+  const s = typeof v === 'string' ? v.trim() : '';
+  if (!s || s.length > 500 || /\s/.test(s)) return null;
+  try {
+    const u = new URL(s);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Estados de franja que se pueden marcar publicadas a mano: tienen pieza y no salieron. */
+export const MARKABLE_SLOT_STATUSES = ['manual_pending', 'reserved'] as const;
+
+/**
+ * La fila de bitácora de una publicación a mano. Mismo desenlace que el drenaje (`PUBLISHED`)
+ * para que el resto del carril —acuses, cobertura, conteos— la lea igual; el `detail` dice que
+ * fue a mano.
+ */
+export function manualDrainRow(
+  slot: { id: string; brand_id: string; platform_key: string; slot_at: string; piece_id: string },
+  link: string, runId: string, at: string,
+) {
+  return {
+    run_id: runId,
+    brand_id: slot.brand_id,
+    platform_key: slot.platform_key,
+    slot_id: slot.id,
+    piece_id: slot.piece_id,
+    slot_at: slot.slot_at,
+    outcome: 'PUBLISHED',
+    detail: 'MANUAL_PUBLISHED: publicada a mano y marcada desde el Orchestrator',
+    platform_post_id: link,
+    published_at: at,
+  };
+}
