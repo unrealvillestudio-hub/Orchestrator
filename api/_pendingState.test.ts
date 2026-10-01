@@ -44,7 +44,18 @@ describe('el eje de pendiente', () => {
   });
 
   it('una retenida por desacuerdo es pendiente', () => {
-    expect(pendingStateOf('challenged', false, false)).toBe<PendingState>('retenida');
+    expect(pendingStateOf('challenged', false, false, true)).toBe<PendingState>('retenida');
+  });
+
+  // 2026-10-01 — `challenged` sin juicio de Sam y SIN imagen: el carril no pudo generarla. Va a
+  // Arreglos y no se pinta como un desacuerdo del juez (17 medidas el 2026-09-30, todas sin imagen).
+  it('una challenged sin juicio y sin imagen es `sin_imagen`, no `retenida`', () => {
+    expect(pendingStateOf('challenged', false, true, false)).toBe<PendingState>('sin_imagen');
+    expect(pendingStateOf('challenged', false, false, false)).toBe<PendingState>('sin_imagen');
+    // Con imagen vuelve a ser retenida: al generarla, la pieza pasa a Calibración.
+    expect(pendingStateOf('challenged', false, true, true)).toBe<PendingState>('retenida');
+    // Un fixable de Sam sigue siendo suyo aunque le falte la imagen.
+    expect(pendingStateOf('challenged', true, true, false)).toBe<PendingState>('por_arreglar');
   });
 
   it('un estado desconocido cae en esperando, nunca en un silencio', () => {

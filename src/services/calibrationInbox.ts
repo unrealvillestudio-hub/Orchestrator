@@ -30,7 +30,7 @@ import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 export type Verdict = 'approved' | 'rejected' | 'fixable';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
-export type QueueOrder = 'recent' | 'oldest' | 'brand' | 'verdict';
+export type QueueOrder = 'slot' | 'recent' | 'oldest' | 'brand' | 'verdict';
 
 /**
  * U-9 — LO URGENTE ES DEL CANAL, NO DE LA PIEZA.
@@ -351,7 +351,7 @@ export interface FixFlow {
  * que tienen que decir lo mismo sólo lo siguen diciendo si algo lo comprueba.
  */
 export type PendingState =
-  'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida';
+  'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida' | 'sin_imagen';
 
 /** Los seis, en orden. Un selector sale de acá y nunca de una lista escrita a mano. */
 /**
@@ -362,7 +362,7 @@ export type PendingState =
 export const CALIBRATION_TAB_STATES: readonly PendingState[] = ['esperando', 'recalibrar', 'aplazada', 'retenida'];
 
 export const PENDING_STATES: readonly PendingState[] =
-  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida'];
+  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen'];
 
 export interface QueueResult {
   total_pending: number;
@@ -405,6 +405,9 @@ export interface QueueResult {
    * el canal que nadie midió.
    */
   slots_source: 'ok' | 'unavailable';
+  /** Arbitrajes abiertos que hoy muestra Retenidas. `null` = no se leyeron. Opcional: un server
+   *  anterior no lo manda. */
+  open_challenges?: number | null;
   truncated?: boolean;
 }
 

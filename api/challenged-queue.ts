@@ -25,7 +25,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   applyCors, extractToken, requireAdmin,
   parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
-  fetchLivePieces, fetchEvaluatedIds, pendingStateOf,
+  fetchLivePieces, fetchEvaluatedIds, pendingStateOf, tieneImagen,
   type PieceSearch,
 } from './_calibrationShared.js';
 import { fetchBrandLanguages } from './_brandLanguage.js';
@@ -105,7 +105,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ]);
     const vivas = new Set(
       retenidas
-        .filter((p) => pendingStateOf(p.status, evaluadas.ids.has(p.id), Boolean(p.challenged_at)) === 'retenida')
+        // `retenida` o `sin_imagen`: con arbitraje abierto decide el juez primero, falte o no la imagen.
+        .filter((p) => {
+          const e = pendingStateOf(p.status, evaluadas.ids.has(p.id), Boolean(p.challenged_at), tieneImagen(p));
+          return e === 'retenida' || e === 'sin_imagen';
+        })
         .map((p) => p.id),
     );
     const all = abiertas.filter((r) => !!r.piece_id && vivas.has(r.piece_id));

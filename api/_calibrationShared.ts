@@ -616,8 +616,17 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     metrics: extras.metrics ?? null,
     // SIN-IMAGEN-01 — mismo criterio que usaba `actionsFor` hasta hoy: una url vacía NO es una
     // imagen. Se conserva al pie de la letra, sólo que ahora informa en vez de cerrar una puerta.
-    has_image: typeof a.image?.url === 'string' && !!a.image.url,
+    has_image: tieneImagen(piece),
   };
+}
+
+/**
+ * ¿La pieza tiene imagen? Una url vacía NO es una imagen (SIN-IMAGEN-01). Único criterio del
+ * servidor: lo usan `has_image` de la tarjeta y el eje `sin_imagen` de `pendingStateOf`.
+ */
+export function tieneImagen(piece: { assets?: unknown } | null | undefined): boolean {
+  const url = (piece?.assets as { image?: { url?: unknown } } | null | undefined)?.image?.url;
+  return typeof url === 'string' && !!url;
 }
 
 // ── HTML autocontenido ─────────────────────────────────────────────────────────
@@ -880,6 +889,12 @@ export const CALIBRATION_STATUSES = ['awaiting_approval', 'deferred', 'challenge
  *                  pieza en vez de descartarla, así que este eje es lo que impide que reaparezca
  *                  como una tarjeta sin juzgar — el riesgo que el sellado venía a evitar.
  *   corregida    — se retó, se arregló y VOLVIÓ. Espera el visto bueno, no una corrección más.
+ *   sin_imagen   — `challenged` sin juicio de Sam y SIN imagen: el carril no pudo generarla (tope de
+ *                  la ventana, cuota o fallo del proveedor) y el motivo está en `challenged_reason`.
+ *                  No espera un veredicto: espera «Generar imagen». Por eso va a Arreglos (decisión
+ *                  de Sam del 2026-10-01). Hasta entonces se pintaba como `retenida`, cuya ayuda
+ *                  dice «desacuerdo del juez» — falso para estas piezas. Medido el 2026-09-30: las
+ *                  17 `challenged` sin corpus eran, todas, piezas sin imagen.
  *
  * POR QUÉ `corregida` ES UN EJE Y NO UN MATIZ DE `recalibrar`. Medido el 2026-09-22: de las 14
  * piezas vivas que hoy salen como `recalibrar`, **13 son piezas retadas que volvieron del arreglo**.
@@ -908,11 +923,11 @@ export const CALIBRATION_STATUSES = ['awaiting_approval', 'deferred', 'challenge
  * eje, que es lo que las dos mitades comparten.
  */
 export type PendingState =
-  'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida';
+  'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida' | 'sin_imagen';
 
 /** Todos los ejes, para que un selector salga de acá y no de una lista escrita a mano. */
 export const PENDING_STATES: readonly PendingState[] =
-  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida'];
+  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen'];
 
 /**
  * UNA PIEZA, UNA PESTAÑA (Sam, 2026-09-30: «las mismas piezas —awaiting_approval, arreglos, retadas,
@@ -940,10 +955,16 @@ export function pendingStateOf(
   status: string | null | undefined,
   yaCalibrada: boolean,
   retada: boolean,
+  // OBLIGATORIO por lo mismo que `retada`. Se lee con `tieneImagen()`, el mismo criterio que
+  // `has_image`: dos criterios distintos para «tiene imagen» acabarían discrepando en una tarjeta.
+  conImagen: boolean,
 ): PendingState {
   const s = String(status ?? '').trim().toLowerCase();
   if (s === 'deferred') return 'aplazada';
-  if (s === 'challenged') return yaCalibrada ? 'por_arreglar' : 'retenida';
+  if (s === 'challenged') {
+    if (yaCalibrada) return 'por_arreglar';
+    return conImagen ? 'retenida' : 'sin_imagen';
+  }
   // VIVA Y CON UN RETO EN SU HISTORIA = volvió del arreglo. Va ANTES del corpus porque es más
   // específico: toda pieza retada por Sam tiene fila en `approval_calibration` —el fixable es un
   // veredicto—, así que preguntar primero por el corpus se las tragaría a todas.

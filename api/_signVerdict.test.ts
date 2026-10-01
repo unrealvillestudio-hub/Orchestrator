@@ -164,7 +164,7 @@ describe('D · los cuatro estados se nombran', () => {
 
     // 2 · se distingue: incluir sin distinguir es el defecto de corte D al revés.
     expect(pendingStateOf('deferred', false)).toBe('aplazada');
-    expect(pendingStateOf('challenged', false)).toBe('retenida');
+    expect(pendingStateOf('challenged', false, false, true)).toBe('retenida');
     expect(pendingStateOf('awaiting_approval', false)).toBe('esperando');
 
     // 3 · se dice POR QUÉ y HASTA CUÁNDO. Es exactamente lo que le faltó a `c5d542b7`.
@@ -303,7 +303,7 @@ describe('fixable · RETA la pieza, no la descarta (cambio de diseño del 2026-0
   it('y no se confunde con una retenida del JUEZ, que se arbitra en vez de arreglarse', () => {
     // Los distingue si hay fila en el corpus: el juez escribe `intel.judge_calibration`, no
     // `intel.approval_calibration`. Una retada CON veredicto humano sólo puede venir de un fixable.
-    expect(pendingStateOf('challenged', false)).toBe('retenida');
+    expect(pendingStateOf('challenged', false, false, true)).toBe('retenida');
     expect(pendingStateOf('challenged', true)).not.toBe('retenida');
   });
 

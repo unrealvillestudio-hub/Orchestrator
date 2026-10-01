@@ -16,7 +16,7 @@ import { PieceActionsBar, type ActionOutcome } from './pieceActions';
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader, shortId,
   ForecastLine, SlotsNotice, SearchNotice, PendingStateBadge, PENDING_STATE_UI,
-  DeferralNotice, FixNotice, PieceSummary, MobileDetails, FilterBar,
+  DeferralNotice, FixNotice, PieceSummary, MobileDetails, FilterBar, OpenChallengesNotice,
 } from './pieceUi';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
 import { SpeechReader } from '../../ui/SpeechReader';
@@ -79,7 +79,7 @@ export default function ApprovalCalibrationModule(
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
   const [brand, setBrand]     = useState<string>(''); // '' = todas
-  const [order, setOrder]     = useState<QueueOrder>('recent');
+  const [order, setOrder]     = useState<QueueOrder>('slot');
   const [verdict, setVerdict] = useState<VerdictFilter>('all');
   const [gen, setGen]         = useState<GenerationFilter>('all');
   // U-7 — la plataforma de la pieza y la búsqueda por id.
@@ -224,7 +224,7 @@ export default function ApprovalCalibrationModule(
       {/* Orden + filtros transversales. Móvil: búsqueda a la vista, filtros plegados. */}
       <FilterBar
         q={q} onSearch={(v) => apply({ q: v })}
-        active={[order !== 'recent', verdict !== 'all', gen !== 'all', urgency !== 'all', platform !== '', estado !== ''].filter(Boolean).length}
+        active={[order !== 'slot', verdict !== 'all', gen !== 'all', urgency !== 'all', platform !== '', estado !== ''].filter(Boolean).length}
         className="flex-col md:flex-row items-stretch md:items-center gap-3 md:gap-4 md:flex-wrap md:mb-5 text-[11px] font-mono text-zinc-600"
       >
         <Selector
@@ -232,6 +232,7 @@ export default function ApprovalCalibrationModule(
           value={order}
           onChange={(v) => apply({ order: v as QueueOrder })}
           options={[
+            ['slot', 'Próxima franja'],
             ['recent', 'Más reciente'],
             ['oldest', 'Más antigua'],
             ['brand', 'Por marca'],
@@ -296,6 +297,7 @@ export default function ApprovalCalibrationModule(
       </div>
 
       {/* Por qué la generación puede venir sin dato — se dice, no se disimula. */}
+      {!scope && <OpenChallengesNotice count={data?.open_challenges} />}
       {data && <SlotsNotice source={data.slots_source} />}
       {data && <CutoffsNotice source={data.cutoffs_source} />}
 

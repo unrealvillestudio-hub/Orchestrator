@@ -442,8 +442,13 @@ export async function releaseSlotsForPiece(pieceId: string): Promise<SlotRelease
   const id = typeof pieceId === 'string' ? pieceId.trim() : '';
   if (!id) return { ok: false, released: 0, slot_ids: [], error: 'piece_id vacío' };
 
+  // `reserved` y `manual_pending`: las dos TIENEN pieza y ninguna salió todavía (2026-10-01).
+  // Liberar sólo `reserved` dejaba atada a su franja manual una pieza devuelta a revisión, y el
+  // reservador, al intentar darle otra, chocaba con `brand_publish_slots_pieza_uniq` y abortaba la
+  // corrida entera: 12 h sin franjas para ninguna marca (medido 2026-09-30).
+  // ⛔ NO OPERATIVO — `&status=eq.reserved`.
   const url = `${SB_URL()}/rest/v1/brand_publish_slots`
-    + `?piece_id=eq.${encodeURIComponent(id)}&status=eq.reserved&select=id`;
+    + `?piece_id=eq.${encodeURIComponent(id)}&status=in.(reserved,manual_pending)&select=id`;
 
   let res: Response;
   try {
