@@ -14,7 +14,9 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, extractToken, requireAdmin, SB_URL, SB_KEY } from './_calibrationShared.js';
+import { applyCors, extractToken, SB_URL, SB_KEY } from './_calibrationShared.js';
+// Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
+import { requireReviewer, filterByReviewScope } from './_reviewScope.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
 import { fetchBrandTimezones } from './_publishSlots.js';
 import {
@@ -46,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
 
-  const session = requireAdmin(req, res, extractToken(req));
+  const session = await requireReviewer(req, res, extractToken(req));
   if (!session) return;
 
   const brand = strParam(req.query.brand);
@@ -66,7 +68,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ]);
 
     const manual = new Set(channels.map((c) => manualChannelKey(c.brand_id, c.platform_key)));
-    const enManual = slots.filter((s) => manual.has(manualChannelKey(s.brand_id, s.platform_key)));
+    // ALCANCE DE REVISIÓN — antes de leer piezas y de contar: sólo las franjas de sus marcas.
+    const enManual = filterByReviewScope(
+      slots.filter((s) => manual.has(manualChannelKey(s.brand_id, s.platform_key))), session.review);
 
     const ids = Array.from(new Set(enManual.map((s) => s.piece_id).filter((x): x is string => !!x)));
     const pieces = new Map<string, ManualPieceInput>();

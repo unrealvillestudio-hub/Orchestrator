@@ -20,7 +20,9 @@
 
 import { randomUUID } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, extractToken, requireAdmin, SB_URL, SB_KEY } from './_calibrationShared.js';
+import { applyCors, extractToken, SB_URL, SB_KEY } from './_calibrationShared.js';
+// Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
+import { requireReviewer, inReviewScope, denyOutOfScope } from './_reviewScope.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
 import { cleanPostLink, manualDrainRow, MARKABLE_SLOT_STATUSES } from './_manualShared.js';
 
@@ -51,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let body: { slot_id?: string; link?: string; session_token?: string } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* vacío */ }
 
-  const session = requireAdmin(req, res, extractToken(req, body));
+  const session = await requireReviewer(req, res, extractToken(req, body));
   if (!session) return;
 
   const slotId = typeof body.slot_id === 'string' ? body.slot_id.trim() : '';
@@ -64,6 +66,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const [slot] = await rest<SlotRow[]>('intel', `brand_publish_slots?id=eq.${slotId}&select=id,brand_id,platform_key,slot_at,status,piece_id&limit=1`);
     if (!slot) return res.status(404).json({ error: 'slot_not_found' });
+    // ALCANCE DE REVISIÓN — la franja tiene que ser de una de sus marcas.
+    if (!inReviewScope(session.review, slot.brand_id)) return denyOutOfScope(res, slot.brand_id);
     if (!slot.piece_id || !(MARKABLE_SLOT_STATUSES as readonly string[]).includes(slot.status)) {
       return res.status(409).json({ error: 'slot_not_pending', detail: `La franja está en estado «${slot.status}»: ya no espera publicación.` });
     }

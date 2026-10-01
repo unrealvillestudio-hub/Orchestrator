@@ -511,6 +511,20 @@ export function fetchQueue(
 }
 
 /**
+ * Las marcas que la sesión puede revisar (`'*'` = todas, admin). `null` si no puede revisar ninguna
+ * (403). Sólo decide qué pestañas se pintan: cada endpoint vuelve a comprobar el alcance.
+ */
+export async function fetchReviewScope(token: string): Promise<'*' | string[] | null> {
+  try {
+    const out = await req<{ review: '*' | string[] }>('/api/review-scope', token);
+    return out.review === '*' || (Array.isArray(out.review) && out.review.length) ? out.review : null;
+  } catch (err) {
+    if (err instanceof CalibrationError && err.status === 403) return null;
+    throw err;
+  }
+}
+
+/**
  * Garantiza el artefacto de una pieza (render lazy). Devuelve su URL pública en el CDN
  * (artifact_url, durable) y el HTML crudo (para render vía <iframe srcdoc>, porque el
  * CDN sirve los objetos como text/plain y no se pueden embeber con src).

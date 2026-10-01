@@ -23,11 +23,13 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
-  applyCors, extractToken, requireAdmin,
+  applyCors, extractToken,
   parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
   fetchLivePieces, fetchEvaluatedIds, pendingStateOf, tieneImagen,
   type PieceSearch,
 } from './_calibrationShared.js';
+// Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
+import { requireReviewer, filterByReviewScope } from './_reviewScope.js';
 import { fetchBrandLanguages } from './_brandLanguage.js';
 import {
   fetchPendingChallenges, fetchPiecesByIds, fetchRuleStatements, toChallengedRow,
@@ -50,8 +52,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
 
-  const session = requireAdmin(req, res, extractToken(req));
-  if (!session) return; // requireAdmin ya respondió
+  const session = await requireReviewer(req, res, extractToken(req));
+  if (!session) return; // requireReviewer ya respondió
 
   const limit  = intParam(req.query.limit, 20, 1, 200);
   const offset = intParam(req.query.offset, 0, 0, 10_000_000);
@@ -112,7 +114,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
         .map((p) => p.id),
     );
-    const all = abiertas.filter((r) => !!r.piece_id && vivas.has(r.piece_id));
+    // ALCANCE DE REVISIÓN — antes de contar, para que las pastillas tampoco muestren otras marcas.
+    const all = filterByReviewScope(abiertas.filter((r) => !!r.piece_id && vivas.has(r.piece_id)), session.review);
 
     const by_brand: Record<string, number> = {};
     const by_rule: Record<string, number> = {};

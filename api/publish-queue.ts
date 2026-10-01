@@ -49,12 +49,14 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
-  applyCors, extractToken, requireAdmin,
+  applyCors, extractToken,
   fetchLivePieces, fetchPipelineCutoffs, fetchWatcherTraces, fetchAttemptsByQueue,
   latestPerQueue, generationOf, toContext, PIECES_CAP,
   parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
   type ContentPiece, type PipelineCutoff, type GenerationInfo, type PieceSearch,
 } from './_calibrationShared.js';
+// Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
+import { requireReviewer, filterByReviewScope } from './_reviewScope.js';
 import {
   PUBLISH_STATUSES, fetchPublishChannels, channelOf, channelBlocks,
   type ChannelInfo, type PublishablePiece,
@@ -110,8 +112,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
 
-  const session = requireAdmin(req, res, extractToken(req));
-  if (!session) return; // requireAdmin ya respondió
+  const session = await requireReviewer(req, res, extractToken(req));
+  if (!session) return; // requireReviewer ya respondió
 
   const limit         = intParam(req.query.limit, 20, 1, 200);
   const offset        = intParam(req.query.offset, 0, 0, 10_000_000);
@@ -166,7 +168,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ]);
     const cutoffs: PipelineCutoff[] = cutoffsRaw ?? [];
 
-    const perPiece = latestPerQueue(allPieces);
+    // ALCANCE DE REVISIÓN — lo que no es de sus marcas no existe para esta sesión. Admin: el mismo array.
+    const perPiece = latestPerQueue(filterByReviewScope(allPieces, session.review));
 
     // Canal y generación de cada pieza: se calculan una vez y sirven para filtrar y para
     // la tarjeta.

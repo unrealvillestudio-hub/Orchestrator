@@ -718,7 +718,11 @@ export function buildHtml(piece: ContentPiece): string {
   // aprobó carruseles sin ver sus láminas. Ahora se ven TODAS, en el orden en que se publican
   // (`manualImagesOf`, el mismo criterio que el drenaje), en una tira que se desliza. Sin JS: el
   // artefacto se pinta en un <iframe sandbox="">.
-  const laminas = manualImagesOf({ id: piece.id, brand_id: piece.brand_id, format: piece.format, assets });
+  // Sólo lo que decide las láminas: `builder_meta` tiene otra forma en cada lado y no interviene.
+  const laminas = manualImagesOf({
+    id: piece.id, brand_id: piece.brand_id, format: piece.format,
+    assets: { image: assets.image, carousel: assets.carousel },
+  });
   const imageBlock = laminas.length >= 2
     ? `<div class="media carousel" aria-label="Carrusel de ${laminas.length} láminas">
       <div class="strip">${laminas.map((u, i) => `<figure class="slide"><img src="${esc(u)}" alt="lámina ${i + 1}" /><figcaption>${i + 1} / ${laminas.length}</figcaption></figure>`).join('')}</div>

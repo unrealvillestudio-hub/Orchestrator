@@ -37,7 +37,9 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, extractToken, requireAdmin } from './_calibrationShared.js';
+import { applyCors, extractToken } from './_calibrationShared.js';
+// Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
+import { requireReviewer, guardPiece } from './_reviewScope.js';
 import { callEdgeFunction, parseBody } from './_challengedShared.js';
 
 /**
@@ -53,11 +55,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
   const body = parseBody(req);
-  const session = requireAdmin(req, res, extractToken(req, body));
-  if (!session) return; // requireAdmin ya respondió
+  const session = await requireReviewer(req, res, extractToken(req, body));
+  if (!session) return; // requireReviewer ya respondió
 
   const piece_id = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';
   if (!piece_id) return res.status(400).json({ error: 'piece_id required' });
+  // ALCANCE DE REVISIÓN — la pieza tiene que ser de una de sus marcas. Admin pasa sin leer nada.
+  if (!(await guardPiece(res, session, piece_id))) return;
 
   const field = body.field as EditableField;
   if (!EDITABLE_FIELDS.includes(field)) {

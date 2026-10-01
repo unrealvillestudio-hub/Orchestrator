@@ -30,7 +30,9 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { applyCors, extractToken, requireAdmin } from './_calibrationShared.js';
+import { applyCors, extractToken } from './_calibrationShared.js';
+// Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
+import { requireReviewer, inReviewScope, denyOutOfScope, TODAS } from './_reviewScope.js';
 import {
   CHALLENGE_VERDICTS, callEdgeFunction, fetchChallenge, parseBody,
   type ChallengeVerdict,
@@ -42,8 +44,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
   const body = parseBody(req);
-  const session = requireAdmin(req, res, extractToken(req, body));
-  if (!session) return; // requireAdmin ya respondió
+  const session = await requireReviewer(req, res, extractToken(req, body));
+  if (!session) return; // requireReviewer ya respondió
 
   const id = typeof body.id === 'string' ? body.id.trim() : '';
   if (!id) return res.status(400).json({ error: 'id required' });
@@ -54,6 +56,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const note = typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null;
+
+  // ALCANCE DE REVISIÓN — el arbitraje tiene que ser de una de sus marcas. Admin pasa sin leer nada.
+  if (session.review !== TODAS) {
+    const fila = await fetchChallenge(id);
+    if (!fila) return res.status(404).json({ error: 'challenge_not_found', id });
+    if (!inReviewScope(session.review, fila.brand_id)) return denyOutOfScope(res, fila.brand_id);
+  }
 
   try {
     const out = await callEdgeFunction('judge-arbitration', {

@@ -43,8 +43,10 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
-  applyCors, extractToken, requireAdmin, ensureArtifact, fetchPiece, PieceNotFound,
+  applyCors, extractToken, ensureArtifact, fetchPiece, PieceNotFound,
 } from './_calibrationShared.js';
+// Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
+import { requireReviewer, guardPiece } from './_reviewScope.js';
 import { callEdgeFunction } from './_challengedShared.js';
 
 /**
@@ -74,11 +76,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
-  const session = requireAdmin(req, res, extractToken(req, body));
-  if (!session) return; // requireAdmin ya respondió
+  const session = await requireReviewer(req, res, extractToken(req, body));
+  if (!session) return; // requireReviewer ya respondió
 
   const pieceId = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';
   if (!pieceId) return res.status(400).json({ error: 'piece_id required' });
+  // ALCANCE DE REVISIÓN — la pieza tiene que ser de una de sus marcas. Admin pasa sin leer nada.
+  if (!(await guardPiece(res, session, pieceId))) return;
 
   // La directriz es obligatoria CUANDO HAY UNA IMAGEN QUE CORREGIR, y va al revés que el criterio
   // de un veredicto. No es una incoherencia: un criterio explica un juicio ya tomado y puede llegar
