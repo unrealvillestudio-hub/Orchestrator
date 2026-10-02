@@ -141,6 +141,9 @@ export interface PieceAssets {
     enabled?: boolean; ran?: boolean; outcome?: string; attempts?: number; reason?: string;
     entered?: string[]; resolved?: string[]; residual?: string[]; applied?: boolean; cost_usd?: number;
   } | null;
+  // F2 (2026-10-02) — las imágenes DENTRO del cuerpo de un artículo. Las escribe el carril; acá
+  // sólo se leen, con la regla de lectura de `inlineFigureHtml`. Forma: `InlineImageEntry`.
+  inline_images?: InlineImageEntry[] | null;
   // Las láminas de un carrusel, cada una con su imagen (`n` = posición; la 1 es la portada).
   carousel?: { slides?: Array<{ n?: number | null; url?: string | null }> | null } | null;
   // Texto adaptado POR CANAL (content-run-stage). Es el que ese canal recibe de verdad,
@@ -157,6 +160,25 @@ export interface PieceAssets {
     failed_rules?: string[] | null;
     rules_evaluated?: number | null;
   };
+}
+/**
+ * F2 — una imagen dentro del cuerpo (`assets.inline_images[]`). `n` es el índice que cita la
+ * marca `![img-N]` del texto; `after`, `focus` y `alt` los decide CopyLab (`image_pass`); `url`,
+ * `path` y `status` los escribe el carril al generar la imagen. Todos opcionales al leer: el dato
+ * puede venir a medias y el lector no se rompe por eso, sólo no pinta.
+ */
+export interface InlineImageEntry {
+  n?: number | null;
+  after?: number | null;
+  focus?: string | null;
+  alt?: string | null;
+  url?: string | null;
+  path?: string | null;
+  status?: 'planned' | 'ok' | 'failed' | string | null;
+  attempts?: number | null;
+  prompt_full?: string | null;
+  error?: string | null;
+  generated_at?: string | null;
 }
 export interface ContentPiece {
   id: string;
@@ -720,7 +742,15 @@ export function hasEmphasis(text: string): boolean {
  */
 const HEADING = /^#{1,3}\s+(\S[\s\S]*)$/;
 const QUOTE_LINE = /^>\s?/;
-export type EditorialBlock = { t: 'h' | 'quote' | 'p'; text: string };
+/**
+ * F2 (Sam 2026-10-02: imágenes dentro del artículo). Tercera marca de bloque: un bloque cuyo
+ * contenido ENTERO es `![img-N]` cita la imagen `n = N` de `assets.inline_images`. El techo es
+ * del contrato (eje), no de una marca: el tope de cada canal es dato
+ * (`brand_publish_channels.config.inline_images_max`) y nunca lo supera.
+ */
+export const INLINE_IMAGES_CONTRACT_MAX = 3;
+const INLINE_IMAGE_MARK = new RegExp(`^!\\[img-([1-${INLINE_IMAGES_CONTRACT_MAX}])\\]$`);
+export type EditorialBlock = { t: 'h' | 'quote' | 'p'; text: string } | { t: 'img'; text: string; n: number };
 
 export function blocksOf(body: string): EditorialBlock[] {
   return String(body || '')
@@ -728,6 +758,8 @@ export function blocksOf(body: string): EditorialBlock[] {
     .map((b) => b.trim())
     .filter(Boolean)
     .map((b): EditorialBlock => {
+      const img = INLINE_IMAGE_MARK.exec(b);
+      if (img) return { t: 'img', text: b, n: Number(img[1]) };
       const h = HEADING.exec(b);
       if (h) return { t: 'h', text: h[1].replace(/\s*\n\s*/g, ' ').replace(/\s+#+\s*$/, '').trim() };
       const lines = b.split('\n');
@@ -739,21 +771,61 @@ export function blocksOf(body: string): EditorialBlock[] {
     .filter((b) => b.text);
 }
 
-/** ¿Trae el texto alguna marca de bloque del formato editorial? */
+/**
+ * ¿Trae el texto alguna marca de bloque del formato editorial que un canal plano dejaría a la
+ * vista? La marca de imagen NO cuenta: en texto plano se elimina (`stripInlineImageMarks`), así
+ * que nunca sale visible y no hay nada de qué avisar.
+ */
 export function hasBlockMarks(text: string): boolean {
-  return blocksOf(text).some((b) => b.t !== 'p');
+  return blocksOf(text).some((b) => b.t === 'h' || b.t === 'quote');
 }
 
-/** Cuerpo → HTML con el formato editorial. Cada bloque se escapa antes de traducir la negrita. */
-export function editorialToHtml(body: string, escape: (s: string) => string): string {
+/**
+ * F2 — toda salida de TEXTO PLANO (canal plano, texto maestro, lo que se lee o se cuenta) va sin
+ * las marcas de imagen: el bloque `![img-N]` se quita entero. Un texto sin marcas vuelve intacto,
+ * byte a byte; con marcas, los bloques que quedan se unen con una línea en blanco.
+ */
+export function stripInlineImageMarks(text: string): string {
+  const src = String(text ?? '');
+  const parts = src.split(/\n\s*\n/);
+  const kept = parts.filter((p) => !INLINE_IMAGE_MARK.test(p.trim()));
+  return kept.length === parts.length ? src : kept.join('\n\n');
+}
+
+/**
+ * F2 — REGLA DE LECTURA de la marca `![img-N]`, la misma en todos los renderizadores: se pinta
+ * la figura sólo si existe una entrada con ese `n`, `status === 'ok'` y `url` que empieza por
+ * `https://`. Cualquier otro caso (sin entrada, `planned`, `failed`, url no https, dato mal
+ * formado) devuelve '' y el bloque desaparece: nunca se muestra la marca como texto.
+ */
+export function inlineFigureHtml(n: number, images: unknown, escape: (s: string) => string): string {
+  if (!Array.isArray(images)) return '';
+  const hit = images.find((e): e is InlineImageEntry =>
+    !!e && typeof e === 'object'
+    && (e as InlineImageEntry).n === n
+    && (e as InlineImageEntry).status === 'ok'
+    && typeof (e as InlineImageEntry).url === 'string'
+    && ((e as InlineImageEntry).url as string).startsWith('https://'));
+  if (!hit) return '';
+  const alt = typeof hit.alt === 'string' ? hit.alt : '';
+  return `<figure class="inline-figure"><img src="${escape(hit.url as string)}" alt="${escape(alt)}" loading="lazy" decoding="async"></figure>`;
+}
+
+/**
+ * Cuerpo → HTML con el formato editorial. Cada bloque se escapa antes de traducir la negrita.
+ * `inlineImages` es `assets.inline_images` de la pieza (F2); sin él, ninguna marca de imagen pinta.
+ */
+export function editorialToHtml(body: string, escape: (s: string) => string, inlineImages?: unknown): string {
   return blocksOf(body).map((b) => {
+    if (b.t === 'img') return inlineFigureHtml(b.n, inlineImages, escape);
     const inline = emphasisToHtml(escape(b.text)).replace(/\n/g, '<br>\n');
     if (b.t === 'h') return `<h2 class="sec">${escape(b.text.replace(EMPHASIS, '$1'))}</h2>`;
     if (b.t === 'quote') return `<blockquote class="pull">${inline}</blockquote>`;
     return `<p>${inline}</p>`;
     // Saltos de línea ENTRE bloques: `readablePiece` lee `.text` con `textContent`, y sin
     // ellos `<p>a</p><p>b</p>` se leería «ab». En pantalla el espacio se colapsa.
-  }).join('\n\n');
+    // Una marca que no pinta devuelve '' y se descarta antes de unir: no deja hueco.
+  }).filter(Boolean).join('\n\n');
 }
 
 /**
@@ -858,8 +930,11 @@ export function buildHtml(piece: ContentPiece, opts: BuildHtmlOptions = {}): str
   // plano y el texto trae `**`, se muestra literal y se avisa: así saldría.
   const pintaNegrita = !!opts.provider && PROVIDERS_WITH_INLINE_EMPHASIS.has(opts.provider);
   // F1: el mismo canal que pinta la negrita pinta los subtítulos (`##`) y las citas (`>`).
-  const bodyHtml = pintaNegrita ? editorialToHtml(bodyText, esc) : esc(bodyText);
-  const conMarcas = hasEmphasis(bodyText) || hasBlockMarks(bodyText);
+  // F2: en el canal que pinta el formato, la marca `![img-N]` se vuelve figura (o nada) según
+  // `assets.inline_images`; en un canal plano se elimina, como hace su publicador.
+  const plainBody = stripInlineImageMarks(bodyText);
+  const bodyHtml = pintaNegrita ? editorialToHtml(bodyText, esc, assets.inline_images) : esc(plainBody);
+  const conMarcas = hasEmphasis(plainBody) || hasBlockMarks(plainBody);
   const avisoNegrita = !pintaNegrita && conMarcas
     ? (opts.provider
         ? '\u26a0 Este canal publica texto plano: los ** de este texto saldrían visibles tal cual (y también los ## y > de bloque).'
@@ -923,6 +998,8 @@ export function buildHtml(piece: ContentPiece, opts: BuildHtmlOptions = {}): str
   .text[data-rich] p { margin: 0 0 12px; }
   .text[data-rich] h2.sec { margin: 18px 0 8px; font-size: 16px; color: #fafafa; }
   .text[data-rich] h2.sec::before { content: '§ '; color: #FFAB00; }
+  .text[data-rich] figure.inline-figure { margin: 16px 0; }
+  .text[data-rich] figure.inline-figure img { display: block; width: 100%; max-width: 100%; height: auto; }
   .text[data-rich] blockquote.pull { margin: 14px 0; padding: 4px 0 4px 14px; border-left: 3px solid #FFAB00;
     font-style: italic; font-size: 15px; color: #fafafa; }
   .textsrc { margin-top: 10px; font-size: 11px; line-height: 1.5; }
@@ -955,7 +1032,7 @@ export function buildHtml(piece: ContentPiece, opts: BuildHtmlOptions = {}): str
             ? '\u26a0 SIN TEXTO — la pieza no trae adaptación para este canal ni texto maestro.'
             : '\u26a0 Sin adaptación para este canal: arriba se muestra el TEXTO MAESTRO, que no es el que saldría.'}</div>`}
       ${showMaster
-        ? `<details class="master"><summary>Ver el texto maestro (etapa anterior a la adaptación)</summary><div class="mastertext">${esc(master)}</div></details>`
+        ? `<details class="master"><summary>Ver el texto maestro (etapa anterior a la adaptación)</summary><div class="mastertext">${esc(stripInlineImageMarks(master))}</div></details>`
         : ''}
       <div class="meta">
         <span><b>piece_id</b> ${esc(piece.id)}</span>
