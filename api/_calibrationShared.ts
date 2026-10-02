@@ -712,6 +712,51 @@ export function hasEmphasis(text: string): boolean {
 }
 
 /**
+ * FORMATO EDITORIAL (F1, Sam 2026-10-02: «markdown mínimo»). Además de la negrita, el cuerpo de
+ * una pieza editorial puede traer dos marcas de bloque, y sólo dos: `## Subtítulo` (de una a
+ * tres almohadillas al principio del bloque) y `> Cita` (todas las líneas del bloque). Las
+ * pintan los mismos publicadores que pintan la negrita —los `api/_inline.js` de cada sitio y
+ * `blog-promoter`—, con la misma regla: un `#` o un `>` dentro de una frase es texto.
+ */
+const HEADING = /^#{1,3}\s+(\S[\s\S]*)$/;
+const QUOTE_LINE = /^>\s?/;
+export type EditorialBlock = { t: 'h' | 'quote' | 'p'; text: string };
+
+export function blocksOf(body: string): EditorialBlock[] {
+  return String(body || '')
+    .split(/\n\s*\n/)
+    .map((b) => b.trim())
+    .filter(Boolean)
+    .map((b): EditorialBlock => {
+      const h = HEADING.exec(b);
+      if (h) return { t: 'h', text: h[1].replace(/\s*\n\s*/g, ' ').replace(/\s+#+\s*$/, '').trim() };
+      const lines = b.split('\n');
+      if (lines.every((l) => QUOTE_LINE.test(l.trim()))) {
+        return { t: 'quote', text: lines.map((l) => l.trim().replace(QUOTE_LINE, '')).join('\n').trim() };
+      }
+      return { t: 'p', text: b };
+    })
+    .filter((b) => b.text);
+}
+
+/** ¿Trae el texto alguna marca de bloque del formato editorial? */
+export function hasBlockMarks(text: string): boolean {
+  return blocksOf(text).some((b) => b.t !== 'p');
+}
+
+/** Cuerpo → HTML con el formato editorial. Cada bloque se escapa antes de traducir la negrita. */
+export function editorialToHtml(body: string, escape: (s: string) => string): string {
+  return blocksOf(body).map((b) => {
+    const inline = emphasisToHtml(escape(b.text)).replace(/\n/g, '<br>\n');
+    if (b.t === 'h') return `<h2 class="sec">${escape(b.text.replace(EMPHASIS, '$1'))}</h2>`;
+    if (b.t === 'quote') return `<blockquote class="pull">${inline}</blockquote>`;
+    return `<p>${inline}</p>`;
+    // Saltos de línea ENTRE bloques: `readablePiece` lee `.text` con `textContent`, y sin
+    // ellos `<p>a</p><p>b</p>` se leería «ab». En pantalla el espacio se colapsa.
+  }).join('\n\n');
+}
+
+/**
  * El proveedor del canal de una pieza, o null si no se pudo resolver. NO lanza: la vista previa
  * se sirve igual, en texto plano y diciéndolo. El fallo se emite con un código estable
  * (`PREVIEW_CHANNEL_UNRESOLVED`) para que se pueda buscar en los logs de Vercel, que es la vía
@@ -812,10 +857,12 @@ export function buildHtml(piece: ContentPiece, opts: BuildHtmlOptions = {}): str
   // NEGRITA: se pinta sólo si el publicador de ESTE canal la pinta. Si el canal publica texto
   // plano y el texto trae `**`, se muestra literal y se avisa: así saldría.
   const pintaNegrita = !!opts.provider && PROVIDERS_WITH_INLINE_EMPHASIS.has(opts.provider);
-  const bodyHtml = pintaNegrita ? emphasisToHtml(esc(bodyText)) : esc(bodyText);
-  const avisoNegrita = !pintaNegrita && hasEmphasis(bodyText)
+  // F1: el mismo canal que pinta la negrita pinta los subtítulos (`##`) y las citas (`>`).
+  const bodyHtml = pintaNegrita ? editorialToHtml(bodyText, esc) : esc(bodyText);
+  const conMarcas = hasEmphasis(bodyText) || hasBlockMarks(bodyText);
+  const avisoNegrita = !pintaNegrita && conMarcas
     ? (opts.provider
-        ? '\u26a0 Este canal publica texto plano: los ** de este texto saldrían visibles tal cual.'
+        ? '\u26a0 Este canal publica texto plano: los ** de este texto saldrían visibles tal cual (y también los ## y > de bloque).'
         : '\u26a0 No se pudo resolver el canal de esta pieza: el texto se muestra sin formato y los ** aparecen tal cual.')
     : '';
   const brand = piece.brand_id ?? '';
@@ -872,6 +919,12 @@ export function buildHtml(piece: ContentPiece, opts: BuildHtmlOptions = {}): str
   .title { font-size: 17px; font-weight: 700; color: #fafafa; margin: 0 0 10px; }
   .text { white-space: pre-wrap; word-break: break-word; font-size: 14px; color: #d4d4d8; }
   .text strong { color: #fafafa; font-weight: 700; }
+  .text[data-rich] { white-space: normal; }
+  .text[data-rich] p { margin: 0 0 12px; }
+  .text[data-rich] h2.sec { margin: 18px 0 8px; font-size: 16px; color: #fafafa; }
+  .text[data-rich] h2.sec::before { content: '§ '; color: #FFAB00; }
+  .text[data-rich] blockquote.pull { margin: 14px 0; padding: 4px 0 4px 14px; border-left: 3px solid #FFAB00;
+    font-style: italic; font-size: 15px; color: #fafafa; }
   .textsrc { margin-top: 10px; font-size: 11px; line-height: 1.5; }
   .textsrc--warn { color: #fbbf24; }
   .master { margin-top: 12px; font-size: 11px; color: #a1a1aa; }
@@ -894,7 +947,7 @@ export function buildHtml(piece: ContentPiece, opts: BuildHtmlOptions = {}): str
     ${imageBlock}
     <div class="body">
       ${title ? `<h1 class="title">${esc(title)}</h1>` : ''}
-      <div class="text">${bodyHtml}</div>
+      <div class="text"${pintaNegrita ? ' data-rich' : ''}>${bodyHtml}</div>
       ${avisoNegrita ? `<div class="textsrc textsrc--warn">${avisoNegrita}</div>` : ''}
       ${textSource === 'channel_adapted'
         ? ''
