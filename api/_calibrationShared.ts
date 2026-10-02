@@ -682,6 +682,65 @@ export function esc(s: unknown): string {
     .replace(/"/g, '&quot;');
 }
 
+// ── Negrita del generador ─────────────────────────────────────────────────────────
+/**
+ * El generador marca con `**texto**` la frase que abre o remata una sección. QUIÉN la pinta
+ * depende del PUBLICADOR del canal, no de la marca:
+ *
+ *   · los publicadores que escriben HTML la traducen a <strong> —`unrlvl-blog` (`api/_inline.js`)
+ *     y `unrlvl-iid-functions/blog-promoter` (`negritas`)—;
+ *   · los que publican texto plano (Meta, TikTok) la mandan tal cual, con los asteriscos.
+ *
+ * El mapa enumera PROVEEDORES —capacidades del publicador—, jamás marcas: una marca N+1 con un
+ * blog entra con una fila en `intel.brand_publish_channels`, no con un cambio aquí. Un proveedor
+ * nuevo que traduzca la negrita se añade a la vez en su publicador y en esta lista.
+ *
+ * Sólo un par bien formado es negrita: un asterisco suelto es texto (mismo patrón en las tres
+ * puntas, para que la bandeja muestre exactamente lo que se publica).
+ */
+export const PROVIDERS_WITH_INLINE_EMPHASIS: ReadonlySet<string> = new Set(['vercel_html', 'shopify_blog']);
+const EMPHASIS = /\*\*(?!\s)([^*]+?)(?<!\s)\*\*/g;
+
+/** `**texto**` → `<strong>texto</strong>`. Recibe texto YA escapado. */
+export function emphasisToHtml(escaped: string): string {
+  return String(escaped).replace(EMPHASIS, '<strong>$1</strong>');
+}
+
+/** ¿Trae el texto al menos una negrita bien formada? */
+export function hasEmphasis(text: string): boolean {
+  return new RegExp(EMPHASIS.source).test(String(text ?? ''));
+}
+
+/**
+ * El proveedor del canal de una pieza, o null si no se pudo resolver. NO lanza: la vista previa
+ * se sirve igual, en texto plano y diciéndolo. El fallo se emite con un código estable
+ * (`PREVIEW_CHANNEL_UNRESOLVED`) para que se pueda buscar en los logs de Vercel, que es la vía
+ * de verificación de este `catch` (DELIVERY_AND_VERIFICATION_RULE §4.2).
+ */
+export async function fetchChannelProvider(brandId: string, platformKey: string): Promise<string | null> {
+  if (!brandId || !platformKey) return null;
+  try {
+    const url = `${SB_URL()}/rest/v1/brand_publish_channels`
+      + `?brand_id=eq.${encodeURIComponent(brandId)}&platform_key=eq.${encodeURIComponent(platformKey)}`
+      + `&select=provider&limit=1`;
+    const res = await fetchWithTimeout('db', url, {
+      headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': 'intel' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = (await res.json().catch(() => [])) as Array<{ provider?: string | null }>;
+    const provider = Array.isArray(rows) && rows.length ? (rows[0]?.provider ?? '').trim() : '';
+    return provider || null;
+  } catch (err) {
+    console.error('[preview] PREVIEW_CHANNEL_UNRESOLVED', brandId, platformKey, err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+/** Opciones del artefacto. `provider` es el del canal de la pieza; undefined = no consultado. */
+export interface BuildHtmlOptions {
+  provider?: string | null;
+}
+
 /**
  * El texto MAESTRO: el filtrado por AIFE, o el crudo si aquél no existe. Es la etapa
  * ANTERIOR a la adaptación por canal, y **ya no es «la pieza»** — ver `channelTextOf`.
@@ -740,7 +799,7 @@ export function channelTextOf(piece: PieceTextInput): { text: string; source: Te
 }
 
 /** Construye el artefacto tal como saldría. Regla de veracidad: literal, sin re-escribir. */
-export function buildHtml(piece: ContentPiece): string {
+export function buildHtml(piece: ContentPiece, opts: BuildHtmlOptions = {}): string {
   const assets = piece.assets ?? {};
   const title = assets.copy?.title ?? '';
   // EL CUERPO ES EL TEXTO QUE SALE POR EL CANAL. `master` se muestra al lado, nunca en su
@@ -750,6 +809,15 @@ export function buildHtml(piece: ContentPiece): string {
   const master = masterTextOf(piece).trim();
   const showMaster = textSource === 'channel_adapted' && master && master !== bodyText;
   const imageUrl = assets.image?.url ?? '';
+  // NEGRITA: se pinta sólo si el publicador de ESTE canal la pinta. Si el canal publica texto
+  // plano y el texto trae `**`, se muestra literal y se avisa: así saldría.
+  const pintaNegrita = !!opts.provider && PROVIDERS_WITH_INLINE_EMPHASIS.has(opts.provider);
+  const bodyHtml = pintaNegrita ? emphasisToHtml(esc(bodyText)) : esc(bodyText);
+  const avisoNegrita = !pintaNegrita && hasEmphasis(bodyText)
+    ? (opts.provider
+        ? '\u26a0 Este canal publica texto plano: los ** de este texto saldrían visibles tal cual.'
+        : '\u26a0 No se pudo resolver el canal de esta pieza: el texto se muestra sin formato y los ** aparecen tal cual.')
+    : '';
   const brand = piece.brand_id ?? '';
   const platform = piece.platform ?? '';
   const format = piece.format ?? '';
@@ -803,6 +871,7 @@ export function buildHtml(piece: ContentPiece): string {
   .body { padding: 18px 18px 22px; }
   .title { font-size: 17px; font-weight: 700; color: #fafafa; margin: 0 0 10px; }
   .text { white-space: pre-wrap; word-break: break-word; font-size: 14px; color: #d4d4d8; }
+  .text strong { color: #fafafa; font-weight: 700; }
   .textsrc { margin-top: 10px; font-size: 11px; line-height: 1.5; }
   .textsrc--warn { color: #fbbf24; }
   .master { margin-top: 12px; font-size: 11px; color: #a1a1aa; }
@@ -825,7 +894,8 @@ export function buildHtml(piece: ContentPiece): string {
     ${imageBlock}
     <div class="body">
       ${title ? `<h1 class="title">${esc(title)}</h1>` : ''}
-      <div class="text">${esc(bodyText)}</div>
+      <div class="text">${bodyHtml}</div>
+      ${avisoNegrita ? `<div class="textsrc textsrc--warn">${avisoNegrita}</div>` : ''}
       ${textSource === 'channel_adapted'
         ? ''
         : `<div class="textsrc textsrc--warn">${textSource === 'empty'
@@ -1328,7 +1398,9 @@ export class PieceNotFound extends Error {
 export async function ensureArtifact(pieceId: string): Promise<{ artifact_url: string; piece: ContentPiece; html: string }> {
   const piece = await fetchPiece(pieceId);
   if (!piece) throw new PieceNotFound(pieceId);
-  const html = buildHtml(piece);
+  // El proveedor decide si la negrita se pinta: la vista previa muestra lo que publica el canal.
+  const provider = await fetchChannelProvider(piece.brand_id, (piece.platform ?? '').trim());
+  const html = buildHtml(piece, { provider });
   await uploadArtifact(piece.brand_id, piece.id, html);
   return { artifact_url: publicArtifactUrl(piece.brand_id, piece.id), piece, html };
 }
