@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   buildHtml, blocksOf, hasBlockMarks, stripInlineImageMarks, INLINE_IMAGES_CONTRACT_MAX,
-  PROVIDERS_WITH_INLINE_EMPHASIS, type ContentPiece,
+  PROVIDERS_WITH_INLINE_EMPHASIS, inlineImageDims, type ContentPiece,
 } from './_calibrationShared';
 
 /**
@@ -116,6 +116,24 @@ describe('las imágenes dentro del artículo en la vista previa', () => {
       expect(html).not.toContain('<figure class="inline-figure"');
       expect(html).not.toContain('![img-');
     }
+  });
+
+  // Paquete de alt (Sam, 2026-10-03): la vista previa pinta la figura como la publican los sitios.
+  it('con width y height reales, el <img> los lleva; sin ellos, sale como antes', () => {
+    const con = buildHtml(conImagenes([{ n: 1, alt: 'a', url: URL_OK, status: 'ok', width: 1408, height: 768 }]), { provider: 'vercel_html' });
+    expect(con).toContain(`<img src="${URL_OK}" alt="a" width="1408" height="768" loading="lazy" decoding="async">`);
+    const sin = buildHtml(conImagenes([{ n: 1, alt: 'a', url: URL_OK, status: 'ok' }]), { provider: 'vercel_html' });
+    expect(sin).toContain(`<img src="${URL_OK}" alt="a" loading="lazy" decoding="async">`);
+  });
+
+  it('una medida suelta, no entera, negativa o absurda no pinta ninguna de las dos', () => {
+    for (const [width, height] of [[0, 768], [1408, null], ['1408', 'x'], [1408.5, 768], [-1, 768], [99999, 768], [1408, undefined]] as unknown[][]) {
+      expect(inlineImageDims({ width, height })).toBeNull();
+      const html = buildHtml(conImagenes([{ n: 1, alt: 'a', url: URL_OK, status: 'ok', width, height }]), { provider: 'vercel_html' });
+      expect(html).toContain('<figure class="inline-figure"');
+      expect(html).not.toMatch(/width="|height="/);
+    }
+    expect(inlineImageDims({ width: '800', height: '600' })).toEqual({ width: 800, height: 600 });
   });
 
   it('el alt va escapado y nunca rompe el atributo', () => {

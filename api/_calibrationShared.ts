@@ -179,6 +179,10 @@ export interface InlineImageEntry {
   prompt_full?: string | null;
   error?: string | null;
   generated_at?: string | null;
+  // Paquete de alt (Sam, 2026-10-03): ancho y alto reales de la imagen guardada, para que la figura
+  // reserve su sitio. Opcionales: una imagen anterior al paquete no los trae y se pinta como antes.
+  width?: number | null;
+  height?: number | null;
 }
 export interface ContentPiece {
   id: string;
@@ -808,7 +812,22 @@ export function inlineFigureHtml(n: number, images: unknown, escape: (s: string)
     && ((e as InlineImageEntry).url as string).startsWith('https://'));
   if (!hit) return '';
   const alt = typeof hit.alt === 'string' ? hit.alt : '';
-  return `<figure class="inline-figure"><img src="${escape(hit.url as string)}" alt="${escape(alt)}" loading="lazy" decoding="async"></figure>`;
+  const dims = inlineImageDims(hit);
+  const wh = dims ? ` width="${dims.width}" height="${dims.height}"` : '';
+  return `<figure class="inline-figure"><img src="${escape(hit.url as string)}" alt="${escape(alt)}"${wh} loading="lazy" decoding="async"></figure>`;
+}
+
+/**
+ * Paquete de alt (2026-10-03) — la MISMA regla de lectura que los `api/_inline.js` de los sitios y
+ * `blog-promoter`: las dos medidas juntas, enteras, positivas y dentro del tope, o ninguna. Una
+ * medida suelta no reserva el sitio y sí deformaría la figura.
+ */
+export const INLINE_IMAGE_DIM_MAX = 20000;
+export function inlineImageDims(e: unknown): { width: number; height: number } | null {
+  const o = (e && typeof e === 'object') ? e as InlineImageEntry : null;
+  const w = Number(o?.width), h = Number(o?.height);
+  const valida = (v: number) => Number.isInteger(v) && v > 0 && v <= INLINE_IMAGE_DIM_MAX;
+  return valida(w) && valida(h) ? { width: w, height: h } : null;
 }
 
 /**
