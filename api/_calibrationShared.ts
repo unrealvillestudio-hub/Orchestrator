@@ -406,7 +406,7 @@ export function generationOf(piece: ContentPiece, cutoffs: PipelineCutoff[]): Ge
  * obliga a adivinar, y quien adivina termina pidiéndoselo a alguien por chat.
  */
 export type PieceActionKey =
-  | 'approve' | 'reject' | 'fixable' | 'discard' | 'edit_text' | 'recompose_image';
+  | 'approve' | 'reject' | 'fixable' | 'research' | 'discard' | 'edit_text' | 'recompose_image';
 
 export interface PieceAction {
   available: boolean;
@@ -417,7 +417,7 @@ export interface PieceAction {
 export type PieceActions = Record<PieceActionKey, PieceAction>;
 
 export const ACTION_KEYS: readonly PieceActionKey[] =
-  ['approve', 'reject', 'fixable', 'discard', 'edit_text', 'recompose_image'];
+  ['approve', 'reject', 'fixable', 'research', 'discard', 'edit_text', 'recompose_image'];
 
 const SI: PieceAction = { available: true, reason: null };
 const NO = (reason: string): PieceAction => ({ available: false, reason });
@@ -450,6 +450,12 @@ export function actionsFor(piece: {
     // `scheduled`. Ésa es la novedad que U-3 dejó lista: al sellarla, su franja se libera.
     reject: SI,
     fixable: SI,
+    /**
+     * INVESTIGAR (2026-10-05) — la pieza deja fuera un escenario que afecta lo que asegura, y
+     * arreglarla pide MATERIAL que su investigación no trae. Vale donde vale `fixable`: reta la
+     * pieza y abre un caso de investigación (`intel.research_cases`). Ver `verdictEffect`.
+     */
+    research: SI,
     discard: SI,
     edit_text: SI,
     /**
@@ -574,6 +580,11 @@ export interface PieceContext {
    * adivinara acertaría hoy y fallaría el día que el artefacto y la imagen dejen de ir juntos.
    */
   has_image: boolean;
+  /**
+   * INVESTIGAR (2026-10-05) — la pieza espera, cerró, nació de o fue reemplazada por un caso de
+   * investigación. Sólo dice a la tarjeta si vale la pena pedir el caso. Ver `researchHintOf`.
+   */
+  research_hint: boolean;
   /** CARRIL AUTO-FIX — qué corrigió el carril antes de que naciera la pieza. `null` = no corrió. */
   autofix: AutofixSummary | null;
   /**
@@ -662,6 +673,8 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     // SIN-IMAGEN-01 — mismo criterio que usaba `actionsFor` hasta hoy: una url vacía NO es una
     // imagen. Se conserva al pie de la letra, sólo que ahora informa en vez de cerrar una puerta.
     has_image: tieneImagen(piece),
+    // INVESTIGAR — si la tarjeta tiene que pedir el estado de un caso de investigación.
+    research_hint: researchHintOf(piece),
     // CARRIL AUTO-FIX — qué corrigió el carril antes de que la pieza naciera, y qué quedó.
     autofix: autofixOf(piece),
   };
@@ -1816,7 +1829,40 @@ export async function ensureArtifact(pieceId: string): Promise<{ artifact_url: s
  * `fixable` la RETA —`status='challenged'`, sin `discarded_at`—, porque marcar algo para arreglarlo
  * no puede sacarlo de la cola de lo arreglable. Ver el bloque de `verdictEffect`.
  */
-export type CalibrationVerdict = 'approved' | 'rejected' | 'fixable';
+export type CalibrationVerdict = 'approved' | 'rejected' | 'fixable' | 'research';
+
+/**
+ * INVESTIGAR (2026-10-05) — el prefijo del motivo de una pieza que espera investigación. Es el
+ * MISMO que escribe el carril (`content-run-stage`, `RESEARCH_PENDING_PREFIX`) cuando su
+ * salvaguarda detecta que una propuesta Fixable pide material nuevo, y NO es «Auto-fix:»: el
+ * carril no levanta un reto que no firmó. Legible, no criterio: lo que identifica un caso es su
+ * fila en `intel.research_cases`.
+ */
+export const RESEARCH_REASON_PREFIX = 'Investigación pendiente:';
+/**
+ * El prefijo con que el carril (`content-run-stage`, `RESEARCH_CLOSED_PREFIX`) devuelve la original a
+ * Arreglos cuando la investigación TERMINÓ sin pieza nueva: sin material, o con material y una
+ * reescritura que no salió. Tampoco es «Auto-fix:».
+ */
+export const RESEARCH_CLOSED_REASON_PREFIX = 'Investigación cerrada:';
+
+/**
+ * ¿Esta pieza tiene algo que ver con un caso de investigación? Es la PISTA que decide si su tarjeta
+ * pide el estado del caso a `/api/research-cases`: sin ella, una bandeja de cien tarjetas haría cien
+ * peticiones para saber que noventa y ocho no tienen caso. No decide nada más: lo que identifica un
+ * caso es su fila en `intel.research_cases`.
+ *
+ * Sí cuando la pieza espera o cerró una investigación (su motivo empieza por uno de los dos
+ * prefijos) o cuando nació de una o fue reemplazada por una (`assets.supersedes` /
+ * `assets.superseded_by`, que escribe el carril).
+ */
+export function researchHintOf(piece: { challenged_reason?: string | null; assets?: unknown } | null | undefined): boolean {
+  if (!piece) return false;
+  const motivo = String(piece.challenged_reason ?? '').trim();
+  if (motivo.startsWith(RESEARCH_REASON_PREFIX) || motivo.startsWith(RESEARCH_CLOSED_REASON_PREFIX)) return true;
+  const a = (piece.assets ?? {}) as Record<string, any>;
+  return Boolean(a?.supersedes?.piece_id || a?.superseded_by?.piece_id || a?.research_case?.case_id);
+}
 
 /**
  * Marcador de veredicto en `challenged_reason` de la pieza (hasta el 2026-09-20 iba en
@@ -2009,7 +2055,118 @@ export function verdictEffect(
     };
   }
 
+  // INVESTIGAR (2026-10-05) — reta la pieza igual que `fixable` (no la descarta: tiene futuro) y
+  // el motivo dice qué se está investigando. La pregunta llega en `fixProposal`.
+  if (verdict === 'research') {
+    const pregunta = (fixProposal ?? '').trim();
+    return {
+      status: 'challenged',
+      challenged_at: nowIso,
+      challenged_reason: [RESEARCH_REASON_PREFIX, pregunta || (reason ?? '')].join(' ').trim(),
+      discarded_at: null,
+      discarded_reason: null,
+      ...sinAplazamiento,
+    };
+  }
+
   return { status: 'rejected', discarded_at: nowIso, discarded_reason: reason, ...sinAplazamiento };
+}
+
+// ── INVESTIGAR · EL CASO DE INVESTIGACIÓN (2026-10-05) ───────────────────────────────────────
+// La interfaz CREA el caso y LEE su estado; nada más. Lo investiga `iid-research` (modo caso, con el
+// agente de la marca) y lo consume `content-run-stage`, que crea la pieza NUEVA por el carril
+// normal y deja la original reemplazada. Las dos EF viven en `unrlvl-iid-functions`.
+//
+// La tabla es de `intel`, sin `anon` ni `authenticated`: se llega con la llave de servicio, desde
+// esta ruta y detrás del alcance de revisión.
+
+/** Los estados del caso, en el orden del ciclo. Es el CHECK de la migración 20261005230000. */
+export const RESEARCH_CASE_STATUSES = [
+  'pending', 'researching', 'researched', 'rewriting', 'rewritten', 'no_material', 'failed',
+] as const;
+export type ResearchCaseStatus = typeof RESEARCH_CASE_STATUSES[number];
+
+export interface ResearchCase {
+  id: string;
+  piece_id: string;
+  brand_id: string;
+  question: string;
+  requested_by: string;
+  requested_at: string;
+  status: ResearchCaseStatus;
+  last_gate: string | null;
+  has_material: boolean | null;
+  sources: Array<{ url: string; title?: string | null }>;
+  new_piece_id: string | null;
+  closed_reason: string | null;
+  updated_at: string | null;
+}
+
+const RESEARCH_CASE_COLS =
+  'id,piece_id,brand_id,question,requested_by,requested_at,status,last_gate,has_material,sources,new_piece_id,closed_reason,updated_at';
+
+/**
+ * La tabla todavía no existe (el PR de interfaz va DESPUÉS de la migración, pero si alguien lo
+ * despliega antes, el botón dice qué falta en vez de un 500 genérico). Mismo criterio que
+ * `CorpusColumnMissing`.
+ */
+export class ResearchCasesMissing extends Error {
+  constructor(public server_detail: string) { super('research_cases missing'); this.name = 'ResearchCasesMissing'; }
+}
+/** Ya hay un caso abierto para la pieza: pulsar dos veces no abre dos investigaciones. */
+export class ResearchCaseOpen extends Error {
+  constructor(public open_case: ResearchCase | null) { super('research_case_open'); this.name = 'ResearchCaseOpen'; }
+}
+
+const tablaAusente = (status: number, detail: string): boolean =>
+  status === 404 || /PGRST205|research_cases/.test(detail) && /does not exist|schema cache|Could not find/i.test(detail);
+
+/** Crea el caso. Lanza `ResearchCaseOpen` si la pieza ya tiene uno abierto (índice único parcial). */
+export async function insertResearchCase(row: {
+  piece_id: string; brand_id: string; question: string; requested_by: string;
+}): Promise<ResearchCase> {
+  const url = `${SB_URL()}/rest/v1/research_cases?select=${RESEARCH_CASE_COLS}`;
+  const res = await fetchWithTimeout('db', url, {
+    method: 'POST',
+    headers: {
+      apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`,
+      'Content-Type': 'application/json', 'Content-Profile': 'intel', 'Accept-Profile': 'intel',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify(row),
+  });
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => '')).slice(0, 300);
+    if (res.status === 409 || /23505|duplicate key/.test(detail)) {
+      const abiertos = await fetchResearchCases(row.piece_id).catch(() => []);
+      throw new ResearchCaseOpen(abiertos.find((c) => c.piece_id === row.piece_id && OPEN_CASE.has(c.status)) ?? null);
+    }
+    if (tablaAusente(res.status, detail)) throw new ResearchCasesMissing(detail);
+    throw new Error(`research_cases insert failed: ${res.status} ${detail}`);
+  }
+  const rows = (await res.json().catch(() => [])) as ResearchCase[];
+  if (!Array.isArray(rows) || !rows.length) throw new Error('research_cases insert sin fila');
+  return rows[0];
+}
+
+const OPEN_CASE = new Set<ResearchCaseStatus>(['pending', 'researching', 'researched', 'rewriting']);
+/** ¿Sigue abierto? Los mismos cuatro estados que el índice único parcial de la migración. */
+export const isOpenResearchCase = (c: Pick<ResearchCase, 'status'> | null | undefined): boolean =>
+  !!c && OPEN_CASE.has(c.status);
+
+/** Los casos de una pieza: los que se abrieron SOBRE ella y el que la creó (`new_piece_id`). */
+export async function fetchResearchCases(pieceId: string): Promise<ResearchCase[]> {
+  const id = encodeURIComponent(pieceId);
+  const url = `${SB_URL()}/rest/v1/research_cases?or=(piece_id.eq.${id},new_piece_id.eq.${id})`
+    + `&select=${RESEARCH_CASE_COLS}&order=requested_at.desc&limit=10`;
+  const res = await fetchWithTimeout('db', url, { headers: sbHeaders('intel') });
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => '')).slice(0, 300);
+    if (tablaAusente(res.status, detail)) throw new ResearchCasesMissing(detail);
+    throw new Error(`research_cases read failed: ${res.status} ${detail}`);
+  }
+  const rows = (await res.json().catch(() => [])) as ResearchCase[];
+  return Array.isArray(rows) ? rows : [];
 }
 
 /**

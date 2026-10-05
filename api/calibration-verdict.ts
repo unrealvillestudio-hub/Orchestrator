@@ -81,6 +81,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!(await guardPiece(res, session, pieceId))) return;
 
   const verdict = body.verdict as CalibrationVerdict;
+  // INVESTIGAR (2026-10-05) — «Investigar» también escribe el corpus, pero abre un caso de
+  // investigación y por eso tiene su propia ruta: `/api/research-cases` (POST). Se dice dónde, en vez
+  // de un «verdict must be one of» que haría creer que el valor no existe.
+  if (verdict === 'research') {
+    return res.status(400).json({
+      error: 'use_research_cases',
+      detail: "«Investigar» se registra en /api/research-cases (POST): abre el caso de investigación además del veredicto.",
+    });
+  }
   if (!VERDICTS.includes(verdict)) {
     return res.status(400).json({ error: `verdict must be one of: ${VERDICTS.join(', ')}` });
   }

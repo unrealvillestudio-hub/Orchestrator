@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle2, XCircle, Archive, Wrench, ImagePlay, PenLine } from 'lucide-react';
+import { CheckCircle2, XCircle, Archive, Wrench, ImagePlay, PenLine, Search } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import {
   saveVerdict, discardPiece, recomposeImage, renderArtifact, CalibrationError,
-  REJECT_REASONS, buildCriterion,
-  type PieceActionKey, type PieceActions, type SlotRelease, type Verdict,
+  REJECT_REASONS, buildCriterion, fetchResearchCases, openResearchCase,
+  type PieceActionKey, type PieceActions, type SlotRelease, type Verdict, type ResearchCase,
 } from '../../services/calibrationInbox';
 import { savePieceEdit } from '../../services/challengedInbox';
 import { fmtInZone } from './pieceUi';
@@ -82,10 +82,15 @@ export interface ActionablePiece {
    * que nunca produce una generación tirada.
    */
   has_image?: boolean;
+  /**
+   * INVESTIGAR (2026-10-05) — la pieza tiene que ver con un caso de investigación: sólo entonces la
+   * tarjeta pide su estado. Lo resuelve el server (`researchHintOf`); `undefined` = no se pide.
+   */
+  research_hint?: boolean;
 }
 
 /** Lo que le pasa a la pieza cuando una acción termina. `null` = sigue en la bandeja. */
-export type ActionOutcome = 'approved' | 'rejected' | 'fixable' | 'discarded';
+export type ActionOutcome = 'approved' | 'rejected' | 'fixable' | 'research' | 'discarded';
 
 // ── La tabla de acciones: eje del sistema, no de una bandeja ─────────────────────
 /**
@@ -125,6 +130,11 @@ export const ACTION_SPECS: ReadonlyArray<{
   // sistema entero (imagen, franjas, re-adaptación), que es lo contrario de marcarla para arreglar.
   { key: 'fixable', label: 'Fixable', panel: 'fix', seals: false, weight: 'primary',
     hint: 'Hay algo que aprovechar. Reta la pieza y guarda la propuesta: queda por arreglar, no descartada.' },
+  // INVESTIGAR (2026-10-05) — también escribe el corpus (veredicto `research`), por eso es primario y
+  // va junto a Fixable. La diferencia con Fixable: arreglar esta pieza pide MATERIAL que su
+  // investigación no trae, y eso no lo resuelve una edición.
+  { key: 'research', label: 'Investigar', panel: 'research', seals: false, weight: 'primary',
+    hint: 'Falta un escenario o un dato que la investigación de la pieza no trae. Escribe la pregunta: el agente de la marca la investiga y, con material, nace una pieza nueva del mismo tema.' },
   // Nivel secundario — sella sin juicio: saca la pieza y no enseña nada.
   { key: 'discard', label: 'Descartar', panel: 'discard', seals: true, weight: 'secondary',
     hint: 'No voy a juzgar esta pieza: sale de la bandeja y NO entra al corpus.' },
@@ -150,7 +160,7 @@ export function imageActionLabel(hasImage: boolean | undefined): string {
   return hasImage === false ? 'Generar imagen' : 'Regenerar imagen';
 }
 
-export type PanelKey = 'reject' | 'fix' | 'edit' | 'regen' | 'discard';
+export type PanelKey = 'reject' | 'fix' | 'research' | 'edit' | 'regen' | 'discard';
 
 // ── Lógica pura, probable sin montar React ───────────────────────────────────────
 /**
@@ -246,6 +256,7 @@ export const OUTCOME_COPY: Record<ActionOutcome, { tone: 'ok' | 'sealed'; text: 
   approved: { tone: 'ok', text: 'Aprobada y guardada en el corpus. Habilitada para salir: la franja la calcula content-scheduler, no este clic.' },
   rejected: { tone: 'sealed', text: 'Rechazada y guardada en el corpus. La pieza queda sellada y sale de la bandeja.' },
   fixable: { tone: 'ok', text: 'Marcada como fixable. La pieza queda RETADA, no descartada: espera una sesión de arreglos con la propuesta en su motivo.' },
+  research: { tone: 'ok', text: 'Enviada a investigar. La pieza queda RETADA con «Investigación pendiente». Con material, nace una pieza nueva del mismo tema en Calibración, con sus fuentes; sin material, vuelve a Arreglos diciéndolo.' },
   discarded: { tone: 'sealed', text: 'Descartada. Sale de la bandeja y NO entra al corpus: un descarte no es un rechazo.' },
 };
 
@@ -268,6 +279,15 @@ export const PANEL_COPY: Record<PanelKey, {
     foot: 'Fixable RETA la pieza: queda «por arreglar», no descartada, y conserva su imagen y su '
       + 'sitio en la cola. La propuesta es obligatoria y baja al motivo del reto.',
     focus: 'focus:border-sky-500/60', button: 'bg-sky-500/90 hover:bg-sky-500', required: true,
+  },
+  research: {
+    label: 'Qué hay que investigar',
+    placeholder: 'La pregunta: qué escenario deja fuera la pieza y qué hay que averiguar para cubrirlo…',
+    confirm: 'Enviar a investigar',
+    foot: 'Investigar RETA la pieza y abre un caso para el agente de investigación de la marca. Con '
+      + 'material, se escribe una pieza NUEVA del mismo tema que cubre la pregunta y cita sus fuentes, y '
+      + 'la actual queda reemplazada; sin material, vuelve a Arreglos diciéndolo. La pregunta es obligatoria.',
+    focus: 'focus:border-amber-500/60', button: 'bg-amber-500/90 hover:bg-amber-500', required: true,
   },
   edit: {
     label: 'El texto de la pieza',
@@ -364,6 +384,7 @@ const BUTTON_STYLE: Record<PieceActionKey, string> = {
   approve: 'bg-accent text-black hover:bg-accent/90 shadow-md shadow-accent/20 font-semibold',
   reject: 'border border-rose-500/30 text-rose-300/90 hover:bg-rose-500/10',
   fixable: 'border border-sky-500/30 text-sky-300/90 hover:bg-sky-500/10',
+  research: 'border border-amber-500/30 text-amber-300/90 hover:bg-amber-500/10',
   // Secundario — sella sin juicio: borde neutro, sin color que señale una decisión.
   discard: 'border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200',
   // Terciario — arreglo: sin color y sin borde a la vista, el mismo tratamiento que
@@ -388,6 +409,7 @@ const ICON: Record<PieceActionKey, React.ReactNode> = {
   approve: <CheckCircle2 size={14} />,
   reject: <XCircle size={14} />,
   fixable: <Wrench size={14} />,
+  research: <Search size={14} />,
   edit_text: <PenLine size={14} />,
   recompose_image: <ImagePlay size={14} />,
   discard: <Archive size={14} />,
@@ -485,17 +507,21 @@ export function PieceActionsBar({
   const submitVerdict = async (verdict: Verdict, key: PieceActionKey) => {
     setBusy(key); setError(null);
     try {
-      const esFixable = verdict === 'fixable';
-      const r = await saveVerdict(token, {
-        piece_id: piece.piece_id,
-        verdict,
-        criterion: esFixable ? buildCriterion(reason, null) : buildCriterion(reason, note),
-        fix_proposal: esFixable ? note.trim() : null,
-      });
+      // Fixable lleva su propuesta; Investigar, su pregunta. Investigar va a su propia ruta porque,
+      // además del veredicto, abre el caso de investigación.
+      const conTexto = verdict === 'fixable' || verdict === 'research';
+      const r = verdict === 'research'
+        ? await openResearchCase(token, { piece_id: piece.piece_id, question: note.trim(), criterion: buildCriterion(reason, null) })
+        : await saveVerdict(token, {
+          piece_id: piece.piece_id,
+          verdict,
+          criterion: conTexto ? buildCriterion(reason, null) : buildCriterion(reason, note),
+          fix_proposal: conTexto ? note.trim() : null,
+        });
       // `approved` pasa por el MISMO acuse que los demás. Que no libere franja no es motivo
       // para que no diga nada: `slot_release` viene null y el acuse lo omite, pero el
       // «Aprobada» se lee igual que el «Rechazada».
-      finish(verdict === 'approved' ? 'approved' : verdict === 'fixable' ? 'fixable' : 'rejected', r.slot_release);
+      finish(verdict === 'approved' ? 'approved' : verdict === 'fixable' ? 'fixable' : verdict === 'research' ? 'research' : 'rejected', r.slot_release);
     } catch (err) {
       setError(cardError(err, 'No se pudo guardar el veredicto.'));
       setBusy(null);
@@ -579,6 +605,7 @@ export function PieceActionsBar({
   const confirm = () => {
     if (panel === 'reject') return submitVerdict('rejected', 'reject');
     if (panel === 'fix') return submitVerdict('fixable', 'fixable');
+    if (panel === 'research') return submitVerdict('research', 'research');
     if (panel === 'regen') return submitRegen();
     if (panel === 'edit') return submitEdit(false);
     return submitDiscard();
@@ -647,6 +674,7 @@ export function PieceActionsBar({
 
   return (
     <div className="space-y-2">
+      {piece.research_hint && <ResearchCaseLine pieceId={piece.piece_id} token={token} />}
       {slotNote && (
         <div className={cn(
           'text-[11px] font-mono leading-snug rounded-xl px-3 py-2 border',
@@ -823,6 +851,91 @@ export function PieceActionsBar({
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// ── INVESTIGAR · EL ESTADO DEL CASO EN LA TARJETA (2026-10-05) ──────────────────────
+/**
+ * QUÉ SE DICE DEL CASO, como lógica pura para probarla sin montar React. Recibe el caso y la pieza
+ * desde la que se mira: la misma investigación se lee distinto en la original («se está
+ * reescribiendo», «la nueva es…») y en la pieza nueva («nace de la investigación…, reemplaza a…»).
+ *
+ * La pieza se nombra SIEMPRE por su `piece_id` completo (CC_PROTOCOL §17.8): Sam la busca por él.
+ */
+export function researchCaseSummary(c: ResearchCase, viewedPieceId: string): {
+  tone: 'wait' | 'ok' | 'alert'; text: string; link: { href: string; label: string } | null;
+  sources: Array<{ url: string; title: string }>;
+} {
+  const q = `«${(c.question ?? '').trim()}»`;
+  const fuentes = (Array.isArray(c.sources) ? c.sources : [])
+    .filter((x) => x && typeof x.url === 'string' && x.url.trim())
+    .map((x) => ({ url: x.url.trim(), title: String(x.title ?? '').trim() || x.url.trim() }));
+  const n = fuentes.length;
+  const nf = `${n} fuente${n === 1 ? '' : 's'}`;
+  const esLaNueva = !!c.new_piece_id && c.new_piece_id === viewedPieceId && c.piece_id !== viewedPieceId;
+  if (esLaNueva) {
+    return { tone: 'ok', text: `Pieza nueva de la investigación ${q}, con ${nf}. Reemplaza a la pieza ${c.piece_id}.`, link: null, sources: fuentes };
+  }
+  switch (c.status) {
+    case 'pending':
+      return { tone: 'wait', link: null, sources: [],
+        text: `Investigación pendiente: ${q}. En cola del agente de investigación de la marca.`
+          + (c.last_gate ? ` Última espera: ${c.last_gate}.` : '') };
+    case 'researching':
+      return { tone: 'wait', link: null, sources: [], text: `Investigando ${q}.` };
+    case 'researched':
+    case 'rewriting':
+      return c.has_material
+        ? { tone: 'wait', link: null, sources: fuentes, text: `Investigada ${q}: hay material (${nf}). La pieza nueva se está escribiendo por el carril.` }
+        : { tone: 'wait', link: null, sources: [], text: `Investigada ${q}: sin material. Vuelve a Arreglos.` };
+    case 'rewritten':
+      return { tone: 'ok', sources: fuentes,
+        text: `Reescrita con ${nf}: la pieza nueva es ${c.new_piece_id ?? '(sin id)'} y esta queda reemplazada.`,
+        link: c.new_piece_artifact_url ? { href: c.new_piece_artifact_url, label: 'Ver la pieza nueva' } : null };
+    case 'no_material':
+      return { tone: 'alert', link: null, sources: [], text: `No se encontró material para ${q}. La pieza sigue en Arreglos.` };
+    case 'failed':
+    default:
+      return { tone: 'alert', link: null, sources: [],
+        text: `La investigación ${q} no terminó: ${c.closed_reason ?? 'sin motivo registrado'}.` };
+  }
+}
+
+/**
+ * La línea del caso. Lee `/api/research-cases` una vez, y sólo en las tarjetas con `research_hint`:
+ * una bandeja de cien tarjetas no hace cien peticiones para saber que casi ninguna tiene caso. Sin
+ * casos, o sin la tabla (migración sin aplicar), no pinta nada: una línea vacía no es un error.
+ */
+export function ResearchCaseLine({ pieceId, token }: { pieceId: string; token: string }) {
+  const [c, setC] = useState<ResearchCase | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    fetchResearchCases(token, pieceId)
+      .then((r) => { if (vivo) setC((r.cases ?? [])[0] ?? null); })
+      .catch(() => { /* sin tabla o sin red: la tarjeta sigue sin la línea */ });
+    return () => { vivo = false; };
+  }, [pieceId, token]);
+  if (!c) return null;
+  const s = researchCaseSummary(c, pieceId);
+  return (
+    <div className={cn(
+      'text-[11px] font-mono leading-snug rounded-xl px-3 py-2 border space-y-1',
+      s.tone === 'ok' ? 'bg-emerald-500/[0.06] border-emerald-500/25 text-emerald-300/90'
+        : s.tone === 'alert' ? 'bg-amber-500/[0.08] border-amber-500/40 text-amber-200'
+          : 'bg-zinc-800/40 border-zinc-700/60 text-zinc-300',
+    )}>
+      <p className="flex items-start gap-1.5"><Search size={12} className="shrink-0 mt-0.5" /><span>{s.text}</span></p>
+      {s.link && (
+        <a href={s.link.href} target="_blank" rel="noreferrer" className="underline hover:text-white">{s.link.label}</a>
+      )}
+      {s.sources.length > 0 && (
+        <ul className="list-disc pl-4 space-y-0.5">
+          {s.sources.map((f) => (
+            <li key={f.url}><a href={f.url} target="_blank" rel="noreferrer" className="underline break-all hover:text-white">{f.title}</a></li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

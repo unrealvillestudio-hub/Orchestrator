@@ -425,6 +425,8 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
             // SIN-IMAGEN-01 — mismo dato en las tres bandejas: la acción no puede llamarse
             // distinto según desde dónde se abra.
             has_image: piece.has_image,
+            // INVESTIGAR — si la tarjeta pide el estado del caso de investigación.
+            research_hint: piece.research_hint,
           }}
           token={token}
           onResolved={(id) => onResolved(id)}

@@ -400,7 +400,10 @@ function VerdictTag({ verdict }: { verdict: string }) {
       ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
       : verdict === 'fixable'
         ? 'bg-sky-500/10 border-sky-500/30 text-sky-300'
-        : 'bg-zinc-800 border-zinc-700 text-zinc-300';
+        // INVESTIGAR (2026-10-05) — el mismo ámbar que el botón «Investigar».
+        : verdict === 'research'
+          ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+          : 'bg-zinc-800 border-zinc-700 text-zinc-300';
   return (
     <span className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded border shrink-0', tono)}>
       {verdict || 'sin veredicto'}
