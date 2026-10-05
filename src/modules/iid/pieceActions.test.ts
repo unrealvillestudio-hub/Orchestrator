@@ -2,8 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   actionButtons, slotWarning, slotReleaseNotice, ACTION_SPECS, PANEL_COPY, OUTCOME_COPY,
-  panelCopyFor, imageActionLabel,
+  panelCopyFor, imageActionLabel, researchCaseSummary,
 } from './pieceActions';
+import type { ResearchCase } from '../../services/calibrationInbox';
 import type { PieceActions, PieceActionKey } from '../../services/calibrationInbox';
 
 /**
@@ -19,8 +20,9 @@ import type { PieceActions, PieceActionKey } from '../../services/calibrationInb
  */
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────────
+// INVESTIGAR (2026-10-05) — entra `research`: son siete.
 const KEYS: PieceActionKey[] =
-  ['approve', 'reject', 'fixable', 'discard', 'edit_text', 'recompose_image'];
+  ['approve', 'reject', 'fixable', 'research', 'discard', 'edit_text', 'recompose_image'];
 
 const SI = { available: true, reason: null };
 const NO = (reason: string) => ({ available: false, reason });
@@ -38,10 +40,10 @@ const activos = (bs: ReturnType<typeof actionButtons>) =>
 const FRANJA = { slot_at: '2026-09-20T15:30:00+00:00', status: 'reserved', timezone: 'UTC' };
 
 // ── 1 · Todo disponible ──────────────────────────────────────────────────────────
-describe('pieza con las seis disponibles', () => {
-  it('seis botones activos, ninguno con motivo', () => {
+describe('pieza con las siete disponibles', () => {
+  it('siete botones activos, ninguno con motivo', () => {
     const bs = actionButtons(conTodo);
-    expect(bs).toHaveLength(6);
+    expect(bs).toHaveLength(7);
     expect(activos(bs)).toEqual([...KEYS].sort());
     for (const b of bs) expect(b.reason).toBeNull();
   });
@@ -58,11 +60,11 @@ describe('pieza ya aprobada (scheduled)', () => {
     expect(approve.reason).toBe(MOTIVO);
     // Sigue estando en la lista: apagar no es ocultar. Un botón que desaparece obliga a
     // preguntarse si existe.
-    expect(bs).toHaveLength(6);
+    expect(bs).toHaveLength(7);
   });
 
-  it('los otros cinco siguen activos', () => {
-    expect(activos(bs)).toEqual(['discard', 'edit_text', 'fixable', 'recompose_image', 'reject']);
+  it('los otros seis siguen activos', () => {
+    expect(activos(bs)).toEqual(['discard', 'edit_text', 'fixable', 'recompose_image', 'reject', 'research']);
   });
 });
 
@@ -73,20 +75,20 @@ describe('pieza sin imagen', () => {
       ...conTodo,
       recompose_image: NO('Esta pieza no tiene imagen: no hay nada que recomponer.'),
     });
-    expect(activos(bs)).toEqual(['approve', 'discard', 'edit_text', 'fixable', 'reject']);
+    expect(activos(bs)).toEqual(['approve', 'discard', 'edit_text', 'fixable', 'reject', 'research']);
     expect(bs.find((b) => b.key === 'recompose_image')!.reason).toContain('no tiene imagen');
   });
 });
 
 // ── 3 bis · Pieza sellada — U-6 §5.3 ─────────────────────────────────────────────
 describe('pieza ya sellada', () => {
-  it('las seis apagadas CON su motivo, ninguna oculta', () => {
+  it('las siete apagadas CON su motivo, ninguna oculta', () => {
     // Es el caso que más se ve en Retenidas: una pieza descartada o ya juzgada sigue
     // listada por su arbitraje pendiente. Seis botones apagados y explicados dicen qué
     // pasa; seis botones ausentes obligan a preguntarse si la pantalla se rompió.
     const SELLADA = 'Esta pieza ya está sellada: no admite más acciones.';
     const bs = actionButtons(Object.fromEntries(KEYS.map((k) => [k, NO(SELLADA)])) as PieceActions);
-    expect(bs).toHaveLength(6);
+    expect(bs).toHaveLength(7);
     expect(activos(bs)).toEqual([]);
     for (const b of bs) expect(b.reason).toBe(SELLADA);
   });
@@ -103,9 +105,9 @@ describe('contrato que no declara una acción', () => {
     expect(fixable.reason).toContain('no declaró');
   });
 
-  it('sin contrato ninguno, las seis apagadas y todas con motivo', () => {
+  it('sin contrato ninguno, las siete apagadas y todas con motivo', () => {
     const bs = actionButtons(null);
-    expect(bs).toHaveLength(6);
+    expect(bs).toHaveLength(7);
     expect(activos(bs)).toEqual([]);
     for (const b of bs) expect((b.reason ?? '').length).toBeGreaterThan(0);
   });
@@ -414,9 +416,10 @@ describe('el apagado se distingue por su forma, no por su transparencia', () => 
 describe('el nivel de una acción lo decide qué deja aprendizaje', () => {
   const NIVEL = (k: PieceActionKey) => ACTION_SPECS.find((s) => s.key === k)!.weight;
 
-  it('las tres que escriben el corpus son primarias; el descarte, secundario', () => {
-    expect([NIVEL('approve'), NIVEL('reject'), NIVEL('fixable')])
-      .toEqual(['primary', 'primary', 'primary']);
+  it('las cuatro que escriben el corpus son primarias; el descarte, secundario', () => {
+    // INVESTIGAR (2026-10-05) — `research` escribe el corpus (veredicto propio): es primaria.
+    expect([NIVEL('approve'), NIVEL('reject'), NIVEL('fixable'), NIVEL('research')])
+      .toEqual(['primary', 'primary', 'primary', 'primary']);
     // Descartar SELLA, pero no entra al corpus: sella y no enseña. Por eso no es primaria.
     expect(NIVEL('discard')).toBe('secondary');
   });
@@ -513,5 +516,52 @@ describe('pedir una imagen cuando no hay ninguna', () => {
     // se piense. Es el único texto que las dos versiones tienen que compartir.
     expect(panelCopyFor('regen', false).foot).toContain('una generación');
     expect(panelCopyFor('regen', true).foot).toContain('una generación');
+  });
+});
+
+// ── INVESTIGAR (2026-10-05) · el estado del caso en la tarjeta ───────────────────────
+describe('Investigar · la tarjeta dice en qué va el caso', () => {
+  const ORIG = '11111111-2222-4333-8444-555555555555';
+  const NUEVA = '66666666-7777-4888-9999-000000000000';
+  const base: ResearchCase = {
+    id: 'c-1', piece_id: ORIG, brand_id: 'MarcaInventadaA', question: '¿Qué pasa con el escenario Y?',
+    requested_by: 'revisor', requested_at: '2026-10-05T10:00:00Z', status: 'pending', last_gate: null,
+    has_material: null, sources: [], new_piece_id: null, new_piece_artifact_url: null, closed_reason: null, updated_at: null,
+  };
+  const S = (c: Partial<ResearchCase>, visto = ORIG) => researchCaseSummary({ ...base, ...c }, visto);
+
+  it('pendiente, con la espera de la puerta si la hubo', () => {
+    expect(S({}).tone).toBe('wait');
+    expect(S({}).text).toMatch(/^Investigación pendiente: «¿Qué pasa con el escenario Y\?»/);
+    expect(S({ last_gate: 'regulador: sin hueco' }).text).toContain('Última espera: regulador: sin hueco');
+  });
+  it('investigada con material: se está escribiendo, con sus fuentes', () => {
+    const s = S({ status: 'rewriting', has_material: true, sources: [{ url: 'https://fuente.invalid/a', title: 'Fuente A' }] });
+    expect(s.text).toContain('1 fuente');
+    expect(s.sources).toEqual([{ url: 'https://fuente.invalid/a', title: 'Fuente A' }]);
+  });
+  it('reescrita: enlace a la pieza nueva y su piece_id COMPLETO', () => {
+    const s = S({ status: 'rewritten', has_material: true, new_piece_id: NUEVA, new_piece_artifact_url: 'https://vista.invalid/x',
+      sources: [{ url: 'https://fuente.invalid/a' }, { url: 'https://fuente.invalid/b', title: 'B' }] });
+    expect(s.tone).toBe('ok');
+    expect(s.text).toContain(NUEVA);
+    expect(s.link).toEqual({ href: 'https://vista.invalid/x', label: 'Ver la pieza nueva' });
+    expect(s.sources.map((f) => f.title)).toEqual(['https://fuente.invalid/a', 'B']);
+  });
+  it('vista desde la pieza nueva: de qué investigación nace y a quién reemplaza', () => {
+    const s = S({ status: 'rewritten', new_piece_id: NUEVA, sources: [{ url: 'https://fuente.invalid/a' }] }, NUEVA);
+    expect(s.text).toContain('Pieza nueva de la investigación');
+    expect(s.text).toContain(ORIG);
+  });
+  it('sin material y fallida se dicen como alerta, con el motivo', () => {
+    expect(S({ status: 'no_material' })).toMatchObject({ tone: 'alert' });
+    expect(S({ status: 'no_material' }).text).toContain('No se encontró material');
+    expect(S({ status: 'failed', closed_reason: 'la investigación falló 3 veces' }).text).toContain('la investigación falló 3 veces');
+  });
+  it('la tarjeta sólo pide el caso con la pista, e Investigar va a su propia ruta', () => {
+    const SRC = readFileSync(new URL('./pieceActions.tsx', import.meta.url), 'utf8');
+    expect(SRC).toMatch(/\{piece\.research_hint && <ResearchCaseLine pieceId=\{piece\.piece_id\} token=\{token\} \/>\}/);
+    expect(SRC).toMatch(/verdict === 'research'\s*\? await openResearchCase\(token, \{ piece_id: piece\.piece_id, question: note\.trim\(\)/);
+    expect(PANEL_COPY.research.required).toBe(true);
   });
 });

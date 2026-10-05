@@ -23,7 +23,7 @@ const disponibles = (a: PieceActions) =>
 
 // ── Una pieza viva ofrece todo ───────────────────────────────────────────────────
 describe('pieza en la bandeja, sin sellar', () => {
-  it('con imagen → las seis disponibles, y ninguna lleva motivo', () => {
+  it('con imagen → las siete disponibles, y ninguna lleva motivo', () => {
     const a = actionsFor({ status: 'awaiting_approval', assets: CON_IMAGEN });
     expect(disponibles(a)).toEqual([...ACTION_KEYS].sort());
     for (const k of ACTION_KEYS) expect(a[k].reason).toBeNull();
@@ -39,17 +39,17 @@ describe('pieza ya aprobada (scheduled)', () => {
     expect(a.approve.reason).toBeTruthy();
   });
 
-  it('las otras cinco SÍ: sacarla de circulación vale en cualquier estado vivo', () => {
+  it('las otras seis SÍ: sacarla de circulación vale en cualquier estado vivo', () => {
     // Es la novedad que U-3 dejó lista: al sellarla, su franja se libera sola.
     expect(disponibles(a)).toEqual(
-      ['discard', 'edit_text', 'fixable', 'recompose_image', 'reject'],
+      ['discard', 'edit_text', 'fixable', 'recompose_image', 'reject', 'research'],
     );
   });
 });
 
 // ── Sellada ──────────────────────────────────────────────────────────────────────
 describe('pieza sellada (discarded_at)', () => {
-  it('las seis cerradas, todas con el mismo motivo: un veredicto no se pisa', () => {
+  it('las siete cerradas, todas con el mismo motivo: un veredicto no se pisa', () => {
     const a = actionsFor({
       status: 'rejected', discarded_at: '2026-09-13T10:00:00Z', assets: CON_IMAGEN,
     });
@@ -92,10 +92,10 @@ describe('publicada Y sellada — un estado incoherente que el carril puede prod
 // La precondición REAL —que la plataforma lleve imagen— vive en el motor y la hace cumplir él,
 // fail-loud y antes de gastar una generación. Ver el docstring de `actionsFor`.
 describe('pieza sin imagen · puede pedir una', () => {
-  it('sin assets, las SEIS acciones siguen disponibles', () => {
+  it('sin assets, las SIETE acciones siguen disponibles', () => {
     const a = actionsFor({ status: 'awaiting_approval', assets: null });
     expect(disponibles(a)).toEqual(
-      ['approve', 'discard', 'edit_text', 'fixable', 'recompose_image', 'reject'],
+      ['approve', 'discard', 'edit_text', 'fixable', 'recompose_image', 'reject', 'research'],
     );
     expect(a.recompose_image.reason).toBeNull();
   });
@@ -140,7 +140,7 @@ describe('invariante estructural — vale para CUALQUIER entrada', () => {
     {},
   ];
 
-  it('las claves son EXACTAMENTE las seis, ni una más ni una menos', () => {
+  it('las claves son EXACTAMENTE las siete, ni una más ni una menos', () => {
     for (const e of ENTRADAS) {
       expect(Object.keys(actionsFor(e)).sort()).toEqual([...ACTION_KEYS].sort());
     }

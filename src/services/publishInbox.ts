@@ -137,6 +137,12 @@ export interface PublishablePiece {
   metrics: PieceMetrics | null;
   /** SIN-IMAGEN-01 — si la pieza ya tiene imagen. Lo resuelve el server (`toContext`). */
   has_image: boolean;
+  /**
+   * INVESTIGAR (2026-10-05) — la pieza espera, cerró, nació de o fue reemplazada por un caso de
+   * investigación: la tarjeta pide su estado a `/api/research-cases`. Lo resuelve el server
+   * (`researchHintOf`). Opcional: sin el dato, la tarjeta no pide nada.
+   */
+  research_hint?: boolean;
   // Canal de destino y su estado operativo.
   channel: ChannelInfo;
   /**

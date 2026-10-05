@@ -27,7 +27,7 @@
  * El contrato completo está en `api/calibration-verdict.ts`.
  */
 import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
-export type Verdict = 'approved' | 'rejected' | 'fixable';
+export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
 export type QueueOrder = 'slot' | 'recent' | 'oldest' | 'brand' | 'verdict';
@@ -183,7 +183,7 @@ export interface ForecastSlot {
  * es `false` el motivo está en `actions[k].reason`.
  */
 export type PieceActionKey =
-  | 'approve' | 'reject' | 'fixable' | 'discard' | 'edit_text' | 'recompose_image';
+  | 'approve' | 'reject' | 'fixable' | 'research' | 'discard' | 'edit_text' | 'recompose_image';
 
 export interface PieceAction {
   available: boolean;
@@ -304,6 +304,12 @@ export interface CalibrationPiece {
    * separa las dos caras de la acción de imagen: corregir una escena, o pedir la primera.
    */
   has_image: boolean;
+  /**
+   * INVESTIGAR (2026-10-05) — la pieza espera, cerró, nació de o fue reemplazada por un caso de
+   * investigación: la tarjeta pide su estado a `/api/research-cases`. Lo resuelve el server
+   * (`researchHintOf`). Opcional: sin el dato, la tarjeta no pide nada.
+   */
+  research_hint?: boolean;
   /**
    * CARRIL AUTO-FIX — qué corrigió el carril antes de que la pieza naciera, y qué quedó. `null` = el
    * carril no corrió sobre ella. Espejo de `AutofixSummary` en `api/_calibrationShared.ts`.
@@ -609,6 +615,54 @@ export function saveVerdict(
       criterion: input.criterion ?? null,
       fix_proposal: input.fix_proposal ?? null,
     },
+  });
+}
+
+// ── INVESTIGAR (2026-10-05) ──────────────────────────────────────────────────
+/**
+ * El caso de investigación de una pieza, tal como lo devuelve `/api/research-cases`. Lo crea el
+ * veredicto `research`; lo investiga `iid-research` con el agente de la marca y lo consume
+ * `content-run-stage`, que crea una pieza NUEVA del mismo tema o devuelve la original a Arreglos.
+ */
+export type ResearchCaseStatus =
+  | 'pending' | 'researching' | 'researched' | 'rewriting' | 'rewritten' | 'no_material' | 'failed';
+export interface ResearchCase {
+  id: string;
+  piece_id: string;
+  brand_id: string;
+  question: string;
+  requested_by: string;
+  requested_at: string;
+  status: ResearchCaseStatus;
+  last_gate: string | null;
+  has_material: boolean | null;
+  sources: Array<{ url: string; title?: string | null }>;
+  new_piece_id: string | null;
+  /** La vista previa de la pieza nueva, cuando existe. La arma el server. */
+  new_piece_artifact_url?: string | null;
+  closed_reason: string | null;
+  updated_at: string | null;
+}
+
+/** Los casos de una pieza: los abiertos sobre ella y el que la creó. */
+export function fetchResearchCases(token: string, pieceId: string): Promise<{ ok: true; cases: ResearchCase[] }> {
+  return req(`/api/research-cases?piece_id=${encodeURIComponent(pieceId)}`, token);
+}
+
+/**
+ * «Investigar»: escribe el veredicto `research` con la pregunta, abre el caso y reta la pieza. Va a su
+ * propia ruta y no a `/api/calibration-verdict` porque además de juzgar abre un caso.
+ */
+export function openResearchCase(
+  token: string,
+  input: { piece_id: string; question: string; criterion?: string | null },
+): Promise<{
+  ok: true; row: VerdictRow; research_case: ResearchCase; piece_applied: boolean; piece_status: string | null;
+  note?: string; slot_release?: SlotRelease | null;
+}> {
+  return req('/api/research-cases', token, {
+    method: 'POST',
+    body: { piece_id: input.piece_id, question: input.question, criterion: input.criterion ?? null },
   });
 }
 
