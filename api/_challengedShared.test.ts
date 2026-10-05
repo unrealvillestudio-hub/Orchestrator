@@ -135,7 +135,8 @@ describe('pieceTitle', () => {
 // ── La fila que ve Sam ───────────────────────────────────────────────────────────
 describe('toChallengedRow', () => {
   const pieces = new Map([['p-1', piece()]]);
-  const statements = new Map([[RULE, 'El enunciado completo de la regla.']]);
+  // 2026-10-05 — las filas llegan CON su marca: el filtro lo hace `toChallengedRow` por arbitraje.
+  const statements = [{ code: RULE, statement: 'El enunciado completo de la regla.', severity: 'blocking', brand_id: BRAND }];
 
   it('trae la regla en disputa CON su enunciado', () => {
     const r = toChallengedRow(cal(), pieces, statements);
@@ -146,9 +147,18 @@ describe('toChallengedRow', () => {
   });
 
   it('el enunciado ausente NO tumba la fila: el arbitraje sigue siendo posible', () => {
-    const r = toChallengedRow(cal(), pieces, new Map());
+    const r = toChallengedRow(cal(), pieces, []);
     expect(r.rule_statement).toBeNull();
     expect(r.rule_code).toBe(RULE);
+  });
+
+  it('una regla de OTRA marca con el mismo código no llega a la fila; una general sí (2026-10-05)', () => {
+    const ajena = [{ code: RULE, statement: 'De otra marca.', severity: 'warn', brand_id: 'OtraMarca' }];
+    expect(toChallengedRow(cal(), pieces, ajena).rule_statement).toBeNull();
+    expect(toChallengedRow(cal(), pieces, ajena).rule_texts).toEqual({});
+    const general = [{ code: RULE, statement: 'General.', severity: 'warn', brand_id: null }];
+    expect(toChallengedRow(cal(), pieces, general).rule_statement).toBe('General.');
+    expect(toChallengedRow(cal(), pieces, general).rule_texts[RULE]).toEqual({ statement: 'General.', severity: 'warn' });
   });
 
   it('lleva el patrón y el hecho de que NO aparece: eso ES el desacuerdo', () => {

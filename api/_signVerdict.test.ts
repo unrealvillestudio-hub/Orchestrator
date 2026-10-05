@@ -133,7 +133,10 @@ describe('D · los cuatro estados se nombran', () => {
     expect(sinComentarios(UI)).toMatch(/evaluada/);
     expect(UI).toMatch(/NO son incumplimientos/);
     const enumera = UI.slice(UI.indexOf("verdict === 'REJECT' && codes.length"), UI.indexOf('rulesEvaluated ==='));
-    expect(enumera).toMatch(/codes\.join/);
+    // 2026-10-05 — cada incumplida se enumera como chip de regla (`codes.map` → `RuleChip`); antes,
+    // con `codes.join`. Lo que se exige es que se ENUMEREN, no con qué función (CC_PROTOCOL §14.3).
+    expect(enumera).toMatch(/codes\.(join|map)\(/);
+    expect(enumera).not.toMatch(/rulesEvaluated/);
   });
 
   it('pass_type visible: clean frente a assisted', () => {
