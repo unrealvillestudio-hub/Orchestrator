@@ -35,6 +35,9 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
 // Las láminas en el orden en que se publican: el mismo criterio que la publicación manual y el drenaje.
 import { manualImagesOf } from './_manualShared.js';
+// La firma canónica del drenaje: la MISMA copia que ya usa la publicación manual (SIGNCANON de
+// `unrlvl-iid-functions`). Una sola copia en este repo, no dos.
+import { canonicalizeSignature } from './_manualShared.js';
 
 export const BUCKET = 'unrlvl-media';
 // Calibración = gate admin (igual que las aprobaciones legacy).
@@ -149,8 +152,11 @@ export interface PieceAssets {
   // Texto adaptado POR CANAL (content-run-stage). Es el que ese canal recibe de verdad,
   // y por eso es el que la cabecera mide contra el tope del canal (ver _pieceMetrics.ts).
   // El artefacto sigue mostrando el maestro: son dos cosas distintas y se declaran.
-  social?: { adapted?: Array<{ copy?: string; platform?: string }> };
-  builder_meta?: { psycho_preset?: string; audience_frame?: string };
+  // `platforms`: la lista de canales del job, que la rama degradada del drenaje usa cuando no hay
+  // adaptación (ver `publishedTextOf`).
+  social?: { adapted?: Array<{ copy?: string; platform?: string }>; platforms?: string[] | null };
+  // `signature_closer`: la firma de la voz, que el drenaje de `meta_graph` pone una vez y al final.
+  builder_meta?: { psycho_preset?: string; audience_frame?: string; signature_closer?: { text?: string | null } | null };
   watcher?: {
     result?: string;
     failed_gate?: string | null;
@@ -934,61 +940,188 @@ export function channelTextOf(piece: PieceTextInput): { text: string; source: Te
   return master ? { text: master, source: 'master_copy' } : { text: '', source: 'empty' };
 }
 
+// ── VISTA COMO SE PUBLICA (2026-10-05) ────────────────────────────────────────────────────────
+//
+// EL DEFECTO QUE CIERRA [medido el 2026-10-05]. La vista previa pintaba SIEMPRE el texto adaptado
+// (`channelTextOf`), pero los publicadores no publican todos ese texto:
+//
+//   · `meta_graph` (`unrlvl-iid-functions/content-scheduler`, `buildPlacementRows`) publica el
+//     adaptado del canal pasado por `canonicalizeSignature`, sin título;
+//   · `shopify_blog` (`blog-promoter`, `cuerpoDelBlog`) publica el MAESTRO —`copy.aife_filtered`,
+//     con `##`, `>` y `![img-N]`— y el título como título del artículo;
+//   · `vercel_html` (`forumphs-com` y `unrlvl-blog`, `api/_channel.js` → `normalizePiece`) publica
+//     también el maestro y el título.
+//
+// En un blog la vista mostraba el adaptado, que no trae subtítulos ni imágenes dentro del texto:
+// `a4597530-b337-4185-a06b-d6ed29ad847a` tiene tres `##` y dos `![img-N]` en el maestro y ninguno
+// en el adaptado. Y en Instagram y Facebook pintaba un <h1> con `copy.title` que el canal no publica.
+//
+// QUIÉN DECIDE ES EL PROVEEDOR DEL CANAL, que es dato: `intel.brand_publish_channels.provider`,
+// resuelto por `(brand_id, platform_key)` en `fetchChannelProvider`. El mapa de abajo enumera
+// PROVEEDORES —capacidades del publicador—, jamás marcas: la marca N+1 con un blog o con Meta entra
+// con una fila en `brand_publish_channels`, no con un cambio aquí.
+//
+// POR QUÉ UN MAPA Y NO UNA COLUMNA. `brand_publish_channels` no declara hoy si el canal publica
+// título ni en qué orden van título y portada [medido el 2026-10-05: columnas `provider`, `config`,
+// `image_title_mode`, `publication_path`; ninguna clave de `config` lo dice]. Mientras no exista ese
+// dato, se deriva del proveedor, que es un eje, con un mapa explícito que falla ruidoso: un
+// proveedor que no esté aquí NO se adivina — la vista sigue como antes, lo dice en pantalla y deja
+// `PREVIEW_PROVIDER_UNMAPPED` en el log de Vercel (DELIVERY_AND_VERIFICATION_RULE §4.2).
+//
+// EL ORDEN TÍTULO → PORTADA, medido el 2026-10-05 en los tres renderizadores que existen: los
+// `api/blog-article.js` de `forumphs-com` y de `unrlvl-blog` pintan `<h1>` y después `.cover`, y la
+// plantilla `templates/article.liquid` del tema activo de la tienda pinta `.nc-art-title` y después
+// `.nc-art-img`. En `shopify_blog` quien decide es el TEMA de la tienda: si un tema futuro lo
+// invierte, este mapa queda desfasado, y por eso el día que exista el dato por canal manda el dato.
+
+/** Qué texto publica el proveedor: el maestro, o el adaptado del canal con la firma canónica. */
+export type PublishedTextRule = 'master' | 'channel_adapted_signed';
+/** En qué orden aparecen título y medios. `media_then_text` = el canal no publica título. */
+export type TitleMediaOrder = 'title_then_cover' | 'media_then_text';
+
+export interface ChannelLayout {
+  text: PublishedTextRule;
+  publishesTitle: boolean;
+  order: TitleMediaOrder;
+}
+
+/** El mapa explícito por PROVEEDOR. Ver el bloque de arriba. Un proveedor ausente no se adivina. */
+export const CHANNEL_LAYOUT_BY_PROVIDER: Readonly<Record<string, ChannelLayout>> = Object.freeze({
+  meta_graph:   { text: 'channel_adapted_signed', publishesTitle: false, order: 'media_then_text' },
+  shopify_blog: { text: 'master',                 publishesTitle: true,  order: 'title_then_cover' },
+  vercel_html:  { text: 'master',                 publishesTitle: true,  order: 'title_then_cover' },
+});
+
+/** La regla de vista del proveedor, o null si el proveedor no está en el mapa (o no se resolvió). */
+export function channelLayoutOf(provider: string | null | undefined): ChannelLayout | null {
+  const k = typeof provider === 'string' ? provider.trim() : '';
+  return k && Object.prototype.hasOwnProperty.call(CHANNEL_LAYOUT_BY_PROVIDER, k) ? CHANNEL_LAYOUT_BY_PROVIDER[k] : null;
+}
+
+/**
+ * De dónde salió el texto publicado:
+ *   master_copy         — el maestro (proveedores de marcado);
+ *   channel_adapted     — el adaptado del canal, con la firma canónica (`meta_graph`);
+ *   channel_degraded    — sin adaptaciones: la rama degradada del drenaje, maestro sin marcas de
+ *                         imagen y con la firma;
+ *   no_copy_for_channel — hay adaptaciones, pero ninguna para este canal: el drenaje NO publica
+ *                         (`NO_COPY_FOR_CHANNEL`);
+ *   empty               — no hay texto.
+ */
+export type PublishedSource = 'master_copy' | 'channel_adapted' | 'channel_degraded' | 'no_copy_for_channel' | 'empty';
+
+export interface PublishedText {
+  text: string;
+  source: PublishedSource;
+}
+
+/** La forma mínima que lee `publishedTextOf`. Estructural, como `PieceTextInput`. */
+export interface PublishedTextInput {
+  platform?: string | null;
+  assets?: {
+    copy?: { aife_filtered?: string | null; raw?: string | null } | null;
+    social?: { adapted?: unknown; platforms?: unknown } | null;
+    builder_meta?: { signature_closer?: { text?: string | null } | null } | null;
+  } | null;
+}
+
+// ── Puerto de `content-scheduler` (repo `unrlvl-iid-functions`, `supabase/functions/content-scheduler/
+// index.ts` en `main` 8ec1c42): `leerAdaptadas` (:2248), `filtrarAlCanalDeLaFranja` (:2265),
+// `stripInlineImageMarks` (bloque INLINE-MARK-STRIP, :2351) y `buildPlacementRows` (:2362). Se porta
+// lo mínimo, sin DB ni red. `canonicalizeSignature` (:1741) NO se copia otra vez: es la de
+// `_manualShared.ts`, que ya es copia del bloque SIGNCANON. Si cambia allá, cambia acá.
+
+/** `leerAdaptadas`: el arreglo tal cual, o el arreglo serializado como cadena. Sin filtrar. */
+function adaptedAsScheduler(assets: PublishedTextInput['assets']): unknown[] {
+  const bruto = assets?.social?.adapted;
+  if (Array.isArray(bruto)) return bruto;
+  if (typeof bruto === 'string' && bruto.trim().length > 0) {
+    try {
+      const decodificado = JSON.parse(bruto);
+      if (Array.isArray(decodificado)) return decodificado;
+    } catch { /* no es JSON: la rama degradada sabe qué publicar */ }
+  }
+  return [];
+}
+
+/** INLINE-MARK-STRIP del drenaje: quita los bloques `![img-N]` (cualquier N) del texto plano. */
+function stripImageMarksAsScheduler(text: unknown): string {
+  const t = String(text ?? '');
+  const marca = /^!\[img-\d+\]$/;
+  const bloques = t.replace(/\r\n?/g, '\n').split(/\n[ \t]*\n/).map((b) => b.trim()).filter(Boolean);
+  if (!bloques.some((b) => marca.test(b))) return t;
+  return bloques.filter((b) => !marca.test(b)).join('\n\n');
+}
+
+/**
+ * EL TEXTO QUE PUBLICA EL CANAL, con la regla de su publicador. `provider` es el del canal de la
+ * pieza (`brand_publish_channels.provider`). Devuelve null si el proveedor no está en
+ * `CHANNEL_LAYOUT_BY_PROVIDER`: quien llama decide qué mostrar y lo dice, nunca se adivina.
+ *
+ * `meta_graph` replica `buildPlacementRows` recortado al canal de la pieza (la franja nombra el canal
+ * por su `platform_key`, que es `content_pieces.platform`). Los proveedores de marcado publican el
+ * maestro: `copy.aife_filtered`, o `copy.raw` si aquél falta, sin espacios en los extremos.
+ */
+export function publishedTextOf(piece: PublishedTextInput, provider: string | null | undefined): PublishedText | null {
+  const layout = channelLayoutOf(provider);
+  if (!layout) return null;
+  const assets = piece.assets ?? {};
+
+  if (layout.text === 'master') {
+    const master = String(assets.copy?.aife_filtered ?? assets.copy?.raw ?? '').trim();
+    return master ? { text: master, source: 'master_copy' } : { text: '', source: 'empty' };
+  }
+
+  // channel_adapted_signed — `buildPlacementRows` + `filtrarAlCanalDeLaFranja`.
+  const canal = String(piece.platform ?? '').toLowerCase();
+  const sig = assets.builder_meta?.signature_closer?.text ?? null;
+  const adapted = adaptedAsScheduler(assets);
+  if (adapted.length > 0) {
+    const propia = adapted.find((a): a is { platform: unknown; copy: string } => {
+      const o = (a && typeof a === 'object') ? a as { platform?: unknown; copy?: unknown } : null;
+      return !!o?.platform && typeof o.copy === 'string' && o.copy.length > 0
+        && String(o.platform).toLowerCase() === canal;
+    });
+    return propia
+      ? { text: canonicalizeSignature(propia.copy, sig), source: 'channel_adapted' }
+      : { text: '', source: 'no_copy_for_channel' };
+  }
+  const judged = stripImageMarksAsScheduler(assets.copy?.aife_filtered ?? assets.copy?.raw ?? '');
+  if (!judged) return { text: '', source: 'empty' };
+  const declaradas = assets.social?.platforms;
+  const platforms = (Array.isArray(declaradas) && declaradas.length > 0)
+    ? declaradas.map((p) => String(p))
+    : (piece.platform ? [String(piece.platform)] : []);
+  return platforms.some((p) => p.toLowerCase() === canal)
+    ? { text: canonicalizeSignature(judged, sig), source: 'channel_degraded' }
+    : { text: '', source: 'no_copy_for_channel' };
+}
+
+/** Avisos de la vista cuando el texto publicado no es el adaptado limpio. */
+const PUBLISHED_SOURCE_WARNING: Readonly<Record<PublishedSource, string>> = Object.freeze({
+  master_copy: '',
+  channel_adapted: '',
+  channel_degraded: '⚠ Sin adaptación para este canal: el drenaje publicaría el TEXTO MAESTRO con la firma (rama degradada), que es lo que se muestra.',
+  no_copy_for_channel: '⚠ La pieza trae adaptaciones para otros canales y ninguna para éste: el drenaje NO la publicaría (NO_COPY_FOR_CHANNEL).',
+  empty: '⚠ SIN TEXTO — este canal no tendría nada que publicar.',
+});
+
 /** Construye el artefacto tal como saldría. Regla de veracidad: literal, sin re-escribir. */
 export function buildHtml(piece: ContentPiece, opts: BuildHtmlOptions = {}): string {
-  const assets = piece.assets ?? {};
-  const title = assets.copy?.title ?? '';
-  // EL CUERPO ES EL TEXTO QUE SALE POR EL CANAL. `master` se muestra al lado, nunca en su
-  // lugar, y `source` se declara: una bandeja que cae al maestro en silencio es el defecto
-  // que este cambio cierra, con el signo invertido.
-  const { text: bodyText, source: textSource } = channelTextOf(piece);
-  const master = masterTextOf(piece).trim();
-  const showMaster = textSource === 'channel_adapted' && master && master !== bodyText;
-  const imageUrl = assets.image?.url ?? '';
-  // NEGRITA: se pinta sólo si el publicador de ESTE canal la pinta. Si el canal publica texto
-  // plano y el texto trae `**`, se muestra literal y se avisa: así saldría.
-  const pintaNegrita = !!opts.provider && PROVIDERS_WITH_INLINE_EMPHASIS.has(opts.provider);
-  // F1: el mismo canal que pinta la negrita pinta los subtítulos (`##`) y las citas (`>`).
-  // F2: en el canal que pinta el formato, la marca `![img-N]` se vuelve figura (o nada) según
-  // `assets.inline_images`; en un canal plano se elimina, como hace su publicador.
-  const plainBody = stripInlineImageMarks(bodyText);
-  const bodyHtml = pintaNegrita ? editorialToHtml(bodyText, esc, assets.inline_images) : esc(plainBody);
-  const conMarcas = hasEmphasis(plainBody) || hasBlockMarks(plainBody);
-  const avisoNegrita = !pintaNegrita && conMarcas
-    ? (opts.provider
-        ? '\u26a0 Este canal publica texto plano: los ** de este texto saldrían visibles tal cual (y también los ## y > de bloque).'
-        : '\u26a0 No se pudo resolver el canal de esta pieza: el texto se muestra sin formato y los ** aparecen tal cual.')
-    : '';
-  const brand = piece.brand_id ?? '';
-  const platform = piece.platform ?? '';
-  const format = piece.format ?? '';
+  const layout = channelLayoutOf(opts.provider);
+  if (layout) return buildPublishedHtml(piece, opts.provider as string, layout);
+  // Proveedor resuelto pero ausente del mapa: no se adivina. La vista sigue como antes y lo dice.
+  if (opts.provider) {
+    console.error('[preview] PREVIEW_PROVIDER_UNMAPPED', piece.brand_id, piece.platform, opts.provider);
+  }
+  const legacy = buildLegacyHtml(piece, opts);
+  if (!opts.provider) return legacy;
+  const aviso = `<div class="textsrc textsrc--warn">⚠ El proveedor «${esc(opts.provider)}» de este canal no está en el mapa de la vista publicada: se muestra el texto adaptado del canal, que puede no ser el que sale.</div>`;
+  return legacy.replace('\n      <div class="meta">', `\n      ${aviso}\n      <div class="meta">`);
+}
 
-  // CARRUSEL (2026-10-01): hasta hoy el artefacto pintaba sólo `assets.image.url`, la portada, y Sam
-  // aprobó carruseles sin ver sus láminas. Ahora se ven TODAS, en el orden en que se publican
-  // (`manualImagesOf`, el mismo criterio que el drenaje), en una tira que se desliza. Sin JS: el
-  // artefacto se pinta en un <iframe sandbox="">.
-  // Sólo lo que decide las láminas: `builder_meta` tiene otra forma en cada lado y no interviene.
-  const laminas = manualImagesOf({
-    id: piece.id, brand_id: piece.brand_id, format: piece.format,
-    assets: { image: assets.image, carousel: assets.carousel },
-  });
-  const imageBlock = laminas.length >= 2
-    ? `<div class="media carousel" aria-label="Carrusel de ${laminas.length} láminas">
-      <div class="strip">${laminas.map((u, i) => `<figure class="slide"><img src="${esc(u)}" alt="lámina ${i + 1}" /><figcaption>${i + 1} / ${laminas.length}</figcaption></figure>`).join('')}</div>
-      <div class="carousel-note">Carrusel · ${laminas.length} láminas — desliza para verlas todas</div>
-    </div>`
-    : imageUrl
-      ? `<div class="media"><img src="${esc(imageUrl)}" alt="preview" /></div>`
-      : `<div class="media media--none">Sin imagen (canal solo-texto)</div>`;
-
-  return `<!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="robots" content="noindex, nofollow" />
-<title>Preview · ${esc(brand)} · ${esc(piece.id)}</title>
-<style>
+/** Los estilos del artefacto. Uno solo para las dos vistas. */
+const ARTIFACT_CSS = `
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; padding: 24px; background: #050508; color: #e4e4e7;
@@ -1030,7 +1163,22 @@ export function buildHtml(piece: ContentPiece, opts: BuildHtmlOptions = {}): str
   .meta { margin-top: 16px; padding-top: 12px; border-top: 1px dashed #26262b; font-size: 10px;
     font-family: ui-monospace, monospace; color: #52525b; display: flex; flex-wrap: wrap; gap: 4px 12px; }
   .meta b { color: #71717a; font-weight: 600; }
-</style>
+`;
+
+/** El marco común del artefacto: cabecera, estilos y pie. Se escribe una sola vez. */
+function artifactShell(piece: ContentPiece, inner: string): string {
+  const assets = piece.assets ?? {};
+  const brand = piece.brand_id ?? '';
+  const platform = piece.platform ?? '';
+  const format = piece.format ?? '';
+  return `<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Preview · ${esc(brand)} · ${esc(piece.id)}</title>
+<style>${ARTIFACT_CSS}</style>
 </head>
 <body>
   <div class="card">
@@ -1040,19 +1188,7 @@ export function buildHtml(piece: ContentPiece, opts: BuildHtmlOptions = {}): str
       <span>${esc(platform)}</span>
       ${format ? `<span class="sep">·</span><span>${esc(format)}</span>` : ''}
     </div>
-    ${imageBlock}
-    <div class="body">
-      ${title ? `<h1 class="title">${esc(title)}</h1>` : ''}
-      <div class="text"${pintaNegrita ? ' data-rich' : ''}>${bodyHtml}</div>
-      ${avisoNegrita ? `<div class="textsrc textsrc--warn">${avisoNegrita}</div>` : ''}
-      ${textSource === 'channel_adapted'
-        ? ''
-        : `<div class="textsrc textsrc--warn">${textSource === 'empty'
-            ? '\u26a0 SIN TEXTO — la pieza no trae adaptación para este canal ni texto maestro.'
-            : '\u26a0 Sin adaptación para este canal: arriba se muestra el TEXTO MAESTRO, que no es el que saldría.'}</div>`}
-      ${showMaster
-        ? `<details class="master"><summary>Ver el texto maestro (etapa anterior a la adaptación)</summary><div class="mastertext">${esc(stripInlineImageMarks(master))}</div></details>`
-        : ''}
+${inner}
       <div class="meta">
         <span><b>piece_id</b> ${esc(piece.id)}</span>
         ${piece.voice ? `<span><b>voice</b> ${esc(piece.voice)}</span>` : ''}
@@ -1064,6 +1200,120 @@ export function buildHtml(piece: ContentPiece, opts: BuildHtmlOptions = {}): str
   </div>
 </body>
 </html>`;
+}
+
+/**
+ * Las láminas o la imagen, en el orden en que se publican. CARRUSEL (2026-10-01): hasta ese día el
+ * artefacto pintaba sólo `assets.image.url`, la portada, y Sam aprobó carruseles sin ver sus
+ * láminas. Ahora se ven TODAS (`manualImagesOf`, el mismo criterio que el drenaje), en una tira que
+ * se desliza. Sin JS: el artefacto se pinta en un <iframe sandbox="">. Sólo lo que decide las
+ * láminas: `builder_meta` tiene otra forma en cada lado y no interviene.
+ */
+function mediaBlockOf(piece: ContentPiece): string {
+  const assets = piece.assets ?? {};
+  const imageUrl = assets.image?.url ?? '';
+  const laminas = manualImagesOf({
+    id: piece.id, brand_id: piece.brand_id, format: piece.format,
+    assets: { image: assets.image, carousel: assets.carousel },
+  });
+  return laminas.length >= 2
+    ? `<div class="media carousel" aria-label="Carrusel de ${laminas.length} láminas">
+      <div class="strip">${laminas.map((u, i) => `<figure class="slide"><img src="${esc(u)}" alt="lámina ${i + 1}" /><figcaption>${i + 1} / ${laminas.length}</figcaption></figure>`).join('')}</div>
+      <div class="carousel-note">Carrusel · ${laminas.length} láminas — desliza para verlas todas</div>
+    </div>`
+    : imageUrl
+      ? `<div class="media"><img src="${esc(imageUrl)}" alt="preview" /></div>`
+      : `<div class="media media--none">Sin imagen (canal solo-texto)</div>`;
+}
+
+/**
+ * La vista de un canal cuyo proveedor está en el mapa: el texto de `publishedTextOf`, el título sólo
+ * si el canal lo publica, y título y medios en el orden del canal.
+ */
+function buildPublishedHtml(piece: ContentPiece, provider: string, layout: ChannelLayout): string {
+  const assets = piece.assets ?? {};
+  const published = publishedTextOf(piece, provider) ?? { text: '', source: 'empty' as const };
+  // El formato editorial lo pinta el MISMO publicador que publica el maestro (ver
+  // `PROVIDERS_WITH_INLINE_EMPHASIS`); en un canal plano el texto se muestra literal, como sale.
+  const rico = PROVIDERS_WITH_INLINE_EMPHASIS.has(provider);
+  const bodyHtml = rico ? editorialToHtml(published.text, esc, assets.inline_images) : esc(published.text);
+  const conMarcas = !rico && (hasEmphasis(published.text) || hasBlockMarks(published.text));
+  const avisoMarcas = conMarcas
+    ? '⚠ Este canal publica texto plano: los ** de este texto saldrían visibles tal cual (y también los ## y > de bloque).'
+    : '';
+  const avisoFuente = PUBLISHED_SOURCE_WARNING[published.source];
+
+  const title = String(assets.copy?.title ?? '').trim();
+  const titleHtml = layout.publishesTitle
+    ? (title
+        ? `<h1 class="title">${esc(title)}</h1>`
+        : '<div class="textsrc textsrc--warn">⚠ Sin título: este canal publica uno y la pieza no lo trae.</div>')
+    : '';
+  // En `meta_graph` el maestro se ofrece al lado (plegado) para ver qué hizo la adaptación; en un
+  // proveedor de marcado el maestro ES lo que sale y no hay nada que comparar.
+  const master = masterTextOf(piece).trim();
+  const showMaster = published.source === 'channel_adapted' && master && master !== published.text.trim();
+
+  const mediaHtml = mediaBlockOf(piece);
+  const head = layout.order === 'title_then_cover' && titleHtml
+    ? `    <div class="body" style="padding-bottom:0">${titleHtml}</div>\n    ${mediaHtml}`
+    : `    ${mediaHtml}`;
+  const inner = `${head}
+    <div class="body">
+      <div class="text"${rico ? ' data-rich' : ''}>${bodyHtml}</div>
+      ${avisoMarcas ? `<div class="textsrc textsrc--warn">${avisoMarcas}</div>` : ''}
+      ${avisoFuente ? `<div class="textsrc textsrc--warn">${avisoFuente}</div>` : ''}
+      ${showMaster
+        ? `<details class="master"><summary>Ver el texto maestro (etapa anterior a la adaptación)</summary><div class="mastertext">${esc(stripInlineImageMarks(master))}</div></details>`
+        : ''}`;
+  return artifactShell(piece, inner);
+}
+
+/**
+ * La vista ANTERIOR, sin cambios: se usa cuando el proveedor no se resolvió o no está en el mapa.
+ * Su salida es byte a byte la de antes del 2026-10-05 (lo prueba el golden de
+ * `_vistaComoSePublica.test.ts`).
+ */
+function buildLegacyHtml(piece: ContentPiece, opts: BuildHtmlOptions = {}): string {
+  const assets = piece.assets ?? {};
+  const title = assets.copy?.title ?? '';
+  // EL CUERPO ES EL TEXTO QUE SALE POR EL CANAL. `master` se muestra al lado, nunca en su
+  // lugar, y `source` se declara: una bandeja que cae al maestro en silencio es el defecto
+  // que este cambio cierra, con el signo invertido.
+  const { text: bodyText, source: textSource } = channelTextOf(piece);
+  const master = masterTextOf(piece).trim();
+  const showMaster = textSource === 'channel_adapted' && master && master !== bodyText;
+  // NEGRITA: se pinta sólo si el publicador de ESTE canal la pinta. Si el canal publica texto
+  // plano y el texto trae `**`, se muestra literal y se avisa: así saldría.
+  const pintaNegrita = !!opts.provider && PROVIDERS_WITH_INLINE_EMPHASIS.has(opts.provider);
+  // F1: el mismo canal que pinta la negrita pinta los subtítulos (`##`) y las citas (`>`).
+  // F2: en el canal que pinta el formato, la marca `![img-N]` se vuelve figura (o nada) según
+  // `assets.inline_images`; en un canal plano se elimina, como hace su publicador.
+  const plainBody = stripInlineImageMarks(bodyText);
+  const bodyHtml = pintaNegrita ? editorialToHtml(bodyText, esc, assets.inline_images) : esc(plainBody);
+  const conMarcas = hasEmphasis(plainBody) || hasBlockMarks(plainBody);
+  const avisoNegrita = !pintaNegrita && conMarcas
+    ? (opts.provider
+        ? '\u26a0 Este canal publica texto plano: los ** de este texto saldrían visibles tal cual (y también los ## y > de bloque).'
+        : '\u26a0 No se pudo resolver el canal de esta pieza: el texto se muestra sin formato y los ** aparecen tal cual.')
+    : '';
+  // CARRUSEL (2026-10-01): las láminas en el orden en que se publican. Ver `mediaBlockOf`.
+  const imageBlock = mediaBlockOf(piece);
+
+  const inner = `    ${imageBlock}
+    <div class="body">
+      ${title ? `<h1 class="title">${esc(title)}</h1>` : ''}
+      <div class="text"${pintaNegrita ? ' data-rich' : ''}>${bodyHtml}</div>
+      ${avisoNegrita ? `<div class="textsrc textsrc--warn">${avisoNegrita}</div>` : ''}
+      ${textSource === 'channel_adapted'
+        ? ''
+        : `<div class="textsrc textsrc--warn">${textSource === 'empty'
+            ? '\u26a0 SIN TEXTO — la pieza no trae adaptación para este canal ni texto maestro.'
+            : '\u26a0 Sin adaptación para este canal: arriba se muestra el TEXTO MAESTRO, que no es el que saldría.'}</div>`}
+      ${showMaster
+        ? `<details class="master"><summary>Ver el texto maestro (etapa anterior a la adaptación)</summary><div class="mastertext">${esc(stripInlineImageMarks(master))}</div></details>`
+        : ''}`;
+  return artifactShell(piece, inner);
 }
 
 // ── Acceso a datos (PostgREST, service_role) ──────────────────────────────────────
