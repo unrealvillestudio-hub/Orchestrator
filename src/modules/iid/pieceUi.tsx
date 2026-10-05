@@ -5,6 +5,10 @@ import {
   ChevronDown, SlidersHorizontal, Wand2,
 } from 'lucide-react';
 import { cn } from '../../ui/components';
+// CHIP DE REGLA (2026-10-05) — todo código de regla de la tarjeta enseña su enunciado.
+import { RuleChip, RuleText } from './RuleText';
+// Las bandejas envuelven cada tarjeta con los enunciados de su pieza; se re-exporta con el resto.
+export { RuleTextsProvider } from './RuleText';
 import type {
   FlowGeneration, PieceMetrics, CountAgainstLimit, SignatureCheck, PendingState, FixFlow, AutofixSummary,
 } from '../../services/calibrationInbox';
@@ -749,7 +753,9 @@ export function WatcherBadge({ verdict, reason, failedRules, rulesEvaluated, pas
       <span className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded border w-fit', e.cls)} title={e.title}>
         {e.icon} {e.label}
         {/* INCUMPLIDAS: se enumeran. Es la única lista de códigos que la tarjeta muestra. */}
-        {verdict === 'REJECT' && codes.length > 0 && <span className="font-mono">· {codes.join(', ')}</span>}
+        {verdict === 'REJECT' && codes.length > 0 && (
+          <span className="font-mono">· {codes.map((c, i) => <React.Fragment key={c}>{i > 0 && ', '}<RuleChip code={c} /></React.Fragment>)}</span>
+        )}
         {/* EVALUADAS: se CUENTAN, nunca se enumeran — enumerarlas es lo que se leía como violaciones. */}
         {typeof rulesEvaluated === 'number' && (
           <span className="opacity-50" title="Contra cuántas reglas enumeradas se juzgó esta pieza. NO son incumplimientos.">
@@ -764,7 +770,7 @@ export function WatcherBadge({ verdict, reason, failedRules, rulesEvaluated, pas
         )}
       </span>
       {/* LA RAZÓN, no sólo el código. La redacta el server, que es quien tiene el gate_detail. */}
-      {reason && <span className="text-[10px] text-zinc-500 leading-snug">{reason}</span>}
+      {reason && <span className="text-[10px] text-zinc-500 leading-snug"><RuleText text={reason} /></span>}
     </span>
   );
 }
@@ -987,10 +993,10 @@ export function AutofixNotice({ autofix, reason }: { autofix: AutofixSummary | n
       <Wand2 size={13} className="shrink-0 mt-0.5" />
       <span>
         <span className={residuo ? 'text-pink-300/70' : 'text-emerald-300/70'}>Auto-fix ({intentos}):</span>{' '}
-        {autofix.resolved.length > 0 && <span className="font-sans">corrigió {autofix.resolved.join(', ')}</span>}
+        {autofix.resolved.length > 0 && <span className="font-sans">corrigió <RuleText text={autofix.resolved.join(', ')} /></span>}
         {autofix.resolved.length > 0 && residuo && <span>; </span>}
-        {residuo && <span className="font-semibold font-sans">no pudo resolver {autofix.residual.join(', ')}</span>}
-        {residuo && reason && <span className="text-pink-300/70"> · {reason}</span>}
+        {residuo && <span className="font-semibold font-sans">no pudo resolver <RuleText text={autofix.residual.join(', ')} /></span>}
+        {residuo && reason && <span className="text-pink-300/70"> · <RuleText text={reason} /></span>}
         {autofix.cost_usd != null && <span className={residuo ? 'text-pink-300/50' : 'text-emerald-300/50'}> · ${autofix.cost_usd.toFixed(3)}</span>}
       </span>
     </div>
@@ -1012,7 +1018,7 @@ export function FixNotice({ state, fix }: { state: PendingState; fix: FixFlow | 
         <AlertTriangle size={13} className="shrink-0 mt-0.5" />
         <span>
           <span className="text-amber-300/70">{state === 'sin_imagen' ? 'Sin imagen. Motivo:' : 'Retenida. Motivo:'}</span>{' '}
-          <span className="font-semibold font-sans">{fix.challenge_reason ?? 'sin motivo escrito'}</span>
+          <span className="font-semibold font-sans">{fix.challenge_reason ? <RuleText text={fix.challenge_reason} /> : 'sin motivo escrito'}</span>
           {fix.challenged_at && <span className="text-amber-300/70"> · {fmtDate(fix.challenged_at)}</span>}
         </span>
       </div>
@@ -1036,7 +1042,7 @@ export function FixNotice({ state, fix }: { state: PendingState; fix: FixFlow | 
           <span className={suave}>
             {volvio ? 'Volvió corregida. Pediste:' : 'Marcada para arreglar. Pediste:'}
           </span>{' '}
-          <span className="font-semibold font-sans">{fix.challenge_reason ?? 'sin propuesta escrita'}</span>
+          <span className="font-semibold font-sans">{fix.challenge_reason ? <RuleText text={fix.challenge_reason} /> : 'sin propuesta escrita'}</span>
           {fix.challenged_at && (
             <span className={suave}> · {fmtDate(fix.challenged_at)}</span>
           )}

@@ -18,6 +18,8 @@ import { PieceActionsBar } from './pieceActions';
 // Lectura en voz alta. Aquí el texto YA llega plano: el adaptador sólo normaliza la forma.
 import { SpeechReader } from '../../ui/SpeechReader';
 import { readableFromChallengedPiece } from './readablePiece';
+// CHIP DE REGLA (2026-10-05) — el código en disputa y los de la razón enseñan su enunciado.
+import { RuleTextsProvider, RuleChip, RuleText } from './RuleText';
 
 const PAGE = 20;
 
@@ -293,6 +295,7 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
   const readable = useMemo(() => readableFromChallengedPiece(row.piece), [row.piece]);
 
   return (
+    <RuleTextsProvider value={row.rule_texts}>
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
@@ -307,7 +310,7 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300">
-              {row.rule_code}
+              <RuleChip code={row.rule_code} />
             </span>
             <span className="text-[11px] font-mono text-zinc-600">{row.brand_id}</span>
             {piece?.platform && <span className="text-[11px] font-mono text-zinc-600">{piece.platform}</span>}
@@ -317,7 +320,7 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
             <p className="text-[13px] text-zinc-300 mt-1.5 leading-relaxed">{row.rule_statement}</p>
           )}
           {/* La razón, redactada por el server: una sola fuente para la explicación. */}
-          <p className="text-[12px] text-amber-300/80 mt-1.5 leading-relaxed">{row.reason}</p>
+          <p className="text-[12px] text-amber-300/80 mt-1.5 leading-relaxed"><RuleText text={row.reason} /></p>
           {row.verify_pattern && (
             <p className="hidden md:block text-[11px] font-mono text-zinc-600 mt-1 break-all">patrón: {row.verify_pattern}</p>
           )}
@@ -443,6 +446,7 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
         <p className="text-[11px] text-amber-300/80 mt-2.5 leading-relaxed">{error}</p>
       )}
     </motion.div>
+    </RuleTextsProvider>
   );
 }
 

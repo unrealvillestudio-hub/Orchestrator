@@ -27,6 +27,8 @@
  * El contrato completo está en `api/calibration-verdict.ts`.
  */
 import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
+// CHIP DE REGLA — la forma del mapa de enunciados es la del server, importada, no espejada.
+import type { RuleTexts } from '../../api/_ruleCodes';
 export type Verdict = 'approved' | 'rejected' | 'fixable';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
@@ -309,6 +311,12 @@ export interface CalibrationPiece {
    * carril no corrió sobre ella. Espejo de `AutofixSummary` en `api/_calibrationShared.ts`.
    */
   autofix: AutofixSummary | null;
+  /**
+   * CHIP DE REGLA (2026-10-05) — enunciado y severidad de cada código que aparece en la pieza, sólo
+   * de su marca o generales (filtrado en el server). Opcional: un server anterior no lo manda, y
+   * entonces los códigos se pintan como texto.
+   */
+  rule_texts?: RuleTexts;
 }
 
 /** Espejo de `AutofixSummary` en `api/_calibrationShared.ts`. */

@@ -16,7 +16,7 @@ import { PieceActionsBar, type ActionOutcome } from './pieceActions';
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader, shortId,
   ForecastLine, SlotsNotice, SearchNotice, PendingStateBadge, PENDING_STATE_UI,
-  DeferralNotice, FixNotice, AutofixNotice, PieceSummary, MobileDetails, FilterBar, OpenChallengesNotice,
+  DeferralNotice, FixNotice, AutofixNotice, PieceSummary, MobileDetails, FilterBar, OpenChallengesNotice, RuleTextsProvider,
 } from './pieceUi';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
 import { SpeechReader } from '../../ui/SpeechReader';
@@ -418,7 +418,7 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
   </>);
 
   return (
-    <motion.div
+    <RuleTextsProvider value={piece.rule_texts}><motion.div
       initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
       className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden"
       style={{ borderLeftWidth: 3, borderLeftColor: estado.color }}
@@ -493,6 +493,6 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
             cada bloque ya está en su sitio de siempre, arriba. */}
         <div className="md:hidden"><MobileDetails>{cabecera}{tecnico}{lectura}</MobileDetails></div>
       </div>
-    </motion.div>
+    </motion.div></RuleTextsProvider>
   );
 }

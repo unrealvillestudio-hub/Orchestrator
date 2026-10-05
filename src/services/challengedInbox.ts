@@ -16,6 +16,7 @@
 
 import { CalibrationError, type SearchInfo, type PieceActions } from './calibrationInbox';
 import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
+import type { RuleTexts } from '../../api/_ruleCodes';
 
 // ── Tipos (contrato de CALIB-01 §2) ──────────────────────────────────────────
 export type ChallengeVerdict = 'judge_was_right' | 'rule_failed';
@@ -51,6 +52,8 @@ export interface ChallengedRow {
   created_at: string;
   rule_code: string;
   rule_statement: string | null;
+  /** CHIP DE REGLA (2026-10-05) — enunciados de los códigos de la fila, filtrados por marca en el server. */
+  rule_texts?: RuleTexts;
   verify_pattern: string | null;
   pattern_found: boolean;
   /** La razón de la retención en una línea, redactada por el server. */
