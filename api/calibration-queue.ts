@@ -46,7 +46,9 @@ import { CALIBRATION_TAB_STATES,
 import { requireReviewer, filterByReviewScope } from './_reviewScope.js';
 // UNA PIEZA, UNA PESTAÑA — la retenida CON arbitraje abierto es de Retenidas; la que no lo tiene
 // (p. ej. sin imagen) se queda acá, porque no hay otra pestaña que la muestre.
-import { fetchPendingChallenges } from './_challengedShared.js';
+import { fetchPendingChallenges, fetchRuleTexts } from './_challengedShared.js';
+// CHIP DE REGLA (2026-10-05) — el enunciado de cada código que aparece en la tarjeta, por marca.
+import { codesInValue, ruleTextsFor, type RuleTexts } from './_ruleCodes.js';
 // LO-CORREGIDO-01 — el circuito de arreglos: qué pidió Sam, qué se hizo desde entonces y por qué
 // versión va. Enriquece la tarjeta; nunca decide si la pieza aparece. Ver `_fixFlow.ts`.
 import { fetchPieceEdits, fixFlowOf, type FixFlow } from './_fixFlow.js';
@@ -88,6 +90,12 @@ type CalibrationInboxPiece = PieceContext & {
    * «no vino» de «no hay», y esas dos cosas ya se confundieron una vez en este repositorio.
    */
   fix: FixFlow;
+  /**
+   * CHIP DE REGLA (2026-10-05) — enunciado y severidad de cada código de regla que aparece en esta
+   * pieza (veredicto, auto-fix, propuesta), SÓLO de su marca o generales. Un código sin entrada
+   * se pinta como texto. Vacío `{}` = ningún código, o no se pudo leer (`RULE_TEXTS_UNREAD`).
+   */
+  rule_texts: RuleTexts;
 };
 
 // Ejes de orden y filtro. Son del SISTEMA (una pieza tiene fecha, marca y veredicto en
@@ -389,7 +397,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       fetchPieceEdits(page.map((p) => p.id)),
     ]);
 
-    const pieces: CalibrationInboxPiece[] = page.map((p) => ({
+    const base = page.map((p) => ({
       ...toContext(p, {
         trace: p.orchestrator_job_id ? traces.get(p.orchestrator_job_id) : undefined,
         attempts: p.queue_id ? (attempts.get(p.queue_id) ?? null) : null,
@@ -407,6 +415,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       pending_state: stateById.get(p.id)!,
       // LO-CORREGIDO-01 — la propuesta de Sam, lo que cambió desde el reto y por qué versión va.
       fix: fixFlowOf(p, edits.get(p.id) ?? []),
+    }));
+
+    // CHIP DE REGLA — los códigos se buscan en la pieza YA ARMADA, que es lo que la tarjeta pinta:
+    // así ningún sitio de la tarjeta queda sin enunciado porque nadie lo enumeró. Una sola lectura
+    // para la página; el filtro de marca, por pieza.
+    const codesByPiece = base.map((p) => codesInValue(p));
+    const ruleRows = await fetchRuleTexts(codesByPiece.flat());
+    const pieces: CalibrationInboxPiece[] = base.map((p, i) => ({
+      ...p,
+      rule_texts: ruleTextsFor(ruleRows, p.brand_id, codesByPiece[i]),
     }));
 
     // U-8 — DOS LOTES PUEDEN CORTARSE, Y CORTARSE MIENTE DE DOS MANERAS DISTINTAS.

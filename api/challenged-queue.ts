@@ -31,8 +31,9 @@ import {
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
 import { requireReviewer, filterByReviewScope } from './_reviewScope.js';
 import { fetchBrandLanguages } from './_brandLanguage.js';
+import { codesIn } from './_ruleCodes.js';
 import {
-  fetchPendingChallenges, fetchPiecesByIds, fetchRuleStatements, toChallengedRow,
+  fetchPendingChallenges, fetchPiecesByIds, fetchRuleTexts, toChallengedRow, retentionReason,
   CHALLENGED_CAP,
 } from './_challengedShared.js';
 
@@ -135,13 +136,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Pieza y enunciado sólo para la página visible: el `in.()` de PostgREST crece con la
     // lista, y el cuerpo de la pieza es lo más pesado de la respuesta.
-    const [pieces, statements] = await Promise.all([
+    // Los códigos de la página: el de cada arbitraje y los que nombre su razón. El filtro de
+    // marca va por fila, en `toChallengedRow`.
+    const [pieces, ruleRows] = await Promise.all([
       fetchPiecesByIds(page.map((r) => r.piece_id ?? '')),
-      fetchRuleStatements(page.map((r) => r.rule_code)),
+      fetchRuleTexts(page.flatMap((r) => [r.rule_code, ...codesIn(retentionReason(r.rule_code))])),
     ]);
 
     const brandLangs = await fetchBrandLanguages();
-    const rows = page.map((r) => toChallengedRow(r, pieces, statements, brandLangs));
+    const rows = page.map((r) => toChallengedRow(r, pieces, ruleRows, brandLangs));
 
     const truncated = abiertas.length >= CHALLENGED_CAP;
     if (truncated) console.warn(`[challenged-queue] judge_calibration hit cap ${CHALLENGED_CAP} — la bandeja puede estar truncada`);

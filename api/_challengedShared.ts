@@ -41,6 +41,8 @@ import {
 } from './_calibrationShared.js';
 import { readingLanguageOf, type BrandLanguageCatalog } from './_brandLanguage.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
+// CHIP DE REGLA (2026-10-05) — el filtro de marca y la forma del código, una sola vez para los dos lados.
+import { ruleTextsFor, codesIn, type RuleTextRow, type RuleTexts } from './_ruleCodes.js';
 
 // ── Tipos del contrato (CALIB-01 §2) ─────────────────────────────────────────────
 
@@ -73,7 +75,10 @@ export interface ChallengedRow {
   created_at: string;
   // La regla en disputa
   rule_code: string;
+  /** El enunciado de `rule_code`, sólo si la regla es de la marca del arbitraje o general. */
   rule_statement: string | null;
+  /** CHIP DE REGLA — enunciado y severidad de cada código que aparece en la fila, filtrado por marca. */
+  rule_texts: RuleTexts;
   verify_pattern: string | null;
   pattern_found: boolean;
   reason: string;
@@ -168,27 +173,34 @@ export async function fetchChallenge(id: string): Promise<JudgeCalibrationRow | 
 }
 
 /**
- * `statement` de las reglas nombradas. Es lo que convierte un código en algo que un humano
- * puede arbitrar: sin el enunciado, "¿el juez tenía razón sobre HR-XXX-01?" no es una
- * pregunta contestable.
+ * `statement` y `severity` de las reglas nombradas, CON su `brand_id`. Es lo que convierte un
+ * código en algo que un humano puede arbitrar: sin el enunciado, "¿el juez tenía razón sobre
+ * HR-XXX-01?" no es una pregunta contestable.
  *
- * Devuelve un Map vacío ante cualquier fallo: el enunciado ENRIQUECE la fila, no la
- * condiciona. Perder la bandeja entera porque no se pudo leer un texto sería peor.
+ * Lee con service_role (`intel.watcher_rules` tiene RLS y sólo `service_role` tiene SELECT
+ * [medido el 2026-10-05]); no se toca ningún grant. Devuelve TODAS las filas de esos códigos, de
+ * cualquier marca: el filtro de marca lo hace `ruleTextsFor` por pieza, que es quien sabe de qué
+ * marca es cada una. `instruction` no se pide: el chip enseña sólo el enunciado.
+ *
+ * Devuelve [] ante cualquier fallo: el enunciado ENRIQUECE la fila, no la condiciona. Perder la
+ * bandeja entera porque no se pudo leer un texto sería peor. El fallo deja `RULE_TEXTS_UNREAD`
+ * en el log de Vercel, que es su vía de verificación (DELIVERY_AND_VERIFICATION_RULE §4.2).
+ *
+ * Sustituye a `fetchRuleStatements(codes) → Map<code, statement>`, que no filtraba por marca.
  */
-export async function fetchRuleStatements(codes: string[]): Promise<Map<string, string>> {
+export async function fetchRuleTexts(codes: string[]): Promise<RuleTextRow[]> {
   const uniq = Array.from(new Set(codes.filter(Boolean)));
-  if (!uniq.length) return new Map();
+  if (!uniq.length) return [];
   const list = uniq.map((c) => `"${c}"`).join(',');
-  const url = `${SB_URL()}/rest/v1/watcher_rules?code=in.(${encodeURIComponent(list)})&select=code,statement&limit=1000`;
+  const url = `${SB_URL()}/rest/v1/watcher_rules?code=in.(${encodeURIComponent(list)})&select=code,statement,severity,brand_id&limit=1000`;
   try {
     const res = await fetchWithTimeout('db', url, { headers: sbHeaders('intel') });
-    if (!res.ok) return new Map();
-    const rows = (await res.json().catch(() => [])) as Array<{ code: string; statement: string | null }>;
-    const m = new Map<string, string>();
-    for (const r of Array.isArray(rows) ? rows : []) if (r?.code && r.statement) m.set(r.code, r.statement);
-    return m;
-  } catch {
-    return new Map();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = (await res.json().catch(() => [])) as RuleTextRow[];
+    return Array.isArray(rows) ? rows : [];
+  } catch (err) {
+    console.error('[rule-texts] RULE_TEXTS_UNREAD', err instanceof Error ? err.message : String(err));
+    return [];
   }
 }
 
@@ -277,20 +289,25 @@ export async function fetchPiecesByIds(ids: string[]): Promise<Map<string, RawPi
 export function toChallengedRow(
   row: JudgeCalibrationRow,
   pieces: Map<string, RawPiece>,
-  statements: Map<string, string>,
+  ruleRows: readonly RuleTextRow[],
   brandLangs: BrandLanguageCatalog = null,
 ): ChallengedRow {
   const p = row.piece_id ? pieces.get(row.piece_id) ?? null : null;
+  const reason = retentionReason(row.rule_code);
+  // La regla de OTRA marca no llega nunca a esta fila, aunque comparta código: filtro por la marca
+  // del arbitraje, que es la de su pieza.
+  const rule_texts = ruleTextsFor(ruleRows, row.brand_id, [row.rule_code, ...codesIn(reason)]);
   return {
     id: row.id,
     piece_id: row.piece_id,
     brand_id: row.brand_id,
     created_at: row.created_at,
     rule_code: row.rule_code,
-    rule_statement: statements.get(row.rule_code) ?? null,
+    rule_statement: rule_texts[row.rule_code]?.statement ?? null,
+    rule_texts,
     verify_pattern: row.verify_pattern,
     pattern_found: row.pattern_found,
-    reason: retentionReason(row.rule_code),
+    reason,
     // La marca del ARBITRAJE, que es la misma que la de su pieza. `null` = sin dato.
     reading_language: readingLanguageOf(row.brand_id, brandLangs),
     piece: p
