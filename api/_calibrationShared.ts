@@ -38,6 +38,8 @@ import { manualImagesOf } from './_manualShared.js';
 // La firma canónica del drenaje: la MISMA copia que ya usa la publicación manual (SIGNCANON de
 // `unrlvl-iid-functions`). Una sola copia en este repo, no dos.
 import { canonicalizeSignature } from './_manualShared.js';
+// El bloque que la pestaña «Manual» entrega para pegar: la vista de un canal manual pinta ESE texto.
+import { manualPasteOf } from './_manualShared.js';
 
 export const BUCKET = 'unrlvl-media';
 // Calibración = gate admin (igual que las aprobaciones legacy).
@@ -986,9 +988,34 @@ export function channelTextOf(piece: PieceTextInput): { text: string; source: Te
 // plantilla `templates/article.liquid` del tema activo de la tienda pinta `.nc-art-title` y después
 // `.nc-art-img`. En `shopify_blog` quien decide es el TEMA de la tienda: si un tema futuro lo
 // invierte, este mapa queda desfasado, y por eso el día que exista el dato por canal manda el dato.
+//
+// LOS PROVEEDORES QUE HOY PUBLICA UNA PERSONA (2026-10-06). Producción dejó
+// `PREVIEW_PROVIDER_UNMAPPED` para `linkedin_org` (7 veces) y `tiktok_business` (4) en
+// `/api/preview-render` [medido el 2026-10-06, errores de ejecución de Vercel]. Lo que publica cada
+// uno, medido el mismo día:
+//
+//   · `linkedin_org`, `tiktok_business` y `x_api`: TODAS sus filas de `brand_publish_channels`
+//     declaran `publication_path = 'manual'`, y `content-scheduler` no los drena (`DRAINABLE_PROVIDER`
+//     es `meta_graph`; los demás caen en `unsupported_provider`). Quien publica es Sam, con el botón
+//     «Copiar texto» de la pestaña Manual (`src/modules/iid/ManualPublishModule.tsx`, `item.text`),
+//     y ese texto es `manualTextOf` (`_manualShared.ts`): el TÍTULO, una línea en blanco, el adaptado
+//     del canal (o el maestro si no hay adaptado) y la firma canónica una vez al final — todo en un
+//     solo bloque de texto plano. No hay <h1>: el título va dentro del texto. Las fotos son las de
+//     `manualImagesOf`, las mismas que pinta `mediaBlockOf`.
+//   · `klaviyo`: sus dos filas están `active = false` y `publication_path = 'inactive'`, ninguna
+//     franja tiene pieza y no existe remitente de piezas: las EF `klaviyo-*` desplegadas configuran
+//     plantillas y flujos, no leen `content_pieces`. No hay qué medir — asunto, preheader y cuerpo
+//     no los decide nadie todavía — y por eso NO entra en el mapa: sigue con su aviso.
+//
+// La regla `manual_paste` describe el texto que entrega el camino manual, no el nombre de una red:
+// el día que uno de estos proveedores tenga publicador propio y su canal pase a `drained`, su
+// entrada se cambia aquí por la regla de ese publicador, medida, igual que se hizo con `meta_graph`.
 
-/** Qué texto publica el proveedor: el maestro, o el adaptado del canal con la firma canónica. */
-export type PublishedTextRule = 'master' | 'channel_adapted_signed';
+/**
+ * Qué texto publica el proveedor: el maestro; el adaptado del canal con la firma canónica; o el
+ * bloque que la pestaña Manual entrega para pegar (título + cuerpo + firma).
+ */
+export type PublishedTextRule = 'master' | 'channel_adapted_signed' | 'manual_paste';
 /** En qué orden aparecen título y medios. `media_then_text` = el canal no publica título. */
 export type TitleMediaOrder = 'title_then_cover' | 'media_then_text';
 
@@ -1003,6 +1030,10 @@ export const CHANNEL_LAYOUT_BY_PROVIDER: Readonly<Record<string, ChannelLayout>>
   meta_graph:   { text: 'channel_adapted_signed', publishesTitle: false, order: 'media_then_text' },
   shopify_blog: { text: 'master',                 publishesTitle: true,  order: 'title_then_cover' },
   vercel_html:  { text: 'master',                 publishesTitle: true,  order: 'title_then_cover' },
+  // Publicados a mano: el título viaja DENTRO del texto pegado, no como encabezado.
+  linkedin_org:    { text: 'manual_paste', publishesTitle: false, order: 'media_then_text' },
+  tiktok_business: { text: 'manual_paste', publishesTitle: false, order: 'media_then_text' },
+  x_api:           { text: 'manual_paste', publishesTitle: false, order: 'media_then_text' },
 });
 
 /** La regla de vista del proveedor, o null si el proveedor no está en el mapa (o no se resolvió). */
@@ -1019,9 +1050,11 @@ export function channelLayoutOf(provider: string | null | undefined): ChannelLay
  *                         imagen y con la firma;
  *   no_copy_for_channel — hay adaptaciones, pero ninguna para este canal: el drenaje NO publica
  *                         (`NO_COPY_FOR_CHANNEL`);
+ *   manual_master       — canal manual sin adaptado propio: la pestaña entrega el maestro con la
+ *                         firma (y el título delante);
  *   empty               — no hay texto.
  */
-export type PublishedSource = 'master_copy' | 'channel_adapted' | 'channel_degraded' | 'no_copy_for_channel' | 'empty';
+export type PublishedSource = 'master_copy' | 'channel_adapted' | 'channel_degraded' | 'no_copy_for_channel' | 'manual_master' | 'empty';
 
 export interface PublishedText {
   text: string;
@@ -1032,7 +1065,7 @@ export interface PublishedText {
 export interface PublishedTextInput {
   platform?: string | null;
   assets?: {
-    copy?: { aife_filtered?: string | null; raw?: string | null } | null;
+    copy?: { title?: string | null; aife_filtered?: string | null; raw?: string | null } | null;
     social?: { adapted?: unknown; platforms?: unknown } | null;
     builder_meta?: { signature_closer?: { text?: string | null } | null } | null;
   } | null;
@@ -1085,6 +1118,16 @@ export function publishedTextOf(piece: PublishedTextInput, provider: string | nu
     return master ? { text: master, source: 'master_copy' } : { text: '', source: 'empty' };
   }
 
+  // manual_paste — el bloque de «Copiar texto» de la pestaña Manual, con la MISMA función. La franja
+  // nombra el canal por su `platform_key`, que es `content_pieces.platform`.
+  if (layout.text === 'manual_paste') {
+    const { text, source } = manualPasteOf(
+      { id: '', brand_id: '', platform: piece.platform, assets: assets as Parameters<typeof manualPasteOf>[0]['assets'] },
+      String(piece.platform ?? ''),
+    );
+    return { text, source: source === 'master_copy' ? 'manual_master' : source };
+  }
+
   // channel_adapted_signed — `buildPlacementRows` + `filtrarAlCanalDeLaFranja`.
   const canal = String(piece.platform ?? '').toLowerCase();
   const sig = assets.builder_meta?.signature_closer?.text ?? null;
@@ -1116,6 +1159,7 @@ const PUBLISHED_SOURCE_WARNING: Readonly<Record<PublishedSource, string>> = Obje
   channel_adapted: '',
   channel_degraded: '⚠ Sin adaptación para este canal: el drenaje publicaría el TEXTO MAESTRO con la firma (rama degradada), que es lo que se muestra.',
   no_copy_for_channel: '⚠ La pieza trae adaptaciones para otros canales y ninguna para éste: el drenaje NO la publicaría (NO_COPY_FOR_CHANNEL).',
+  manual_master: '⚠ Sin adaptación para este canal: la pestaña Manual entrega para pegar el TEXTO MAESTRO con la firma, que es lo que se muestra.',
   empty: '⚠ SIN TEXTO — este canal no tendría nada que publicar.',
 });
 

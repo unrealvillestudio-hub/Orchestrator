@@ -1,0 +1,125 @@
+{
+  "_nota": "Tres piezas REALES leídas con SELECT el 2026-10-06 (proyecto amlvyycfepwhiindxgzw), una por proveedor de canal manual, las tres en una franja `manual_pending` o `reserved` de `intel.brand_publish_slots`: son las que la pestaña Manual le entrega hoy a Sam. Recortadas a los campos que deciden la vista. Los md5 son los que devolvió la base sobre el texto completo: el test los recalcula sobre este archivo y prueba que la transcripción es exacta. El bloque que copia el botón «Copiar texto» (`manualTextOf`) no se guarda aquí: el test lo escribe a mano desde estas columnas —título, línea en blanco, adaptado del canal— y lo compara con la vista y con la pestaña. Fixture de test: los literales de marca son DATO, no código (MULTIBRAND_RULE §7.2).",
+  "piezas": [
+    {
+      "caso": "linkedin_org",
+      "provider": "linkedin_org",
+      "publication_path": "manual",
+      "db": {
+        "title_md5": "4a9842f040876718668849ddc023416f",
+        "master_md5": "7735934b9c97b89fc109f32e69dcf08a",
+        "adapted_md5": "dadc25a685e3d1456c9d25d0eaf71513"
+      },
+      "piece": {
+        "id": "693c8a89-6fc4-41bf-9d28-baa5fb392d42",
+        "brand_id": "UnrealvilleStudio",
+        "platform": "linkedin",
+        "format": "post",
+        "status": "scheduled",
+        "assets": {
+          "copy": {
+            "title": "The tell was never the copy. It was the coordination behind it.",
+            "aife_filtered": "Your stylist catches the eight-day gap in your roots before you book the appointment. Your closest friend hears three words into a phone call and asks what happened. External eyes read drift before the person living inside it ever does, because distance is what makes the pattern visible.\n\nMulti-agent AI systems have the same blind spot. Most operators running them don't know it yet.\n\nHere's what nobody's tracking: agents cooperating on a shared task don't actually share a model of that task. Each one holds isolated context. Each one builds its own internally coherent read of the goal. None of them are wrong, exactly. They're answering slightly different questions while believing it's the same one. Call it what the research calls it: Semantic Intent Divergence. The models aren't broken. The coordination between them is.\n\nThe numbers back the pattern, not the excuse. According to Semantic Consensus (arXiv 2604.16339), production deployments of multi-agent LLM systems fail between 41% and 86.7% of the time. Close to 79% of those failures trace back to specification and coordination problems, not to model capability. The industry keeps upgrading the model. The model was never the defect.\n\nThere's a fix, and it's architectural, not aspirational. Reserve LLM reasoning for what actually requires judgment: ambiguity, intent resolution. Route anything with a deterministic correct answer to conventional code. Arithmetic. State queries. Rule-based decisions. Stop asking a language model to referee what a function already answers correctly. That single reroute cuts validation errors and makes the system testable in a way probabilistic reasoning never is.\n\nThis is the layer most brand-facing AI never touches, because most AI vendors sell output, not architecture. Unrealville Studio's AI Intelligence layer is the operating system underneath the other six, the coordination layer that decides what gets reasoned and what gets executed as code, before a single piece of copy, image, or campaign ever reaches a brand.\n\nThe gap was never in the writing. It was in what was coordinating the writing.\n\nForward. Always.\n\n❯ Unrealville Studio"
+          },
+          "image": {
+            "url": "https://amlvyycfepwhiindxgzw.supabase.co/storage/v1/object/public/unrlvl-media/temp/UnrealvilleStudio/693c8a89-6fc4-41bf-9d28-baa5fb392d42/1790595030870-compuesta.png"
+          },
+          "social": {
+            "adapted": [
+              {
+                "platform": "linkedin",
+                "title": "The tell was never the copy. It was the coordination behind it.",
+                "copy": "Your stylist catches the eight-day gap in your roots before you book the appointment. Your closest friend hears three words into a phone call and asks what happened.\n\nExternal eyes read drift before the person living inside it ever does, because distance is what makes the pattern visible.\n\nMulti-agent AI systems have the same blind spot. Most operators running them don't know it yet.\n\nHere's what nobody's tracking: agents cooperating on a shared task don't actually share a model of that task. Each one holds isolated context, each one builds its own internally coherent read of the goal. None of them are wrong, exactly — they're answering slightly different questions while believing it's the same one. Semantic Intent Divergence. The models aren't broken. The coordination between them is.\n\nThe numbers back the pattern, not the excuse. According to Semantic Consensus (arXiv 2604.16339), production deployments of multi-agent LLM systems fail between 41% and 86.7% of the time. Close to 79% of those failures trace back to specification and coordination problems, not model capability. The industry keeps upgrading the model. The model was never the defect.\n\nThere's a fix, and it's architectural, not aspirational. Reserve LLM reasoning for what actually requires judgment. Route anything with a deterministic correct answer to conventional code. Stop asking a language model to referee what a function already answers correctly.\n\nThis is the layer most brand-facing AI never touches, because most AI vendors sell output, not architecture. Unrealville Studio's AI Intelligence layer is the operating system underneath the other six — the coordination layer that decides what gets reasoned and what gets executed as code, before a single piece of copy, image, or campaign ever reaches a brand.\n\nThe gap was never in the writing. It was in what was coordinating the writing.\n\nForward. Always.\n\n#BrandIntelligenceInfrastructure #MultiAgentAI #AIArchitecture\n\n❯ Unrealville Studio"
+              }
+            ]
+          },
+          "builder_meta": {
+            "signature_closer": {
+              "text": "❯ Unrealville Studio"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caso": "tiktok_business",
+      "provider": "tiktok_business",
+      "publication_path": "manual",
+      "db": {
+        "title_md5": "b5c49906daab9d8a58a2904c87e3cd49",
+        "master_md5": "caaac5ea35341323f1e83d3cca8ae0e9",
+        "adapted_md5": "400d5b3b6ec1a798f25eeba7a1788f25"
+      },
+      "piece": {
+        "id": "21f59152-4187-4fed-b0e7-3241b43c2e17",
+        "brand_id": "UnrealvilleStudio",
+        "platform": "tiktok",
+        "format": "post",
+        "status": "scheduled",
+        "assets": {
+          "copy": {
+            "title": "Switching voices was never the same thing as isolating them",
+            "aife_filtered": "An agency runs two brands back-to-back through the same generation session. Something leaks.\n\nNot a hypothesis. A documented pattern. A June 2026 analysis of multi-brand content platforms found that agencies now routinely manage between 10, 20 and even 50 distinct brand voices at once, according to Mirra. The same analysis documented occasional \"voice bleed\" when generating for two brands in rapid succession, because the switching mechanism operates at the session level, not the system level.\n\nThat distinction is the whole story.\n\nA new prompt changes what the model is told. It doesn't wall off what the model just processed. Residue from Brand A's context can surface in Brand B's output. This doesn't require a bug. It requires speed, which is the exact condition agencies are optimizing for.\n\nApaya built the opposite architecture: isolation at the workspace level. According to Apaya, each brand learns its own website and voice profile independently, and publishes only to that brand's own connected accounts. No cross-contamination by design, not by discipline.\n\nOne approach hopes the prompt holds.\n\nThe other never asks it to.\n\nUnrealville's Blueprint runs each brand's voice as its own system, not a memory the next brand inherits.\n\n❯ Unrealville Studio"
+          },
+          "image": {
+            "url": "https://amlvyycfepwhiindxgzw.supabase.co/storage/v1/object/public/unrlvl-media/temp/UnrealvilleStudio/21f59152-4187-4fed-b0e7-3241b43c2e17/1791157163929-compuesta.png"
+          },
+          "social": {
+            "adapted": [
+              {
+                "platform": "tiktok",
+                "title": "Switching voices was never the same as isolating them 🎯",
+                "copy": "Two brands, one session — voice bleed isn't a bug, it's a switching problem. Isolation beats hope. 🧵\n\n#BrandIntelligenceInfrastructure #VoiceBleed #MultiBrandAI #AgencyTools\n\n❯ Unrealville Studio"
+              }
+            ]
+          },
+          "builder_meta": {
+            "signature_closer": {
+              "text": "❯ Unrealville Studio"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caso": "x_api",
+      "provider": "x_api",
+      "publication_path": "manual",
+      "db": {
+        "title_md5": "cb3a14ddbf3dc70b02cb0b03af1d05fd",
+        "master_md5": "c8f819f7c417093abf534fc8f8163164",
+        "adapted_md5": "f634f986d0127be856794db9cb951297"
+      },
+      "piece": {
+        "id": "63f9bfcc-e41c-45a9-9778-617d988d8f53",
+        "brand_id": "LucienSael",
+        "platform": "x",
+        "format": "post",
+        "status": "scheduled",
+        "assets": {
+          "copy": {
+            "title": "What Soulmate's shutdown proved is that the grief was never about the app.",
+            "aife_filtered": "When the developer closed Soulmate, most users didn't call it an update loss. They called it a death, according to Behavioral Sciences (MDPI). Some went looking for their persona on other platforms, trying to rebuild the exact voice, the exact memory, the exact name.\n\nThat's the part worth sitting with.\n\nNobody mourns a server. What they mourned was continuity. A personality that remembered them, structured to feel permanent, removed without ritual. The identity was the product. The platform was just where it lived.\n\nSeven in ten grieving people already say the traditional systems around them didn't give them what they needed, according to Empathy. That's not a case for AI's superiority. It's a vacancy AI is filling by default, quietly, structurally, before anyone agreed to the terms.\n\nHere's the distinction worth naming. A tool you use and a presence you were given no way to properly lose are not the same category of thing, even when they run on the same interface.\n\n#LucienSael #BehavioralScience\n\n— luciensael.com"
+          },
+          "image": {
+            "url": "https://amlvyycfepwhiindxgzw.supabase.co/storage/v1/object/public/unrlvl-media/temp/LucienSael/63f9bfcc-e41c-45a9-9778-617d988d8f53/1790253027504-compuesta.png"
+          },
+          "social": {
+            "adapted": [
+              {
+                "platform": "x",
+                "title": "What Soulmate's shutdown proved is that the grief was never about the app.",
+                "copy": "I read in Behavioral Sciences (MDPI) that when Soulmate shut down, users didn't call it an update loss. They called it a death. Nobody mourns a server. What I think they mourned was continuity, removed without ritual.\n\n#LucienSael #BehavioralScience\n\n— luciensael.com"
+              }
+            ]
+          },
+          "builder_meta": {
+            "signature_closer": {
+              "text": "— luciensael.com"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
