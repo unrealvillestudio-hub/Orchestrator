@@ -11,7 +11,7 @@ import {
 } from '../../services/publishInbox';
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader,
-  SlotLine, SlotsNotice, SearchNotice, PieceSummary, MobileDetails, FilterBar,
+  SlotLine, SlotsNotice, SearchNotice, PieceSummary, MobileDetails, FilterBar, CarouselToggle,
 } from './pieceUi';
 // U-5 — el ÚNICO componente de acciones del sistema, el mismo que monta calibración.
 import { PieceActionsBar } from './pieceActions';
@@ -88,13 +88,15 @@ function ScheduledQueue({ session }: { session: IidSession }) {
   // U-7 — el estado de la pieza y la búsqueda por id.
   const [status, setStatus]   = useState('');
   const [q, setQ]             = useState('');
+  // 2026-10-06 — sólo carruseles, de cualquier canal; se combina con `channel`.
+  const [carousel, setCarousel] = useState(false);
   const [offset, setOffset]   = useState(0);
 
   type Query = {
     offset: number; brand: string; channel: string; chStatus: ChannelStatusFilter;
-    gen: GenerationFilter; status: string; q: string;
+    gen: GenerationFilter; status: string; q: string; carousel: boolean;
   };
-  const current = (): Query => ({ offset, brand, channel, chStatus, gen, status, q });
+  const current = (): Query => ({ offset, brand, channel, chStatus, gen, status, q, carousel });
 
   const load = async (q: Query) => {
     setLoading(true); setError(null);
@@ -108,6 +110,7 @@ function ScheduledQueue({ session }: { session: IidSession }) {
         generation: q.gen,
         status: q.status || undefined,
         q: q.q || undefined,
+        carousel: q.carousel,
       });
       setData(r);
     } catch (err) {
@@ -125,7 +128,7 @@ function ScheduledQueue({ session }: { session: IidSession }) {
   const apply = (patch: Partial<Query>) => {
     const q = { ...current(), offset: 0, ...patch };
     setOffset(q.offset); setBrand(q.brand); setChannel(q.channel); setChStatus(q.chStatus); setGen(q.gen);
-    setStatus(q.status); setQ(q.q);
+    setStatus(q.status); setQ(q.q); setCarousel(q.carousel);
     load(q);
   };
   const goPage = (o: number) => { setOffset(o); load({ ...current(), offset: o }); };
@@ -191,13 +194,17 @@ function ScheduledQueue({ session }: { session: IidSession }) {
         </div>
       )}
 
-      {/* Filtro por canal */}
-      {channels.length > 0 && (
+      {/* Filtro por canal. 2026-10-06 — con «Carrusel» al final, combinable con el canal elegido. La
+          fila se pinta también con el carrusel puesto y cero canales: si no, el interruptor que vació
+          la lista desaparecería con ella y no habría forma de apagarlo. */}
+      {(channels.length > 0 || carousel) && (
         <div className="flex items-center gap-1 overflow-x-auto md:flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-3 [&>*]:shrink-0">
           <CountPill label="Todos los canales" count={Object.values(byChannel).reduce((a, b) => a + b, 0)} active={channel === ''} onClick={() => apply({ channel: '' })} />
           {channels.map((c) => (
             <CountPill key={c} label={c} count={byChannel[c]} active={channel === c} onClick={() => apply({ channel: c })} />
           ))}
+          <span className="mx-1 h-5 w-px bg-zinc-800" aria-hidden />
+          <CarouselToggle active={carousel} count={data?.carousels} onToggle={(v) => apply({ carousel: v })} />
         </div>
       )}
 

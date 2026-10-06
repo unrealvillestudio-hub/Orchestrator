@@ -34,7 +34,7 @@ import type { PieceMetrics } from './_pieceMetrics.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
 // Las láminas en el orden en que se publican: el mismo criterio que la publicación manual y el drenaje.
-import { manualImagesOf } from './_manualShared.js';
+import { manualImagesOf, isCarouselPiece, CAROUSEL_FORMAT } from './_manualShared.js';
 // La firma canónica del drenaje: la MISMA copia que ya usa la publicación manual (SIGNCANON de
 // `unrlvl-iid-functions`). Una sola copia en este repo, no dos.
 import { canonicalizeSignature } from './_manualShared.js';
@@ -1433,6 +1433,56 @@ export async function fetchLivePieces(
   return Array.isArray(rows) ? rows : [];
 }
 
+// ── FILTRO «CARRUSEL» (2026-10-06) ───────────────────────────────────────────────
+/**
+ * Sam: «en el filtro por plataformas quiero ver carrousels». Un carrusel NO es una plataforma: en
+ * `content_pieces` es `format = 'carousel'` con sus láminas en `assets.carousel.slides`, y vive en
+ * `meta_ig` y en `meta_fb` [medido el 2026-10-06: 18 y 15 piezas, todas con 2 o más láminas]. Por eso
+ * el filtro va APARTE del de plataforma y se combina con él: «carruseles» a secas, o «carruseles de
+ * meta_ig».
+ *
+ * El criterio es `isCarouselPiece` (`_manualShared.ts`), el mismo con el que la tarjeta pinta la
+ * tira de láminas. Aquí sólo se adapta la forma de la pieza, igual que hace `mediaBlockOf`.
+ */
+export function isCarouselContentPiece(p: ContentPiece): boolean {
+  const assets = p.assets ?? {};
+  return isCarouselPiece({
+    id: p.id, brand_id: p.brand_id, format: p.format,
+    assets: { image: assets.image, carousel: assets.carousel },
+  });
+}
+
+/** `carousel=1` / `carousel=true` → filtro puesto. Cualquier otra cosa, o nada → sin filtro. */
+export function carouselParam(v: unknown): boolean {
+  const s = Array.isArray(v) ? v[0] : v;
+  return typeof s === 'string' && ['1', 'true'].includes(s.trim().toLowerCase());
+}
+
+/**
+ * LOS IDS DE LAS PIEZAS QUE SON CARRUSEL, para la bandeja que no lee `content_pieces` (Historial: sus
+ * filas salen del corpus, que guarda el `format` del momento del veredicto pero no las láminas).
+ *
+ * Se piden sólo las columnas que decide `isCarouselPiece` y sólo las piezas con el formato que ese
+ * criterio exige —el resto no puede serlo—, sin mirar `discarded_at`: el historial enseña también lo
+ * descartado. Con su cap, como todo lote del repo; si se llena, el llamante lo declara.
+ */
+export async function fetchCarouselPieceIds(): Promise<{ ids: Set<string>; truncated: boolean }> {
+  const url = `${SB_URL()}/rest/v1/content_pieces?format=eq.${encodeURIComponent(CAROUSEL_FORMAT)}`
+    + `&select=id,brand_id,format,image:assets->image,carousel:assets->carousel&limit=${PIECES_CAP}`;
+  const res = await fetchWithTimeout('db', url, { headers: sbHeaders('content') });
+  if (!res.ok) throw new Error(`content_pieces carousel read failed: ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
+  const rows = (await res.json().catch(() => [])) as Array<{
+    id: string; brand_id: string; format: string | null;
+    image?: { url?: string | null } | null;
+    carousel?: { slides?: Array<{ n?: number | null; url?: string | null }> | null } | null;
+  }>;
+  const lista = Array.isArray(rows) ? rows : [];
+  const ids = new Set(lista
+    .filter((r) => isCarouselPiece({ id: r.id, brand_id: r.brand_id, format: r.format, assets: { image: r.image, carousel: r.carousel } }))
+    .map((r) => r.id));
+  return { ids, truncated: lista.length >= PIECES_CAP };
+}
+
 /**
  * LOS ESTADOS EN LOS QUE UNA PIEZA ESTÁ VIVA Y PENDIENTE.
  *
@@ -1602,68 +1652,17 @@ export function pendingStateOf(
  * que el lote se cortó**. Son dos ceros distintos y el dato tiene que distinguirlos — el
  * mismo criterio que `slots_source` y `cutoffs_source` en estas mismas respuestas.
  */
-export type SearchMode = 'uuid' | 'prefix';
+//
+// 2026-10-06 — VARIAS PIEZAS A LA VEZ. El parser y el comparador se mudaron a `_pieceSearch.ts`, un
+// módulo puro que también importa la caja de búsqueda del front: un solo parser para los dos lados.
+// Se reexportan aquí para que las cuatro bandejas sigan importando de donde importaban.
+export {
+  parsePieceSearch, idMatchesSearch, idMatchesTerm, unmatchedTerms, splitSearchTerms,
+  searchSummary, searchErrorBody,
+  SearchTooShort, SearchNotAnId, SearchTooMany, SEARCH_MIN_PREFIX, SEARCH_MAX_TERMS,
+  type SearchMode, type PieceSearch, type PieceSearchTerm, type SearchSummary,
+} from './_pieceSearch.js';
 
-export interface PieceSearch {
-  /** Lo que se buscó, ya normalizado. Viaja a la respuesta para que la UI lo pueda repetir. */
-  q: string;
-  mode: SearchMode;
-  /** uuid completo: filtro directo, sin lote y sin truncamiento posible. */
-  exact: string | null;
-  /** Prefijo en minúsculas, para comparar contra el id también en minúsculas. */
-  prefix: string | null;
-}
-
-/** Mínimo de caracteres de un prefijo. Menos devuelve medio catálogo y parece una búsqueda rota. */
-export const SEARCH_MIN_PREFIX = 4;
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-/** Un prefijo puede traer guiones si Sam pegó parte de un uuid con formato. */
-const PREFIX_RE = /^[0-9a-f-]+$/;
-
-/** Error tipado para «el prefijo es demasiado corto». El endpoint lo traduce a 400. */
-export class SearchTooShort extends Error {
-  constructor(public q: string) {
-    super(`search prefix too short: need at least ${SEARCH_MIN_PREFIX} characters`);
-    this.name = 'SearchTooShort';
-  }
-}
-
-/** Error tipado para «esto no se parece a un id». También 400: buscar texto libre no existe. */
-export class SearchNotAnId extends Error {
-  constructor(public q: string) {
-    super('search must be a piece id or a prefix of one');
-    this.name = 'SearchNotAnId';
-  }
-}
-
-/**
- * QUÉ SE BUSCA Y CÓMO. Pura: no lee la red y no sabe de qué bandeja viene.
- *
- * `null` = no se buscó nada (parámetro ausente o vacío), que NO es lo mismo que buscar y no
- * encontrar. Lanza cuando lo que llegó no se puede resolver, en vez de devolver una lista
- * vacía que se leería como «no existe».
- */
-export function parsePieceSearch(raw: unknown): PieceSearch | null {
-  const q = (typeof raw === 'string' ? raw : '').trim().toLowerCase();
-  if (!q) return null;
-  if (UUID_RE.test(q)) return { q, mode: 'uuid', exact: q, prefix: null };
-  if (!PREFIX_RE.test(q)) throw new SearchNotAnId(q);
-  // Los guiones no cuentan como longitud: `5b14-caa` son 7 caracteres de id, no 8.
-  if (q.replace(/-/g, '').length < SEARCH_MIN_PREFIX) throw new SearchTooShort(q);
-  return { q, mode: 'prefix', exact: null, prefix: q };
-}
-
-/**
- * ¿Este id cae en la búsqueda? En minúsculas los dos lados: un uuid de Postgres llega en
- * minúsculas, pero lo que Sam pega puede venir de cualquier sitio.
- */
-export function idMatchesSearch(id: string | null | undefined, search: PieceSearch | null): boolean {
-  if (!search) return true; // sin búsqueda, no se filtra nada.
-  const v = (id ?? '').toLowerCase();
-  if (search.exact) return v === search.exact;
-  return !!search.prefix && v.startsWith(search.prefix);
-}
 export function fetchCalibrationPieces(brand?: string): Promise<ContentPiece[]> {
   return fetchLivePieces({ brand, onlyStatuses: CALIBRATION_STATUSES });
 }

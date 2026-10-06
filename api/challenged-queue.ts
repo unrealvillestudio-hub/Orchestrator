@@ -24,7 +24,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   applyCors, extractToken,
-  parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
+  parsePieceSearch, idMatchesSearch, searchErrorBody, searchSummary,
   fetchLivePieces, fetchEvaluatedIds, pendingStateOf, tieneImagen, autofixResiduo,
   type PieceSearch,
 } from './_calibrationShared.js';
@@ -67,19 +67,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     search = parsePieceSearch(req.query.q);
   } catch (err) {
-    if (err instanceof SearchTooShort) {
-      return res.status(400).json({
-        error: 'search_too_short',
-        detail: `Para buscar por id hacen falta al menos ${SEARCH_MIN_PREFIX} caracteres. `
-          + 'Un prefijo más corto devolvería medio catálogo.',
-      });
-    }
-    if (err instanceof SearchNotAnId) {
-      return res.status(400).json({
-        error: 'search_not_an_id',
-        detail: 'La búsqueda es por id de pieza (o por su prefijo), no por texto libre.',
-      });
-    }
+    // 2026-10-06 — varios ids a la vez: el 400 nombra los que fallan. Una sola redacción para las
+    // cuatro bandejas (`searchErrorBody`), no una copia por endpoint.
+    const body = searchErrorBody(err);
+    if (body) return res.status(400).json(body);
     throw err;
   }
 
@@ -156,7 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
        * U-7 — qué se buscó y si el lote se cortó. Si `truncated`, una lista vacía NO es «no
        * existe»: es «puede que no lo haya traído». Un uuid completo no se trunca.
        */
-      search: search ? { q: search.q, mode: search.mode, truncated: search.mode === 'prefix' && truncated } : null,
+      search: search ? searchSummary(search, scoped.map((r) => r.piece_id), search.mode === 'prefix' && truncated) : null,
       contract: { available: true, reason: null },
       ...(truncated ? { truncated: true } : {}),
     });

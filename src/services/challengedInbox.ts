@@ -154,7 +154,7 @@ export function fetchChallengedQueue(
   token: string,
   opts: {
     limit?: number; offset?: number; brand?: string; rule?: string;
-    /** U-7 — id de la PIEZA retenida, o prefijo suyo. No el id de la fila de arbitraje. */
+    /** U-7 — uno o varios ids de PIEZA retenida (o prefijos de 8+). No el id de la fila de arbitraje. */
     q?: string;
   } = {},
 ): Promise<ChallengedResult> {

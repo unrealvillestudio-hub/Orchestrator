@@ -25,8 +25,10 @@ describe('uuid completo', () => {
   it('va como filtro directo, sin lote y sin truncamiento posible', () => {
     const s = parsePieceSearch(UUID)!;
     expect(s.mode).toBe('uuid');
-    expect(s.exact).toBe(UUID);
-    expect(s.prefix).toBeNull();
+    // 2026-10-06 — la búsqueda es una lista de términos; con un solo id, la lista tiene uno.
+    expect(s.terms).toHaveLength(1);
+    expect(s.terms[0].exact).toBe(UUID);
+    expect(s.terms[0].prefix).toBeNull();
   });
 
   it('encuentra sólo el suyo', () => {
@@ -60,14 +62,18 @@ describe('prefijos que no se buscan', () => {
   it('menos del mínimo → lanza, no devuelve lista vacía', () => {
     // Devolver vacío se leería como «no existe». Un prefijo de 3 devolvería medio catálogo
     // y parecería una búsqueda rota; las dos lecturas son falsas.
+    // 2026-10-06 — el mínimo sube de 4 a 8, el largo que pinta la tarjeta: con varios ids a la
+    // vez, cada término corto suma coincidencias ajenas que nadie ve (ver `_pieceSearch.ts`).
     expect(() => parsePieceSearch('5b1')).toThrow(SearchTooShort);
-    expect(SEARCH_MIN_PREFIX).toBe(4);
+    expect(() => parsePieceSearch('5b14caa')).toThrow(SearchTooShort);
+    expect(SEARCH_MIN_PREFIX).toBe(8);
   });
 
   it('los guiones no cuentan como longitud', () => {
-    // `5b1-` son 3 caracteres de id, no 4.
-    expect(() => parsePieceSearch('5b1-')).toThrow(SearchTooShort);
-    expect(parsePieceSearch('5b14-')!.mode).toBe('prefix');
+    // `5b14-caa` son 7 caracteres de id, no 8.
+    expect(() => parsePieceSearch('5b14-caa')).toThrow(SearchTooShort);
+    expect(parsePieceSearch('5b14-caa7')!.mode).toBe('prefix');
+    expect(parsePieceSearch('5b14caa7-')!.mode).toBe('prefix');
   });
 
   it('texto libre → lanza: buscar por título no existe, y no se finge que sí', () => {

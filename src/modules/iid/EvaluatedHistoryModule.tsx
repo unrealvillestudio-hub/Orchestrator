@@ -8,7 +8,7 @@ import {
   fetchEvaluatedHistory,
   type EvaluatedRow, type EvaluatedHistoryResult, type HistorySourceFilter,
 } from '../../services/evaluatedHistory';
-import { CountPill, Selector, Pager, CopyableId, fmtDate, SearchNotice, FilterBar } from './pieceUi';
+import { CountPill, Selector, Pager, CopyableId, fmtDate, SearchNotice, FilterBar, CarouselToggle } from './pieceUi';
 // Lectura en voz alta. Mismo componente y mismo adaptador que las otras tres bandejas.
 import { SpeechReader } from '../../ui/SpeechReader';
 import { readableFromArtifactHtml } from './readablePiece';
@@ -57,12 +57,15 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
   // encontrarla. Medido el 2026-09-13 con `5b14caa7`: sellada, en el corpus, invisible en
   // las tres bandejas vivas.
   const [q, setQ] = useState('');
+  // 2026-10-06 — sólo carruseles, de cualquier canal; se combina con `channel`.
+  const [carousel, setCarousel] = useState(false);
 
   type Query = {
     offset: number; from: string; to: string;
     brand: string; channel: string; verdict: string; source: HistorySourceFilter; q: string;
+    carousel: boolean;
   };
-  const current = (): Query => ({ offset, from, to, brand, channel, verdict, source, q });
+  const current = (): Query => ({ offset, from, to, brand, channel, verdict, source, q, carousel });
 
   /**
    * Los `<input type="date">` dan un día suelto, y el corpus guarda un instante. Se abre el
@@ -85,6 +88,7 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
         verdict: q.verdict || undefined,
         source: q.source,
         q: q.q || undefined,
+        carousel: q.carousel,
       }));
     } catch (err) {
       setError(err instanceof CalibrationError ? err.message : 'No se pudo cargar el historial.');
@@ -102,7 +106,7 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
     const q = { ...current(), offset: 0, ...patch };
     setOffset(q.offset); setFrom(q.from); setTo(q.to);
     setBrand(q.brand); setChannel(q.channel); setVerdict(q.verdict); setSource(q.source);
-    setQ(q.q);
+    setQ(q.q); setCarousel(q.carousel);
     setOpen(null);
     load(q);
   };
@@ -118,10 +122,10 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
   const channels = useMemo(() => Object.keys(byChannel).sort(), [byChannel]);
   const verdicts = useMemo(() => Object.keys(byVerdict).sort(), [byVerdict]);
 
-  const limpiar = () => apply({ from: '', to: '', brand: '', channel: '', verdict: '', source: 'all', q: '' });
+  const limpiar = () => apply({ from: '', to: '', brand: '', channel: '', verdict: '', source: 'all', q: '', carousel: false });
   // U-7 — la búsqueda cuenta como filtro: «Limpiar filtros» tiene que limpiarla también, o
   // dejaría una lista acotada con todos los controles en su valor por defecto.
-  const hayFiltro = Boolean(from || to || brand || channel || verdict || source !== 'all' || q);
+  const hayFiltro = Boolean(from || to || brand || channel || verdict || source !== 'all' || q || carousel);
 
   return (
     <div className="max-w-5xl mx-auto px-3 md:px-6 py-2">
@@ -204,12 +208,18 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
           ))}
         </div>
       )}
-      {channels.length > 0 && (
+      {/* 2026-10-06 — «Carrusel» al final de los canales, combinable con el canal elegido. Sin
+          número: aquí contarlo obligaría a leer `content_pieces` en cada carga, y el historial sólo la
+          lee cuando el filtro está puesto. La fila se pinta también con el carrusel puesto y cero
+          canales, para que el interruptor no desaparezca con la lista que vació. */}
+      {(channels.length > 0 || carousel) && (
         <div className="flex items-center gap-1 overflow-x-auto md:flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-2 [&>*]:shrink-0">
           <CountPill label="Todos los canales" count={Object.values(byChannel).reduce((a, b) => a + b, 0)} active={channel === ''} onClick={() => apply({ channel: '' })} />
           {channels.map((c) => (
             <CountPill key={c} label={c} count={byChannel[c]} active={channel === c} onClick={() => apply({ channel: c })} />
           ))}
+          <span className="mx-1 h-5 w-px bg-zinc-800" aria-hidden />
+          <CarouselToggle active={carousel} count={carousel ? total : undefined} onToggle={(v) => apply({ carousel: v })} />
         </div>
       )}
       {verdicts.length > 0 && (

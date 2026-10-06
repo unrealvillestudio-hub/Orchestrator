@@ -209,6 +209,14 @@ export interface SearchInfo {
   q: string;
   mode: 'uuid' | 'prefix';
   truncated: boolean;
+  /**
+   * 2026-10-06 — VARIAS PIEZAS A LA VEZ (`api/_pieceSearch.ts → searchSummary`): los ids buscados,
+   * cuántas filas casaron con los filtros puestos y QUÉ ids no encontraron nada. Opcionales: un
+   * server anterior no los manda, y entonces la pantalla no dice nada que no sepa.
+   */
+  terms?: string[];
+  matched?: number;
+  missing?: string[];
 }
 
 /**
@@ -423,6 +431,9 @@ export interface QueueResult {
   platform: string;
   /** U-7 — las plataformas presentes en el lote. Del dato, nunca de una lista en el código. */
   platforms: string[];
+  /** 2026-10-06 — el filtro «Carrusel» aplicado y cuántas daría con los demás filtros puestos. */
+  carousel?: boolean;
+  carousels?: number;
   /** U-7 — qué se buscó. `null` = no se buscó nada, que no es «no se encontró nada». */
   search: SearchInfo | null;
   pieces: CalibrationPiece[];
@@ -513,8 +524,13 @@ export function fetchQueue(
     urgencyHours?: number;
     /** U-7 — plataforma de la pieza. No es el `channel` de publicación: ver su docstring. */
     platform?: string;
-    /** U-7 — id de pieza o prefijo suyo. Menos de 4 caracteres lo rechaza el server. */
+    /**
+     * U-7 — uno o varios ids de pieza (o prefijos de 8+), separados por coma, espacio o salto de
+     * línea. Lo valida el mismo parser en los dos lados (`api/_pieceSearch.ts`).
+     */
     q?: string;
+    /** 2026-10-06 — sólo carruseles, de cualquier plataforma. Se combina con `platform`. */
+    carousel?: boolean;
     /**
      * LO-CORREGIDO-01 — el alcance por eje de pendiente. Es un CONJUNTO: el circuito de arreglos
      * tiene dos mitades y una pestaña que enseñara sólo una escondería la otra. Vacío = toda la
@@ -534,6 +550,7 @@ export function fetchQueue(
   if (opts.urgency) q.set('urgency', opts.urgency);
   if (opts.urgencyHours != null) q.set('urgency_hours', String(opts.urgencyHours));
   if (opts.q) q.set('q', opts.q);
+  if (opts.carousel) q.set('carousel', '1');
   if (opts.states?.length) q.set('state', opts.states.join(','));
   const qs = q.toString();
   return req<QueueResult>(`/api/calibration-queue${qs ? `?${qs}` : ''}`, token);

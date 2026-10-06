@@ -116,13 +116,21 @@ export function manualPasteOf(piece: ManualPieceInput, platformKey: string): { t
 }
 
 /**
+ * El valor de `content_pieces.format` que declara un carrusel. Es el eje FORMATO del sistema —el mismo
+ * que ya leía `manualImagesOf`—, no una plataforma ni una marca: un carrusel de cualquier marca, en
+ * cualquier plataforma, lo declara igual. Se nombra aquí una vez para que el filtro «Carrusel» de las
+ * bandejas y este criterio no puedan divergir.
+ */
+export const CAROUSEL_FORMAT = 'carousel';
+
+/**
  * Las fotos en el orden en que se publican. Un carrusel declarado con 2 o más láminas sale lámina
  * por lámina (mismo criterio que `carouselMediaOf` del drenaje); si no, la imagen de la pieza.
  */
 export function manualImagesOf(piece: ManualPieceInput): string[] {
   const assets = piece.assets ?? {};
   const esUrl = (u: unknown): u is string => typeof u === 'string' && /^https?:\/\//.test(u);
-  if (String(piece.format ?? '') === 'carousel') {
+  if (String(piece.format ?? '') === CAROUSEL_FORMAT) {
     const slides = Array.isArray(assets.carousel?.slides) ? assets.carousel!.slides! : [];
     const urls = slides.slice()
       .sort((a, b) => Number(a?.n ?? 0) - Number(b?.n ?? 0))
@@ -132,6 +140,20 @@ export function manualImagesOf(piece: ManualPieceInput): string[] {
   }
   const portada = assets.image?.url;
   return esUrl(portada) ? [portada] : [];
+}
+
+/**
+ * ¿ES UN CARRUSEL? El MISMO criterio con el que la vista decide pintar la tira de láminas
+ * (`_calibrationShared.ts → mediaBlockOf`: `laminas.length >= 2`) y con el que el drenaje y la
+ * pestaña Manual publican lámina por lámina: formato carrusel y al menos dos láminas con imagen.
+ * No se inventa otro: un «carrusel» con una sola lámina se publica y se ve como una foto, y el
+ * filtro tiene que decir lo mismo que la tarjeta.
+ *
+ * Lo usa el filtro «Carrusel» de las bandejas (2026-10-06, Sam: «en el filtro por plataformas quiero
+ * ver carrousels»).
+ */
+export function isCarouselPiece(piece: ManualPieceInput): boolean {
+  return manualImagesOf(piece).length >= 2;
 }
 
 // ── La lista ─────────────────────────────────────────────────────────────────────

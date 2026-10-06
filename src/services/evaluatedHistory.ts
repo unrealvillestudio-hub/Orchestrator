@@ -69,6 +69,8 @@ export interface EvaluatedHistoryResult {
   limit: number;
   offset: number;
   rows: EvaluatedRow[];
+  /** 2026-10-06 — el filtro «Carrusel» aplicado. */
+  carousel?: boolean;
   /** U-7 — qué se buscó. `null` = no se buscó nada, que no es «no se encontró nada». */
   search: SearchInfo | null;
   /** La lectura topó el límite del server: el historial mostrado puede no estar completo. */
@@ -112,8 +114,13 @@ export function fetchEvaluatedHistory(
     from?: string; to?: string;
     brand?: string; channel?: string;
     verdict?: string; source?: HistorySourceFilter;
-    /** U-7 — id de pieza o prefijo suyo. Acá es donde vive una pieza ya sellada. */
+    /**
+     * U-7 — uno o varios ids de pieza (o prefijos de 8+), separados por coma, espacio o salto de
+     * línea. Acá es donde vive una pieza ya sellada.
+     */
     q?: string;
+    /** 2026-10-06 — sólo carruseles, de cualquier canal. Se combina con `channel`. */
+    carousel?: boolean;
   } = {},
 ): Promise<EvaluatedHistoryResult> {
   const q = new URLSearchParams();
@@ -126,6 +133,7 @@ export function fetchEvaluatedHistory(
   if (opts.verdict) q.set('verdict', opts.verdict);
   if (opts.source) q.set('source', opts.source);
   if (opts.q) q.set('q', opts.q);
+  if (opts.carousel) q.set('carousel', '1');
   const qs = q.toString();
   return req<EvaluatedHistoryResult>(`/api/evaluated-history${qs ? `?${qs}` : ''}`, token);
 }
