@@ -82,6 +82,23 @@ export function adaptedRows(assets: ManualPieceInput['assets']): Array<{ platfor
  * `platformKey` es el canal de la FRANJA, que es el que manda (una franja es un canal, y sólo ése).
  */
 export function manualTextOf(piece: ManualPieceInput, platformKey: string): string {
+  return manualPasteOf(piece, platformKey).text;
+}
+
+/**
+ * De dónde salió el cuerpo del bloque de la pestaña:
+ *   channel_adapted — el adaptado del canal de la franja;
+ *   master_copy     — no hay adaptado para ese canal: el texto juzgado (rama degradada);
+ *   empty           — no hay cuerpo (el bloque es, como mucho, el título).
+ */
+export type ManualPasteSource = 'channel_adapted' | 'master_copy' | 'empty';
+
+/**
+ * EL BLOQUE QUE LA PESTAÑA «MANUAL» ENTREGA PARA PEGAR, y de dónde salió su cuerpo. Es la única
+ * regla: `manualTextOf` la devuelve tal cual y la vista previa de un canal que se publica a mano la
+ * pinta tal cual (`_calibrationShared.ts`, `publishedTextOf`). Si cambia aquí, cambian las dos.
+ */
+export function manualPasteOf(piece: ManualPieceInput, platformKey: string): { text: string; source: ManualPasteSource } {
   const assets = piece.assets ?? {};
   const sig = assets.builder_meta?.signature_closer?.text ?? null;
   const k = String(platformKey ?? '').toLowerCase();
@@ -89,12 +106,13 @@ export function manualTextOf(piece: ManualPieceInput, platformKey: string): stri
   const propia = adaptedRows(assets).find((a) => a.platform.toLowerCase() === k);
   const base = propia ? propia.copy : (assets.copy?.aife_filtered ?? assets.copy?.raw ?? '');
   const cuerpo = base ? canonicalizeSignature(base, sig).trim() : '';
+  const source: ManualPasteSource = !cuerpo ? 'empty' : propia ? 'channel_adapted' : 'master_copy';
 
   const titulo = String(assets.copy?.title ?? '').trim();
-  if (!titulo) return cuerpo;
-  if (!cuerpo) return titulo;
-  if (cuerpo.startsWith(titulo)) return cuerpo;
-  return `${titulo}\n\n${cuerpo}`;
+  if (!titulo) return { text: cuerpo, source };
+  if (!cuerpo) return { text: titulo, source };
+  if (cuerpo.startsWith(titulo)) return { text: cuerpo, source };
+  return { text: `${titulo}\n\n${cuerpo}`, source };
 }
 
 /**
