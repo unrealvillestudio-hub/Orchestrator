@@ -52,7 +52,8 @@ import {
   applyCors, extractToken,
   fetchLivePieces, fetchPipelineCutoffs, fetchWatcherTraces, fetchAttemptsByQueue,
   latestPerQueue, generationOf, toContext, PIECES_CAP,
-  parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
+  parsePieceSearch, idMatchesSearch, searchErrorBody, searchSummary,
+  isCarouselContentPiece, carouselParam,
   type ContentPiece, type PipelineCutoff, type GenerationInfo, type PieceSearch,
 } from './_calibrationShared.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
@@ -131,6 +132,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // lo ya publicado— y por eso es acá donde hay estados que filtrar. Darle un filtro de estado a
   // calibración la convertiría en ésta.
   const status        = strParam(req.query.status);
+  // 2026-10-06 — sólo carruseles, de cualquier canal. Se combina con `channel`: un carrusel es un
+  // FORMATO, no un canal (ver `isCarouselContentPiece`).
+  const carousel      = carouselParam(req.query.carousel);
 
   // U-7 — buscar por id. Un `q` inválido es 400, no una lista vacía: «no existe» y «no supe
   // buscar eso» no se pueden leer igual.
@@ -138,19 +142,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     search = parsePieceSearch(req.query.q);
   } catch (err) {
-    if (err instanceof SearchTooShort) {
-      return res.status(400).json({
-        error: 'search_too_short',
-        detail: `Para buscar por id hacen falta al menos ${SEARCH_MIN_PREFIX} caracteres. `
-          + 'Un prefijo más corto devolvería medio catálogo.',
-      });
-    }
-    if (err instanceof SearchNotAnId) {
-      return res.status(400).json({
-        error: 'search_not_an_id',
-        detail: 'La búsqueda es por id de pieza (o por su prefijo), no por texto libre.',
-      });
-    }
+    // 2026-10-06 — varios ids a la vez: el 400 nombra los que fallan. Una sola redacción para las
+    // cuatro bandejas (`searchErrorBody`), no una copia por endpoint.
+    const body = searchErrorBody(err);
+    if (body) return res.status(400).json(body);
     throw err;
   }
 
@@ -201,6 +196,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // de en qué página estabas.
     if (search) scoped = scoped.filter((p) => idMatchesSearch(p.id, search));
     if (status) scoped = scoped.filter((p) => (p.status ?? '') === status);
+    // 2026-10-06 — FILTRO «CARRUSEL», contado justo antes de aplicarse: el número del interruptor es
+    // lo que daría encenderlo con los demás filtros puestos.
+    const carousels = scoped.filter((p) => isCarouselContentPiece(p)).length;
+    if (carousel) scoped = scoped.filter((p) => isCarouselContentPiece(p));
 
     const by_brand: Record<string, number> = {};
     const by_channel: Record<string, number> = {};
@@ -252,6 +251,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       channel_status: channelStatus,
       generation,
       status: status ?? '',
+      carousel,
+      carousels,
       // U-7 — los estados PRESENTES EN EL LOTE. Sale del dato, como `by_brand`: si el carril
       // empieza a producir un estado nuevo, aparece en el selector solo. Se calcula sobre el
       // lote COMPLETO, no sobre el filtrado — si no, elegir un estado dejaría el selector con
@@ -262,7 +263,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
        * que existe pudo quedarse fuera, y entonces una lista vacía NO es «no existe».
        * Un uuid completo nunca se trunca: va como filtro directo.
        */
-      search: search ? { q: search.q, mode: search.mode, truncated: search.mode === 'prefix' && truncated } : null,
+      search: search ? searchSummary(search, ordered.map((p) => p.id), search.mode === 'prefix' && truncated) : null,
       pieces,
       // PR-C — si las franjas no se pudieron leer, la pantalla tiene que decir que las
       // fechas FALTAN, no que estén vacías: `slot: null` significaría «sin franja» y el

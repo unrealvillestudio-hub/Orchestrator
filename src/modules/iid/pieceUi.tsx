@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import {
   ChevronLeft, ChevronRight, ShieldCheck, ShieldAlert, ShieldQuestion, Copy, Check, Clock, GitBranch, History,
   CalendarCheck, CalendarClock, CalendarOff, CalendarX, Search, X, AlertTriangle, Wrench, HelpCircle,
-  ChevronDown, SlidersHorizontal, Wand2,
+  ChevronDown, SlidersHorizontal, Wand2, GalleryHorizontal,
 } from 'lucide-react';
+// El MISMO parser que el server: lo que la caja acepta es lo que la bandeja acepta.
+import { checkSearchDraft } from '../../../api/_pieceSearch';
 import { cn } from '../../ui/components';
 // CHIP DE REGLA (2026-10-05) — todo código de regla de la tarjeta enseña su enunciado.
 import { RuleChip, RuleText } from './RuleText';
@@ -320,19 +322,28 @@ export function Selector({ label, value, onChange, options }: {
   );
 }
 
-// ── U-7 · BUSCAR UNA PIEZA POR SU ID ─────────────────────────────────────────────
+// ── U-7 · BUSCAR PIEZAS POR SU ID (varias a la vez desde el 2026-10-06) ──────────
 /**
  * EL SITIO DONDE PEGAR LO QUE LA TARJETA PINTA.
  *
  * `shortId` muestra los 8 primeros caracteres del uuid, y hasta U-7 no había dónde pegarlos:
  * para encontrar una pieza había que ir a Historial y mirar a mano. Este campo es ese sitio,
- * y es el MISMO en las tres bandejas — si cada una tuviera el suyo, divergirían.
+ * y es el MISMO en todas las bandejas — si cada una tuviera el suyo, divergirían.
+ *
+ * VARIAS PIEZAS A LA VEZ (Sam, 2026-10-06: «filtrar por varias piezas a la vez separadas por coma
+ * o como quieras»). Acepta ids separados por coma, punto y coma, espacio o salto de línea. Es un
+ * `<textarea>` y no un `<input>` a propósito: un `<input>` de una línea BORRA los saltos de línea al
+ * pegar, y una columna de ids copiada de una hoja se convertiría en un solo prefijo inventado. Enter
+ * busca; Mayúsculas+Enter añade una línea.
+ *
+ * El parser es el del server (`api/_pieceSearch.ts`): la caja avisa ANTES de enviar qué ids no
+ * valen, con el mismo texto que daría el 400.
  *
  * NO busca mientras se escribe. Se busca al confirmar (Enter o el botón), y es deliberado:
  * un prefijo de 2 caracteres tecleado de camino a uno de 8 dispara una consulta que el
  * server rechaza con 400, y el operador vería un error por escribir.
  */
-export function PieceSearchBox({ value, onSearch, placeholder = 'Pegar id de pieza…' }: {
+export function PieceSearchBox({ value, onSearch, placeholder = 'Pegar ids de pieza…' }: {
   /** Lo que está buscándose AHORA (viene del estado de la bandeja, no de este campo). */
   value: string;
   /** Confirmar. Cadena vacía = limpiar la búsqueda. */
@@ -343,60 +354,85 @@ export function PieceSearchBox({ value, onSearch, placeholder = 'Pegar id de pie
   // Si la bandeja limpia la búsqueda desde fuera, el campo la sigue.
   React.useEffect(() => { setDraft(value); }, [value]);
 
+  const check = checkSearchDraft(draft);
+  const enviar = () => { if (!check.error) onSearch(check.q); };
   const buscando = !!value;
+  const sinCambios = buscando && check.q === checkSearchDraft(value).q;
   return (
-    <div className="flex items-center gap-1.5">
-      <div className="relative flex-1 md:flex-none">
-        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') onSearch(draft.trim()); }}
-          placeholder={placeholder}
-          spellCheck={false}
-          className={cn(
-            'w-full md:w-[190px] bg-zinc-900 border rounded-lg pl-7 pr-2 py-2 md:py-1 text-zinc-300 font-mono',
-            'outline-none transition-colors placeholder:text-zinc-700 placeholder:font-sans',
-            buscando ? 'border-accent/50' : 'border-zinc-800 focus:border-accent/50',
-          )}
-        />
+    <div className="flex flex-col gap-1">
+      <div className="flex items-start gap-1.5">
+        <div className="relative flex-1 md:flex-none">
+          <Search size={13} className="absolute left-2.5 top-2.5 md:top-1.5 text-zinc-600 pointer-events-none" />
+          <textarea
+            value={draft}
+            rows={Math.min(4, Math.max(1, draft.split('\n').length))}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar(); } }}
+            placeholder={placeholder}
+            title="Uno o varios ids (8 caracteres o el id completo), separados por coma, espacio o línea"
+            spellCheck={false}
+            aria-invalid={!!check.error}
+            className={cn(
+              'block w-full md:w-[260px] resize-none bg-zinc-900 border rounded-lg pl-7 pr-2 py-2 md:py-1 text-zinc-300 font-mono',
+              'outline-none transition-colors placeholder:text-zinc-700 placeholder:font-sans',
+              check.error ? 'border-rose-500/60' : buscando ? 'border-accent/50' : 'border-zinc-800 focus:border-accent/50',
+            )}
+          />
+        </div>
+        {buscando && sinCambios ? (
+          <button
+            onClick={() => { setDraft(''); onSearch(''); }}
+            title="Quitar la búsqueda"
+            className="px-2 py-1 rounded-lg border border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+          >
+            <X size={13} />
+          </button>
+        ) : (
+          <button
+            onClick={enviar}
+            disabled={!draft.trim() || !!check.error}
+            title={check.count > 1 ? `Buscar ${check.count} ids` : 'Buscar por id'}
+            className="px-2 py-1 rounded-lg border border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Search size={13} />
+          </button>
+        )}
       </div>
-      {buscando ? (
-        <button
-          onClick={() => { setDraft(''); onSearch(''); }}
-          title="Quitar la búsqueda"
-          className="px-2 py-1 rounded-lg border border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-        >
-          <X size={13} />
-        </button>
-      ) : (
-        <button
-          onClick={() => onSearch(draft.trim())}
-          disabled={!draft.trim()}
-          title="Buscar por id"
-          className="px-2 py-1 rounded-lg border border-zinc-800 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <Search size={13} />
-        </button>
-      )}
+      {check.error ? (
+        <span className="text-[10px] font-mono text-rose-300/90 md:max-w-[300px]">{check.error}</span>
+      ) : check.count > 1 && !sinCambios ? (
+        <span className="text-[10px] font-mono text-zinc-600">{check.count} ids · Enter para buscar</span>
+      ) : null}
     </div>
   );
 }
 
 /**
- * QUÉ DECIR CUANDO UNA BÚSQUEDA NO ENCUENTRA NADA — y es lo único que hace falta explicar
- * de todo U-7.
+ * QUÉ DECIR DE UNA BÚSQUEDA — cuántas filas casaron, qué ids no encontraron nada, y si el lote se
+ * cortó.
  *
  * El endpoint resuelve el prefijo en memoria sobre un lote con tope. Si ese lote se cortó,
  * una pieza que existe puede no aparecer, y decir «no existe» sería mentir. Son dos ceros
  * distintos y la pantalla los nombra distinto.
+ *
+ * Con VARIOS ids (2026-10-06) hace falta decir además cuáles faltan: pegar diez ids y ver ocho
+ * tarjetas obliga, si no, a cotejarlos a mano. `missing` lo calcula el server sobre el resultado con
+ * todos los filtros puestos (`api/_pieceSearch.ts → searchSummary`).
  */
 export function SearchNotice({ search, vacia }: {
-  search: { q: string; mode: 'uuid' | 'prefix'; truncated: boolean } | null;
+  search: {
+    q: string; mode: 'uuid' | 'prefix'; truncated: boolean;
+    terms?: string[]; matched?: number; missing?: string[];
+  } | null;
   /** ¿La lista salió vacía? */
   vacia: boolean;
 }) {
   if (!search) return null;
+  const terms = search.terms ?? [search.q];
+  const missing = search.missing ?? (vacia ? terms : []);
+  const varios = terms.length > 1;
+  const ids = (xs: string[]) => <span className="font-mono text-zinc-300">{xs.join(', ')}</span>;
+
   if (search.truncated) {
     return (
       <div className={cn(DATE_ROW, 'bg-amber-500/[0.08] border-amber-500/40 text-amber-200')}>
@@ -404,24 +440,110 @@ export function SearchNotice({ search, vacia }: {
         <span>
           <span className="font-semibold">La búsqueda no pudo mirarlo todo.</span>{' '}
           <span className="text-amber-300/80">
-            El lote llegó a su tope, así que {vacia ? 'que no aparezca NO significa que no exista' : 'puede faltar alguna coincidencia'}.
+            El lote llegó a su tope, así que {missing.length ? <>que {ids(missing)} no aparezca NO significa que no exista</> : 'puede faltar alguna coincidencia'}.
             Con el id completo la búsqueda es exacta y no depende del lote.
           </span>
         </span>
       </div>
     );
   }
-  if (!vacia) return null;
+  if (!varios) {
+    if (!vacia) return null;
+    return (
+      <div className={cn(DATE_ROW, 'bg-zinc-800/40 border-zinc-700/60 border-dashed text-zinc-400')}>
+        <Search size={13} className="shrink-0 mt-0.5" />
+        <span>
+          Ninguna pieza de esta bandeja empieza por <span className="font-mono text-zinc-300">{search.q}</span>.
+          Puede estar en otra bandeja, o ya haber salido del circuito.
+        </span>
+      </div>
+    );
+  }
+  const encontrados = terms.length - missing.length;
   return (
-    <div className={cn(DATE_ROW, 'bg-zinc-800/40 border-zinc-700/60 border-dashed text-zinc-400')}>
+    <div className={cn(DATE_ROW, missing.length
+      ? 'bg-zinc-800/40 border-zinc-700/60 border-dashed text-zinc-400'
+      : 'bg-accent/[0.06] border-accent/30 text-zinc-300')}>
       <Search size={13} className="shrink-0 mt-0.5" />
       <span>
-        Ninguna pieza de esta bandeja empieza por <span className="font-mono text-zinc-300">{search.q}</span>.
-        Puede estar en otra bandeja, o ya haber salido del circuito.
+        <span className="font-semibold">{encontrados} de {terms.length} ids encontrados</span>
+        {typeof search.matched === 'number' && <> · {search.matched} {search.matched === 1 ? 'resultado' : 'resultados'}</>}
+        {missing.length > 0 && (
+          <>
+            {' · '}sin coincidencia en esta bandeja con los filtros puestos: {ids(missing)}.
+            {' '}Pueden estar en otra bandeja, o ya haber salido del circuito.
+          </>
+        )}
       </span>
     </div>
   );
 }
+
+/**
+ * EL FILTRO DE PLATAFORMA DE LA BANDEJA DE PIEZAS, con «Carrusel» al lado (2026-10-06).
+ *
+ * Las opciones de plataforma salen del LOTE (`data.platforms`), nunca de una lista escrita aquí: una
+ * marca nueva con una plataforma nueva aparece sola. «Carrusel» no es una opción más del selector —
+ * que es de valor único— sino un interruptor que se combina con él. Ojo con el nombre: la bandeja de
+ * publicación llama `channel` a lo suyo y filtra el CANAL OPERATIVO de la marca; son ejes distintos.
+ */
+export function PlatformFilter({ platform, platforms, carousel, carousels, onChange }: {
+  platform: string;
+  platforms: string[];
+  carousel: boolean;
+  carousels?: number;
+  onChange: (patch: { platform?: string; carousel?: boolean }) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <Selector
+        label="Plataforma"
+        value={platform}
+        onChange={(v) => onChange({ platform: v })}
+        options={[['', 'Todas'], ...platforms.map((p) => [p, p] as [string, string])]}
+      />
+      <CarouselToggle active={carousel} count={carousels} onToggle={(v) => onChange({ carousel: v })} />
+    </div>
+  );
+}
+
+// ── 2026-10-06 · FILTRO «CARRUSEL» ───────────────────────────────────────────────
+/**
+ * Sam: «en el filtro por plataformas quiero ver carrousels». Un carrusel no es una plataforma —es un
+ * formato, y existe en más de una—, así que no entra como una opción más del selector de plataforma,
+ * que es de valor único: va como interruptor al lado, y se COMBINA con él («carruseles de meta_ig»).
+ * Qué cuenta como carrusel lo decide el server con el mismo criterio que pinta la tira de láminas
+ * (`api/_manualShared.ts → isCarouselPiece`). Esta pieza sólo enciende y apaga.
+ */
+export function CarouselToggle({ active, count, onToggle }: {
+  active: boolean;
+  /** Cuántas daría encenderlo con los demás filtros puestos. `undefined` = el server no lo cuenta. */
+  count?: number;
+  onToggle: (next: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(!active)}
+      aria-pressed={active}
+      title={active ? 'Quitar el filtro de carruseles' : 'Sólo carruseles, de cualquier plataforma'}
+      className={cn(
+        'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all font-body border',
+        active ? 'bg-accent text-black border-accent shadow' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50',
+      )}
+    >
+      <GalleryHorizontal size={13} />
+      Carrusel
+      {typeof count === 'number' && (
+        <span className={cn(
+          'text-[9px] font-mono px-1.5 py-0.5 rounded-full',
+          active ? 'bg-black/20 text-black' : 'bg-zinc-800 text-zinc-600',
+        )}>{count}</span>
+      )}
+    </button>
+  );
+}
+
 
 // ── Paginación: los botones se ven SIEMPRE, deshabilitados incluido ──────────────
 // Un botón invisible cuando no aplica deja al operador sin saber dónde está parado.

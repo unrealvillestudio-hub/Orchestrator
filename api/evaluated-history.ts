@@ -41,8 +41,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   applyCors, extractToken, requireAdmin, SB_URL, SB_KEY,
-  parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
-  fetchLivePieces, CALIBRATION_STATUSES,
+  parsePieceSearch, idMatchesSearch, searchErrorBody, searchSummary,
+  fetchLivePieces, CALIBRATION_STATUSES, fetchCarouselPieceIds, carouselParam,
   type PieceSearch,
 } from './_calibrationShared.js';
 import { PUBLISH_STATUSES } from './_publishShared.js';
@@ -213,6 +213,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Cualquier valor, comparado exacto. `all` (o vacío) = sin filtro. Ver la cabecera.
   const verdict = strParam(req.query.verdict);
   const source  = enumParam<HistorySourceFilter>(req.query.source, HISTORY_SOURCES, 'all');
+  // 2026-10-06 — sólo carruseles, de cualquier canal; se combina con `channel`. El corpus no guarda
+  // las láminas, así que el criterio se resuelve sobre `content_pieces` (`fetchCarouselPieceIds`), y
+  // SÓLO cuando el filtro está puesto: sin él, el historial no lee una tabla más.
+  const carousel = carouselParam(req.query.carousel);
 
   // U-7 — buscar por id de pieza, el MISMO resolvedor que las otras tres bandejas.
   //
@@ -228,24 +232,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     search = parsePieceSearch(req.query.q);
   } catch (err) {
-    if (err instanceof SearchTooShort) {
-      return res.status(400).json({
-        error: 'search_too_short',
-        detail: `Para buscar por id hacen falta al menos ${SEARCH_MIN_PREFIX} caracteres. `
-          + 'Un prefijo más corto devolvería medio catálogo.',
-      });
-    }
-    if (err instanceof SearchNotAnId) {
-      return res.status(400).json({
-        error: 'search_not_an_id',
-        detail: 'La búsqueda es por id de pieza (o por su prefijo), no por texto libre.',
-      });
-    }
+    // 2026-10-06 — varios ids a la vez: el 400 nombra los que fallan. Una sola redacción para las
+    // cuatro bandejas (`searchErrorBody`), no una copia por endpoint.
+    const body = searchErrorBody(err);
+    if (body) return res.status(400).json(body);
     throw err;
   }
 
   try {
-    const [live, archived, brandLangs, enCurso] = await Promise.all([
+    const [live, archived, brandLangs, enCurso, carruseles] = await Promise.all([
       source === 'archived' ? Promise.resolve([]) : fetchCorpusRows('approval_calibration', 'live', { from, to }),
       source === 'live' ? Promise.resolve([]) : fetchCorpusRows('approval_calibration_archive', 'archived', { from, to }),
       fetchBrandLanguages(),
@@ -253,6 +248,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // en arreglo, retenido o aprobado esperando salir— se ve ALLÍ, con sus botones. Historial es lo
       // que ya terminó: publicado, rechazado o descartado.
       search ? Promise.resolve([]) : fetchLivePieces({ onlyStatuses: [...CALIBRATION_STATUSES, ...PUBLISH_STATUSES] }),
+      carousel ? fetchCarouselPieceIds() : Promise.resolve(null),
     ]);
     const vivasEnOtraBandeja = new Set(enCurso.map((p) => p.id));
 
@@ -287,13 +283,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (brand)   filtradas = filtradas.filter((r) => r.brand_id === brand);
     if (channel) filtradas = filtradas.filter((r) => r.platform === channel);
     if (verdict && verdict !== 'all') filtradas = filtradas.filter((r) => r.verdict === verdict);
+    if (carruseles) filtradas = filtradas.filter((r) => carruseles.ids.has(r.piece_id));
 
     const ordenadas = filtradas.sort((a, b) => ms(b.created_at) - ms(a.created_at));
     const page = ordenadas.slice(offset, offset + limit);
 
     // Que una de las dos lecturas tope el CAP se DICE: un historial truncado en silencio es
     // peor que uno corto, porque parece completo.
-    const truncated = live.length >= HISTORY_CAP || archived.length >= HISTORY_CAP;
+    const truncated = live.length >= HISTORY_CAP || archived.length >= HISTORY_CAP
+      // Si la lista de carruseles llegó a su tope, puede faltar alguno: el resultado no es completo.
+      || Boolean(carruseles?.truncated);
     if (truncated) {
       console.warn(`[evaluated-history] lectura al tope ${HISTORY_CAP} — el historial puede estar truncado`);
     }
@@ -306,11 +305,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       limit,
       offset,
       rows: page,
+      carousel,
       /**
        * U-7 — qué se buscó y si alguna de las dos lecturas topó su cap. Si se truncó, una
        * lista vacía NO es «no existe»: es «puede que no lo haya traído».
        */
-      search: search ? { q: search.q, mode: search.mode, truncated: search.mode === 'prefix' && truncated } : null,
+      search: search ? searchSummary(search, ordenadas.map((r) => r.piece_id), search.mode === 'prefix' && truncated) : null,
       ...(truncated ? { truncated } : {}),
     });
   } catch (err) {

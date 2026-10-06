@@ -37,8 +37,9 @@ import { CALIBRATION_TAB_STATES,
   fetchCalibrationPieces, fetchEvaluatedIds, fetchPipelineCutoffs,
   fetchWatcherTraces, fetchAttemptsByQueue,
   latestPerQueue, generationOf, watcherOf, toContext, PIECES_CAP,
-  parsePieceSearch, idMatchesSearch, SearchTooShort, SearchNotAnId, SEARCH_MIN_PREFIX,
+  parsePieceSearch, idMatchesSearch, searchErrorBody, searchSummary,
   pendingStateOf, PENDING_STATES, tieneImagen, autofixResiduo, type PendingState,
+  isCarouselContentPiece, carouselParam,
   type ContentPiece, type PieceContext, type PipelineCutoff, type GenerationInfo,
   type PieceSearch,
 } from './_calibrationShared.js';
@@ -242,6 +243,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // filtra el CANAL OPERATIVO de la marca: son dos ejes distintos y por eso llevan nombres
   // distintos. Unificarlos a la fuerza haría que un filtro dijera lo que el otro hace.
   const platform   = strParam(req.query.platform);
+  // 2026-10-06 — sólo carruseles, de cualquier plataforma. Va aparte de `platform` para poder
+  // combinarse con ella: un carrusel es un FORMATO, no una plataforma (ver `isCarouselContentPiece`).
+  const carousel   = carouselParam(req.query.carousel);
 
   // U-7 — buscar por id. Se resuelve ANTES de nada porque un `q` inválido es un 400, no una
   // lista vacía: «no existe» y «no supe buscar eso» no se pueden leer igual.
@@ -249,19 +253,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     search = parsePieceSearch(req.query.q);
   } catch (err) {
-    if (err instanceof SearchTooShort) {
-      return res.status(400).json({
-        error: 'search_too_short',
-        detail: `Para buscar por id hacen falta al menos ${SEARCH_MIN_PREFIX} caracteres. `
-          + 'Un prefijo más corto devolvería medio catálogo.',
-      });
-    }
-    if (err instanceof SearchNotAnId) {
-      return res.status(400).json({
-        error: 'search_not_an_id',
-        detail: 'La búsqueda es por id de pieza (o por su prefijo), no por texto libre.',
-      });
-    }
+    // 2026-10-06 — varios ids a la vez: el 400 nombra los que fallan. Una sola redacción para las
+    // cuatro bandejas (`searchErrorBody`), no una copia por endpoint.
+    const body = searchErrorBody(err);
+    if (body) return res.status(400).json(body);
     throw err;
   }
 
@@ -352,6 +347,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const ejeDelJuez = (e: PendingState | undefined) => e === 'retenida' || e === 'sin_imagen';
       scoped = scoped.filter((p) => !(ejeDelJuez(stateById.get(p.id)) && enArbitraje.has(p.id)));
     }
+
+    // 2026-10-06 — FILTRO «CARRUSEL», el último de los transversales y ANTES de `by_brand`. Se cuenta
+    // justo antes de aplicarlo: el número que acompaña al interruptor es lo que daría encenderlo con
+    // los demás filtros puestos, igual que las pastillas de marca.
+    const carousels = scoped.filter((p) => isCarouselContentPiece(p)).length;
+    if (carousel) scoped = scoped.filter((p) => isCarouselContentPiece(p));
 
     // UNA MARCA NO DESAPARECE: DECLARA CERO. (Regla de Sam, 2026-09-18.)
     //
@@ -486,6 +487,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             (p) => p.brand_id === c.brand_id && (p.platform ?? '') === c.platform).length,
         })),
       platform: platform ?? '',
+      // 2026-10-06 — el filtro «Carrusel» y cuántas piezas daría con los demás filtros puestos.
+      carousel,
+      carousels,
       // U-7 — las plataformas PRESENTES EN EL LOTE, para que el selector salga del dato.
       // Nunca una lista escrita en el código: una marca nueva con una plataforma nueva
       // aparece sola, sin tocar una línea.
@@ -500,7 +504,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
        * sería una afirmación falsa sobre la búsqueda, en el único campo que existe para no
        * mentir sobre ella.
        */
-      search: search ? { q: search.q, mode: search.mode, truncated: search.mode === 'prefix' && piezasTruncadas } : null,
+      // 2026-10-06 — con varios ids, la respuesta dice además cuántas filas casaron y QUÉ ids no
+      // encontraron nada en esta bandeja con los filtros puestos (`searchSummary`).
+      search: search ? searchSummary(search, ordered.map((p) => p.id), search.mode === 'prefix' && piezasTruncadas) : null,
       pieces,
       // Por qué la generación puede venir 'unknown': tabla ausente vs tabla vacía.
       cutoffs_source: cutoffsRaw === null ? 'unavailable' : (cutoffs.length ? 'seeded' : 'empty'),

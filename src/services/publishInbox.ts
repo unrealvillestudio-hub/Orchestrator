@@ -168,6 +168,9 @@ export interface PublishQueueResult {
   status: string;
   /** U-7 — los estados presentes en el lote. Del dato, nunca de una lista en el código. */
   statuses: string[];
+  /** 2026-10-06 — el filtro «Carrusel» aplicado y cuántas daría con los demás filtros puestos. */
+  carousel?: boolean;
+  carousels?: number;
   /** U-7 — qué se buscó. `null` = no se buscó nada, que no es «no se encontró nada». */
   search: SearchInfo | null;
   pieces: PublishablePiece[];
@@ -212,8 +215,10 @@ export function fetchPublishQueue(
     channel?: string; channelStatus?: ChannelStatusFilter; generation?: GenerationFilter;
     /** U-7 — estado de la pieza. Esta bandeja lista varios; calibración lista uno solo. */
     status?: string;
-    /** U-7 — id de pieza o prefijo suyo. */
+    /** U-7 — uno o varios ids de pieza (o prefijos de 8+), separados por coma, espacio o salto de línea. */
     q?: string;
+    /** 2026-10-06 — sólo carruseles, de cualquier canal. Se combina con `channel`. */
+    carousel?: boolean;
   } = {},
 ): Promise<PublishQueueResult> {
   const q = new URLSearchParams();
@@ -225,6 +230,7 @@ export function fetchPublishQueue(
   if (opts.generation) q.set('generation', opts.generation);
   if (opts.status) q.set('status', opts.status);
   if (opts.q) q.set('q', opts.q);
+  if (opts.carousel) q.set('carousel', '1');
   const qs = q.toString();
   return req<PublishQueueResult>(`/api/publish-queue${qs ? `?${qs}` : ''}`, token);
 }
