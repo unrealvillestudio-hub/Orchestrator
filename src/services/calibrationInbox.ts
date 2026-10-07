@@ -401,6 +401,21 @@ export const CALIBRATION_TAB_STATES: readonly PendingState[] = ['esperando', 're
 export const PENDING_STATES: readonly PendingState[] =
   ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo'];
 
+/**
+ * LOS EJES QUE PIDE UNA PETICIÓN DE LA BANDEJA. Sin alcance (Calibración), el selector «Estado»
+ * elige un eje o ninguno. Con alcance (una pestaña como Arreglos), el alcance manda y el grupo
+ * elegido sólo lo ESTRECHA a uno de sus propios ejes (Sam, 2026-10-07: filtrar Arreglos por
+ * «reparadas», «auto-fixed» y «por reparar»). Un eje ajeno al alcance se ignora: dejarlo pasar
+ * convertiría la pestaña en otra cosa bajo el mismo título.
+ */
+export function statesForQuery(
+  scopeStates: readonly PendingState[] | undefined,
+  elegido: PendingState | '',
+): PendingState[] {
+  if (!scopeStates?.length) return elegido ? [elegido] : [];
+  return elegido && scopeStates.includes(elegido) ? [elegido] : [...scopeStates];
+}
+
 export interface QueueResult {
   total_pending: number;
   by_brand: Record<string, number>;

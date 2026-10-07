@@ -59,6 +59,13 @@ const FIX_SCOPE: CalibrationScope = {
     </>
   ),
   empty: 'Nada en el circuito de arreglos: ni pendiente de arreglar, ni esperando tu visto bueno.',
+  // 2026-10-07 — Sam pidió filtrar Arreglos por tres grupos. Cada uno es un eje de `pendingStateOf`,
+  // no una regla nueva sobre el texto del motivo:
+  //   · Reparadas   = `corregida`: viva (`awaiting_approval`) y con `challenged_at` — volvió del arreglo.
+  //   · Auto-fixed  = `autofix_residuo`: retada, con imagen, sin juicio de Sam y con residuo del carril.
+  //   · Por reparar = `por_arreglar`: retada con veredicto de Sam en el corpus, es decir, su fixable.
+  // `sin_imagen` no es grupo de los tres: sigue visible con «Todas».
+  groups: [['corregida', 'Reparadas'], ['autofix_residuo', 'Auto-fixed'], ['por_arreglar', 'Por reparar']],
 };
 
 const NAV_ITEMS = [

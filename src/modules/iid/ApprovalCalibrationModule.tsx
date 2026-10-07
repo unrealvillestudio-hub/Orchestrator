@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { RefreshCw, Inbox, CheckCircle2, XCircle, AlertTriangle, Archive, Wrench } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import type { IidSession } from '../../services/iidInbound';
-import { CALIBRATION_TAB_STATES,
+import { CALIBRATION_TAB_STATES, statesForQuery,
   fetchQueue, renderArtifact, CalibrationError,
   type CalibrationPiece, type QueueResult, type QueueOrder, type VerdictFilter,
   type GenerationFilter, type UrgencyFilter, type UrgentChannelInfo, type PendingState,
@@ -17,7 +17,7 @@ import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader, shortId,
   ForecastLine, SlotsNotice, SearchNotice, PendingStateBadge, PENDING_STATE_UI,
   DeferralNotice, FixNotice, AutofixNotice, PieceSummary, MobileDetails, FilterBar, OpenChallengesNotice, RuleTextsProvider,
-  PlatformFilter,
+  PlatformFilter, ScopeGroupFilter,
 } from './pieceUi';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
 import { SpeechReader } from '../../ui/SpeechReader';
@@ -69,6 +69,7 @@ export interface CalibrationScope {
   subtitle: React.ReactNode;
   /** Qué decir cuando no hay ninguna. No es «nada pendiente»: es «nada EN ESTA PESTAÑA». */
   empty: string;
+  groups?: Array<[PendingState, string]>; // 2026-10-07 — grupos con nombre dentro de la pestaña: ver `ScopeGroupFilter`.
 }
 
 export default function ApprovalCalibrationModule(
@@ -91,7 +92,7 @@ export default function ApprovalCalibrationModule(
   const [urgency, setUrgency]   = useState<UrgencyFilter>('all');
   // LO-CORREGIDO-01 — el eje de pendiente, SÓLO cuando la pantalla no trae alcance fijado. Dentro
   // de una pestaña el eje no es un filtro: es qué pestaña es, y dejar cambiarlo la convertiría en
-  // otra cosa bajo el mismo título.
+  // otra cosa bajo el mismo título. Con `scope.groups` (2026-10-07), es el grupo elegido.
   const [estado, setEstado]     = useState<PendingState | ''>('');
   const [offset, setOffset]   = useState(0);
 
@@ -101,9 +102,9 @@ export default function ApprovalCalibrationModule(
   };
   const current = (): Query => ({ offset, brand, order, verdict, gen, platform, q, urgency, estado, carousel });
 
-  /** Los ejes que esta petición pide: el alcance de la pestaña manda sobre el selector. */
+  /** Los ejes que esta petición pide: el alcance manda; el grupo sólo lo estrecha (`statesForQuery`). */
   const statesOf = (q: Query): PendingState[] =>
-    (scope?.states?.length ? scope.states : (q.estado ? [q.estado] : []));
+    statesForQuery(scope?.states, q.estado);
 
   const load = async (q: Query) => {
     setLoading(true); setError(null);
@@ -287,6 +288,7 @@ export default function ApprovalCalibrationModule(
             ]}
           />
         )}
+        {scope && <ScopeGroupFilter scope={scope} value={estado} byState={data?.by_state} onChange={(e) => apply({ estado: e })} />}
       </FilterBar>
 
       {/* U-7 — «no hay» y «no lo pude mirar todo» son dos ceros distintos. */}

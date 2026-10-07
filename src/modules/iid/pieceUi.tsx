@@ -322,6 +322,34 @@ export function Selector({ label, value, onChange, options }: {
   );
 }
 
+/**
+ * LOS GRUPOS DE UNA PESTAÑA CON ALCANCE (Sam, 2026-10-07: filtrar Arreglos por «reparadas»,
+ * «auto-fixed» y «por reparar»). Es el mismo patrón que el selector «Estado» de Calibración —el
+ * de las aplazadas—: «Todas» por defecto y el número de cada grupo al lado, contado por el server
+ * en `by_state` sobre TODO lo pendiente, así que un grupo en cero DICE cero en vez de desaparecer.
+ *
+ * Cada grupo es UN eje de `pendingStateOf` con el nombre que Sam usa para él: el grupo no
+ * clasifica nada, sólo nombra un eje que el server ya resolvió. Sólo se ofrecen los ejes que
+ * pertenecen al alcance de la pestaña. Sin `groups`, no se pinta nada.
+ */
+export function ScopeGroupFilter({ scope, value, byState, onChange }: {
+  scope: { states: readonly PendingState[]; groups?: Array<[PendingState, string]> };
+  value: PendingState | '';
+  byState: Partial<Record<PendingState, number>> | undefined;
+  onChange: (v: PendingState | '') => void;
+}) {
+  const groups = (scope.groups ?? []).filter(([e]) => scope.states.includes(e));
+  if (!groups.length) return null;
+  return (
+    <Selector
+      label="Grupo"
+      value={value}
+      onChange={(v) => onChange(v as PendingState | '')}
+      options={[['', 'Todas'], ...groups.map(([e, l]) => [e, `${l} (${byState?.[e] ?? 0})`] as [string, string])]}
+    />
+  );
+}
+
 // ── U-7 · BUSCAR PIEZAS POR SU ID (varias a la vez desde el 2026-10-06) ──────────
 /**
  * EL SITIO DONDE PEGAR LO QUE LA TARJETA PINTA.
