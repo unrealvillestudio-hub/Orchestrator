@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 // El MISMO parser que el server: lo que la caja acepta es lo que la bandeja acepta.
 import { checkSearchDraft } from '../../../api/_pieceSearch';
+// El valor del tipo «carrusel» es el del formato: la misma constante que usa el server.
+import { CAROUSEL_FORMAT } from '../../../api/_manualShared';
 import { cn } from '../../ui/components';
 // CHIP DE REGLA (2026-10-05) — todo código de regla de la tarjeta enseña su enunciado.
 import { RuleChip, RuleText } from './RuleText';
@@ -322,6 +324,34 @@ export function Selector({ label, value, onChange, options }: {
   );
 }
 
+/**
+ * LOS GRUPOS DE UNA PESTAÑA CON ALCANCE (Sam, 2026-10-07: filtrar Arreglos por «reparadas»,
+ * «auto-fixed» y «por reparar»). Es el mismo patrón que el selector «Estado» de Calibración —el
+ * de las aplazadas—: «Todas» por defecto y el número de cada grupo al lado, contado por el server
+ * en `by_state` sobre TODO lo pendiente, así que un grupo en cero DICE cero en vez de desaparecer.
+ *
+ * Cada grupo es UN eje de `pendingStateOf` con el nombre que Sam usa para él: el grupo no
+ * clasifica nada, sólo nombra un eje que el server ya resolvió. Sólo se ofrecen los ejes que
+ * pertenecen al alcance de la pestaña. Sin `groups`, no se pinta nada.
+ */
+export function ScopeGroupFilter({ scope, value, byState, onChange }: {
+  scope: { states: readonly PendingState[]; groups?: Array<[PendingState, string]> };
+  value: PendingState | '';
+  byState: Partial<Record<PendingState, number>> | undefined;
+  onChange: (v: PendingState | '') => void;
+}) {
+  const groups = (scope.groups ?? []).filter(([e]) => scope.states.includes(e));
+  if (!groups.length) return null;
+  return (
+    <Selector
+      label="Grupo"
+      value={value}
+      onChange={(v) => onChange(v as PendingState | '')}
+      options={[['', 'Todas'], ...groups.map(([e, l]) => [e, `${l} (${byState?.[e] ?? 0})`] as [string, string])]}
+    />
+  );
+}
+
 // ── U-7 · BUSCAR PIEZAS POR SU ID (varias a la vez desde el 2026-10-06) ──────────
 /**
  * EL SITIO DONDE PEGAR LO QUE LA TARJETA PINTA.
@@ -480,19 +510,25 @@ export function SearchNotice({ search, vacia }: {
 }
 
 /**
- * EL FILTRO DE PLATAFORMA DE LA BANDEJA DE PIEZAS, con «Carrusel» al lado (2026-10-06).
+ * EL FILTRO DE PLATAFORMA DE LA BANDEJA DE PIEZAS, con «Tipo» al lado (2026-10-08).
  *
  * Las opciones de plataforma salen del LOTE (`data.platforms`), nunca de una lista escrita aquí: una
- * marca nueva con una plataforma nueva aparece sola. «Carrusel» no es una opción más del selector —
- * que es de valor único— sino un interruptor que se combina con él. Ojo con el nombre: la bandeja de
+ * marca nueva con una plataforma nueva aparece sola. El «Tipo» va en un selector aparte porque se
+ * COMBINA con la plataforma («carruseles de una plataforma»). Ojo con el nombre: la bandeja de
  * publicación llama `channel` a lo suyo y filtra el CANAL OPERATIVO de la marca; son ejes distintos.
+ *
+ * Hasta el 2026-10-08 aquí había un interruptor «Carrusel» (`CarouselToggle`, que siguen usando
+ * Publicación e Historial). En Calibración y Arreglos lo sustituye el selector de tipo: el carrusel
+ * es ahora un valor más del tipo, junto a las series de los temas y los demás formatos.
  */
-export function PlatformFilter({ platform, platforms, carousel, carousels, onChange }: {
+export function PlatformFilter({ platform, platforms, type, types, onChange }: {
   platform: string;
   platforms: string[];
-  carousel: boolean;
-  carousels?: number;
-  onChange: (patch: { platform?: string; carousel?: boolean }) => void;
+  /** El tipo elegido. `''` = todos. */
+  type: string;
+  /** Cuántas daría cada tipo con los demás filtros puestos (`types` del server). */
+  types?: Record<string, number>;
+  onChange: (patch: { platform?: string; type?: string }) => void;
 }) {
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -502,9 +538,36 @@ export function PlatformFilter({ platform, platforms, carousel, carousels, onCha
         onChange={(v) => onChange({ platform: v })}
         options={[['', 'Todas'], ...platforms.map((p) => [p, p] as [string, string])]}
       />
-      <CarouselToggle active={carousel} count={carousels} onToggle={(v) => onChange({ carousel: v })} />
+      <Selector label="Tipo" value={type} onChange={(v) => onChange({ type: v })} options={pieceTypeOptions(types, type)} />
     </div>
   );
+}
+
+// ── 2026-10-08 · FILTRO «TIPO» ───────────────────────────────────────────────────
+/**
+ * Vocabulario de la interfaz para el eje TIPO. Sólo se nombra lo que capitalizar no resuelve: el
+ * carrusel, cuyo valor en el dato es la palabra inglesa. Cualquier otro valor —`post`, una serie como
+ * `podcast`, `video` cuando exista— se pinta con la primera letra en mayúscula, sin tocar este archivo.
+ */
+const PIECE_TYPE_LABELS: Readonly<Record<string, string>> = { [CAROUSEL_FORMAT]: 'Carrusel' };
+
+export function pieceTypeLabel(t: string): string {
+  return PIECE_TYPE_LABELS[t] ?? (t ? t.charAt(0).toUpperCase() + t.slice(1) : t);
+}
+
+/**
+ * Las opciones del selector «Tipo»: «Todos» y, después, SÓLO los tipos con piezas, del dato. El tipo
+ * ya elegido se conserva aunque los demás filtros lo dejen en cero: sin su opción, el selector
+ * enseñaría «Todos» con el filtro todavía puesto, que es una pantalla que miente sobre sí misma.
+ */
+export function pieceTypeOptions(types: Record<string, number> | undefined, selected: string): Array<[string, string]> {
+  const conteo = { ...(types ?? {}) };
+  const presentes = Object.keys(conteo).filter((t) => conteo[t] > 0 || t === selected);
+  if (selected && !presentes.includes(selected)) presentes.push(selected);
+  return [
+    ['', 'Todos'],
+    ...presentes.sort().map((t) => [t, `${pieceTypeLabel(t)} (${conteo[t] ?? 0})`] as [string, string]),
+  ];
 }
 
 // ── 2026-10-06 · FILTRO «CARRUSEL» ───────────────────────────────────────────────

@@ -363,15 +363,24 @@ describe('las cuatro bandejas comparten parser, resumen y error', () => {
       const src = leer(f);
       expect(src, f).not.toMatch(/['"]carousel['"]/);
     }
-    expect(leer('./calibration-queue.ts')).toContain('isCarouselContentPiece(p)');
+    // 2026-10-08 — Calibración filtra por TIPO (`pieceTypeOf`), y el tipo «carrusel» se decide con
+    // el mismo criterio compartido: la comprobación se mueve a donde vive ese criterio ahora.
+    expect(leer('./calibration-queue.ts')).toContain('pieceTypeOf(p, ');
+    expect(leer('./_calibrationShared.ts')).toMatch(/export function pieceTypeOf[\s\S]{0,400}isCarouselContentPiece\(p\)/);
     expect(leer('./publish-queue.ts')).toContain('isCarouselContentPiece(p)');
     expect(leer('./evaluated-history.ts')).toContain('fetchCarouselPieceIds()');
   });
 
   it('el carrusel filtra ANTES de contar marcas y antes de paginar', () => {
-    for (const f of ['./calibration-queue.ts', './publish-queue.ts']) {
+    // 2026-10-08 — en Calibración el carrusel es un valor del filtro «Tipo» (`carousel=1` es su alias
+    // legado): lo que se fija es lo mismo —filtrar antes de contar marcas y de paginar—, sobre la
+    // línea que ahora filtra.
+    for (const [f, linea] of [
+      ['./calibration-queue.ts', 'if (type) scoped = scoped.filter'],
+      ['./publish-queue.ts', 'if (carousel) scoped = scoped.filter'],
+    ] as const) {
       const src = leer(f);
-      const filtro = src.indexOf('if (carousel) scoped = scoped.filter');
+      const filtro = src.indexOf(linea);
       expect(filtro, f).toBeGreaterThan(-1);
       expect(filtro, f).toBeLessThan(src.indexOf('by_brand: Record<string, number>'));
       expect(filtro, f).toBeLessThan(src.indexOf('.slice(offset, offset + limit)'));

@@ -21,6 +21,8 @@
  *   order      slot (default) | recent | oldest | brand | verdict
  *   verdict    all (default) | PASS | REJECT     — primera opinión del watcher
  *   generation all (default) | current           — sólo piezas posteriores al último corte
+ *   type       <tipo> (2026-10-08)               — sólo piezas de ese tipo (`pieceTypeOf`)
+ *   carousel   1 | true                          — ALIAS LEGADO de `type=carousel`
  *
  * Returns 200: {
  *   total_pending, by_brand, limit, offset, pieces[], cutoffs_source
@@ -39,10 +41,12 @@ import { CALIBRATION_TAB_STATES,
   latestPerQueue, generationOf, watcherOf, toContext, PIECES_CAP,
   parsePieceSearch, idMatchesSearch, searchErrorBody, searchSummary,
   pendingStateOf, PENDING_STATES, tieneImagen, autofixResiduo, type PendingState,
-  isCarouselContentPiece, carouselParam,
+  fetchRecurringFormats, pieceTypeOf, typeParam,
   type ContentPiece, type PieceContext, type PipelineCutoff, type GenerationInfo,
   type PieceSearch,
 } from './_calibrationShared.js';
+// El valor del tipo «carrusel» es el del formato: una sola constante para el criterio y el filtro.
+import { CAROUSEL_FORMAT } from './_manualShared.js';
 // Quién puede ver esta bandeja y de qué marcas: admin todo; un revisor, sólo las suyas.
 import { requireReviewer, filterByReviewScope } from './_reviewScope.js';
 // UNA PIEZA, UNA PESTAÑA — la retenida CON arbitraje abierto es de Retenidas; la que no lo tiene
@@ -97,6 +101,8 @@ type CalibrationInboxPiece = PieceContext & {
    * se pinta como texto. Vacío `{}` = ningún código, o no se pudo leer (`RULE_TEXTS_UNREAD`).
    */
   rule_texts: RuleTexts;
+  /** 2026-10-08 — el tipo de la pieza (serie del tema, carrusel o formato). Ver `pieceTypeOf`. */
+  piece_type: string;
 };
 
 // Ejes de orden y filtro. Son del SISTEMA (una pieza tiene fecha, marca y veredicto en
@@ -243,9 +249,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // filtra el CANAL OPERATIVO de la marca: son dos ejes distintos y por eso llevan nombres
   // distintos. Unificarlos a la fuerza haría que un filtro dijera lo que el otro hace.
   const platform   = strParam(req.query.platform);
-  // 2026-10-06 — sólo carruseles, de cualquier plataforma. Va aparte de `platform` para poder
-  // combinarse con ella: un carrusel es un FORMATO, no una plataforma (ver `isCarouselContentPiece`).
-  const carousel   = carouselParam(req.query.carousel);
+  // 2026-10-08 — EL TIPO DE PIEZA (serie del tema, carrusel o formato). Va aparte de `platform` para
+  // combinarse con ella: un tipo no es una plataforma. `carousel=1` —el interruptor del 2026-10-06—
+  // sigue valiendo como ALIAS LEGADO de `type=carousel`; si vienen los dos, manda `type`.
+  const type       = typeParam(req.query.type, req.query.carousel);
 
   // U-7 — buscar por id. Se resuelve ANTES de nada porque un `q` inválido es un 400, no una
   // lista vacía: «no existe» y «no supe buscar eso» no se pueden leer igual.
@@ -263,7 +270,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Se lee sin filtro de marca para que by_brand sea global y estable aunque venga
     // filtro; los cortes se leen en runtime (nunca hay fechas de corte en este código).
-    const [allPieces, evaluated, cutoffsRaw, limits, closers, brandLangs, brandZones, freeSlots, abiertas] = await Promise.all([
+    const [allPieces, evaluated, cutoffsRaw, limits, closers, brandLangs, brandZones, freeSlots, abiertas, recurring] = await Promise.all([
       fetchCalibrationPieces(),
       fetchEvaluatedIds(),
       fetchPipelineCutoffs(),
@@ -277,6 +284,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Sólo hace falta si la pestaña pide `retenida`. Una lectura fallida no esconde nada: sin
       // saber qué está en arbitraje, la retenida se muestra acá antes que en ningún sitio.
       states.some((e) => e === 'retenida' || e === 'sin_imagen') ? fetchPendingChallenges().catch(() => null) : Promise.resolve(null),
+      // 2026-10-08 — las series recurrentes de los temas, UNA lectura. Falla en blando: ver la función.
+      fetchRecurringFormats(),
     ]);
     const cutoffs: PipelineCutoff[] = cutoffsRaw ?? [];
 
@@ -348,11 +357,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       scoped = scoped.filter((p) => !(ejeDelJuez(stateById.get(p.id)) && enArbitraje.has(p.id)));
     }
 
-    // 2026-10-06 — FILTRO «CARRUSEL», el último de los transversales y ANTES de `by_brand`. Se cuenta
-    // justo antes de aplicarlo: el número que acompaña al interruptor es lo que daría encenderlo con
-    // los demás filtros puestos, igual que las pastillas de marca.
-    const carousels = scoped.filter((p) => isCarouselContentPiece(p)).length;
-    if (carousel) scoped = scoped.filter((p) => isCarouselContentPiece(p));
+    // 2026-10-08 — FILTRO «TIPO», el último de los transversales y ANTES de `by_brand`. Sustituye al
+    // filtro «Carrusel» del 2026-10-06, que queda como un valor más del tipo. `types` se cuenta justo
+    // antes de aplicarlo: el número de cada opción es lo que daría elegirla con los demás filtros
+    // puestos, igual que las pastillas de marca. El tipo se resuelve una vez por pieza y viaja.
+    const typeById = new Map<string, string>();
+    for (const p of scoped) typeById.set(p.id, pieceTypeOf(p, recurring.byTopic));
+    const types: Record<string, number> = {};
+    for (const t of typeById.values()) types[t] = (types[t] ?? 0) + 1;
+    if (type) scoped = scoped.filter((p) => typeById.get(p.id) === type);
 
     // UNA MARCA NO DESAPARECE: DECLARA CERO. (Regla de Sam, 2026-09-18.)
     //
@@ -416,6 +429,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       pending_state: stateById.get(p.id)!,
       // LO-CORREGIDO-01 — la propuesta de Sam, lo que cambió desde el reto y por qué versión va.
       fix: fixFlowOf(p, edits.get(p.id) ?? []),
+      piece_type: typeById.get(p.id)!,
     }));
 
     // CHIP DE REGLA — los códigos se buscan en la pieza YA ARMADA, que es lo que la tarjeta pinta:
@@ -487,9 +501,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             (p) => p.brand_id === c.brand_id && (p.platform ?? '') === c.platform).length,
         })),
       platform: platform ?? '',
-      // 2026-10-06 — el filtro «Carrusel» y cuántas piezas daría con los demás filtros puestos.
-      carousel,
-      carousels,
+      // 2026-10-08 — el tipo pedido (`''` = todos) y cuántas piezas daría cada tipo con los demás
+      // filtros puestos. Sólo aparecen los tipos presentes: salen del dato, no de una lista.
+      type: type ?? '',
+      types,
+      // Por qué no aparece ninguna serie: «no hay series» (`ok`) y «no se pudieron leer» (`unavailable`).
+      types_source: recurring.source,
+      // ALIAS LEGADO del 2026-10-06 para clientes anteriores: `carousel` dice si el tipo pedido es el
+      // carrusel y `carousels` es el conteo de ese tipo, con la misma precedencia que `types`.
+      carousel: type === CAROUSEL_FORMAT,
+      carousels: types[CAROUSEL_FORMAT] ?? 0,
       // U-7 — las plataformas PRESENTES EN EL LOTE, para que el selector salga del dato.
       // Nunca una lista escrita en el código: una marca nueva con una plataforma nueva
       // aparece sola, sin tocar una línea.

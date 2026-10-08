@@ -331,6 +331,8 @@ export interface CalibrationPiece {
    * entonces los códigos se pintan como texto.
    */
   rule_texts?: RuleTexts;
+  /** 2026-10-08 — tipo de la pieza (serie del tema, carrusel o formato). Opcional: server anterior. */
+  piece_type?: string;
 }
 
 /** Espejo de `AutofixSummary` en `api/_calibrationShared.ts`. */
@@ -401,6 +403,21 @@ export const CALIBRATION_TAB_STATES: readonly PendingState[] = ['esperando', 're
 export const PENDING_STATES: readonly PendingState[] =
   ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo'];
 
+/**
+ * LOS EJES QUE PIDE UNA PETICIÓN DE LA BANDEJA. Sin alcance (Calibración), el selector «Estado»
+ * elige un eje o ninguno. Con alcance (una pestaña como Arreglos), el alcance manda y el grupo
+ * elegido sólo lo ESTRECHA a uno de sus propios ejes (Sam, 2026-10-07: filtrar Arreglos por
+ * «reparadas», «auto-fixed» y «por reparar»). Un eje ajeno al alcance se ignora: dejarlo pasar
+ * convertiría la pestaña en otra cosa bajo el mismo título.
+ */
+export function statesForQuery(
+  scopeStates: readonly PendingState[] | undefined,
+  elegido: PendingState | '',
+): PendingState[] {
+  if (!scopeStates?.length) return elegido ? [elegido] : [];
+  return elegido && scopeStates.includes(elegido) ? [elegido] : [...scopeStates];
+}
+
 export interface QueueResult {
   total_pending: number;
   by_brand: Record<string, number>;
@@ -431,9 +448,17 @@ export interface QueueResult {
   platform: string;
   /** U-7 — las plataformas presentes en el lote. Del dato, nunca de una lista en el código. */
   platforms: string[];
-  /** 2026-10-06 — el filtro «Carrusel» aplicado y cuántas daría con los demás filtros puestos. */
+  /** 2026-10-06 — ALIAS LEGADO de `type`: si el tipo pedido es el carrusel y cuántos hay de ese tipo. */
   carousel?: boolean;
   carousels?: number;
+  /**
+   * 2026-10-08 — el tipo pedido (`''` = todos) y cuántas piezas daría cada tipo con los demás filtros
+   * puestos. Sólo vienen los tipos presentes. Opcional: un server anterior no lo manda.
+   */
+  type?: string;
+  types?: Record<string, number>;
+  /** Si las series de los temas se pudieron leer. `unavailable` = el tipo cayó al formato. */
+  types_source?: 'ok' | 'unavailable';
   /** U-7 — qué se buscó. `null` = no se buscó nada, que no es «no se encontró nada». */
   search: SearchInfo | null;
   pieces: CalibrationPiece[];
@@ -529,8 +554,8 @@ export function fetchQueue(
      * línea. Lo valida el mismo parser en los dos lados (`api/_pieceSearch.ts`).
      */
     q?: string;
-    /** 2026-10-06 — sólo carruseles, de cualquier plataforma. Se combina con `platform`. */
-    carousel?: boolean;
+    /** 2026-10-08 — sólo piezas de este tipo (`types`). Se combina con `platform` y con el grupo. */
+    type?: string;
     /**
      * LO-CORREGIDO-01 — el alcance por eje de pendiente. Es un CONJUNTO: el circuito de arreglos
      * tiene dos mitades y una pestaña que enseñara sólo una escondería la otra. Vacío = toda la
@@ -550,7 +575,7 @@ export function fetchQueue(
   if (opts.urgency) q.set('urgency', opts.urgency);
   if (opts.urgencyHours != null) q.set('urgency_hours', String(opts.urgencyHours));
   if (opts.q) q.set('q', opts.q);
-  if (opts.carousel) q.set('carousel', '1');
+  if (opts.type) q.set('type', opts.type);
   if (opts.states?.length) q.set('state', opts.states.join(','));
   const qs = q.toString();
   return req<QueueResult>(`/api/calibration-queue${qs ? `?${qs}` : ''}`, token);
