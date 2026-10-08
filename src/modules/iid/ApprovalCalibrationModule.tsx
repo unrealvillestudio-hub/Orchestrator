@@ -87,7 +87,7 @@ export default function ApprovalCalibrationModule(
   // U-7 — la plataforma de la pieza y la búsqueda por id.
   const [platform, setPlatform] = useState('');
   const [q, setQ]               = useState('');
-  const [carousel, setCarousel] = useState(false); // 2026-10-06 — ver `PlatformFilter`.
+  const [type, setType]         = useState(''); // 2026-10-08 — tipo de pieza; '' = todos. Ver `PlatformFilter`.
   // U-9 — lo que el carril necesita YA. Es del CANAL, no de la pieza: ver `UrgencyFilter`.
   const [urgency, setUrgency]   = useState<UrgencyFilter>('all');
   // LO-CORREGIDO-01 — el eje de pendiente, SÓLO cuando la pantalla no trae alcance fijado. Dentro
@@ -98,9 +98,9 @@ export default function ApprovalCalibrationModule(
 
   type Query = {
     offset: number; brand: string; order: QueueOrder; verdict: VerdictFilter; gen: GenerationFilter;
-    platform: string; q: string; urgency: UrgencyFilter; estado: PendingState | ''; carousel: boolean;
+    platform: string; q: string; urgency: UrgencyFilter; estado: PendingState | ''; type: string;
   };
-  const current = (): Query => ({ offset, brand, order, verdict, gen, platform, q, urgency, estado, carousel });
+  const current = (): Query => ({ offset, brand, order, verdict, gen, platform, q, urgency, estado, type });
 
   /** Los ejes que esta petición pide: el alcance manda; el grupo sólo lo estrecha (`statesForQuery`). */
   const statesOf = (q: Query): PendingState[] =>
@@ -118,7 +118,7 @@ export default function ApprovalCalibrationModule(
         generation: q.gen,
         platform: q.platform || undefined,
         urgency: q.urgency,
-        q: q.q || undefined, carousel: q.carousel,
+        q: q.q || undefined, type: q.type || undefined,
         states: statesOf(q),
       });
       setData(r);
@@ -137,7 +137,7 @@ export default function ApprovalCalibrationModule(
   const apply = (patch: Partial<Query>) => {
     const q = { ...current(), offset: 0, ...patch };
     setOffset(q.offset); setBrand(q.brand); setOrder(q.order); setVerdict(q.verdict); setGen(q.gen);
-    setPlatform(q.platform); setQ(q.q); setUrgency(q.urgency); setEstado(q.estado); setCarousel(q.carousel);
+    setPlatform(q.platform); setQ(q.q); setUrgency(q.urgency); setEstado(q.estado); setType(q.type);
     load(q);
   };
   const goPage = (o: number) => { setOffset(o); load({ ...current(), offset: o }); };
@@ -227,7 +227,7 @@ export default function ApprovalCalibrationModule(
       {/* Orden + filtros transversales. Móvil: búsqueda a la vista, filtros plegados. */}
       <FilterBar
         q={q} onSearch={(v) => apply({ q: v })}
-        active={[order !== 'slot', verdict !== 'all', gen !== 'all', urgency !== 'all', platform !== '', estado !== '', carousel].filter(Boolean).length}
+        active={[order !== 'slot', verdict !== 'all', gen !== 'all', urgency !== 'all', platform !== '', estado !== '', type !== ''].filter(Boolean).length}
         className="flex-col md:flex-row items-stretch md:items-center gap-3 md:gap-4 md:flex-wrap md:mb-5 text-[11px] font-mono text-zinc-600"
       >
         <Selector
@@ -267,8 +267,8 @@ export default function ApprovalCalibrationModule(
           onChange={(v) => apply({ urgency: v as UrgencyFilter })}
           options={[['all', 'Todo'], ['urgent', 'Franja por vencer']]}
         />
-        <PlatformFilter platform={platform} platforms={data?.platforms ?? []} carousel={carousel}
-          carousels={data?.carousels} onChange={apply} />
+        <PlatformFilter platform={platform} platforms={data?.platforms ?? []} type={type}
+          types={data?.types} onChange={apply} />
         {/* LO-CORREGIDO-01 — EL EJE DE PENDIENTE, con su número al lado. Sólo en la bandeja
             general: dentro de una pestaña el eje ya está decidido y es su identidad.
             Las opciones salen de `by_state`, que el server cuenta sobre TODO lo pendiente, así que

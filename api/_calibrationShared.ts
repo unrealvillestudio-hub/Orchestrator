@@ -1483,6 +1483,99 @@ export async function fetchCarouselPieceIds(): Promise<{ ids: Set<string>; trunc
   return { ids, truncated: lista.length >= PIECES_CAP };
 }
 
+// ── FILTRO «TIPO» DE PIEZA (Sam, 2026-10-08) ─────────────────────────────────────
+/**
+ * Sam: filtrar las bandejas por tipo de pieza —carruseles, podcasts, vídeo cuando exista—. El TIPO
+ * no es una columna: se resuelve de dos ejes del sistema, ninguno de ellos de una marca.
+ *
+ *   1. La SERIE RECURRENTE del tema. Un podcast no es un formato de pieza: es una serie que se declara
+ *      por tema en `intel.brand_topics.recurring_format` (NULL en un tema normal). Una pieza pertenece
+ *      a un tema por `(brand_id, domain)`. Si su tema declara serie, la serie manda.
+ *   2. El FORMATO de la pieza. «Carrusel» con el MISMO criterio con el que la tarjeta pinta la tira de
+ *      láminas (`isCarouselContentPiece`): no hay un segundo criterio de carrusel. Si no, `format` tal
+ *      como está guardado, en minúsculas y sin espacios.
+ *
+ * Los valores salen del dato: un tema nuevo con una serie nueva, o un formato nuevo (`video`), aparece
+ * en el selector sin tocar este archivo.
+ */
+
+/** Tipo de una pieza sin `format` declarado. Es el formato por defecto del sistema, no de una marca. */
+export const DEFAULT_PIECE_TYPE = 'post';
+
+/** Clave del tema de una pieza: `(brand_id, domain)`. El separador no puede aparecer en ninguno. */
+export const topicKey = (brandId: string | null | undefined, domain: string | null | undefined): string =>
+  `${brandId ?? ''}\u0000${domain ?? ''}`;
+
+const normType = (v: unknown): string => (typeof v === 'string' ? v.trim().toLowerCase() : '');
+
+/** Tope de la lectura de temas con serie: son filas de configuración, no piezas. */
+export const RECURRING_TOPICS_CAP = 5000;
+
+/**
+ * LAS SERIES RECURRENTES DECLARADAS, por tema. UNA lectura por request, sólo de los temas que
+ * declaran serie (`recurring_format IS NOT NULL`).
+ *
+ * FALLA EN BLANDO, Y LO DICE. Si `brand_topics` no se puede leer —la columna todavía no existe, el
+ * schema no responde, la red cae—, la bandeja no se rompe: ninguna pieza tiene serie y el tipo cae al
+ * formato. Ese error capturado tiene su propia vía de verificación: el código estable
+ * `[TIPO] brand_topics ilegible` en el log del servidor, y `source:'unavailable'`, que el endpoint
+ * devuelve como `types_source`. «No hay series» y «no se pudieron leer» no se leen igual.
+ */
+export async function fetchRecurringFormats(): Promise<{ byTopic: Map<string, string>; source: 'ok' | 'unavailable' }> {
+  const url = `${SB_URL()}/rest/v1/brand_topics?recurring_format=not.is.null`
+    + `&select=brand_id,domain,recurring_format&limit=${RECURRING_TOPICS_CAP}`;
+  const byTopic = new Map<string, string>();
+  try {
+    const res = await fetchWithTimeout('db', url, { headers: sbHeaders('intel') });
+    if (!res.ok) {
+      console.error(`[TIPO] brand_topics ilegible (${res.status}) — el tipo de pieza cae al formato: ${(await res.text().catch(() => '')).slice(0, 200)}`);
+      return { byTopic, source: 'unavailable' };
+    }
+    const rows = (await res.json().catch(() => null)) as Array<{ brand_id: string; domain: string | null; recurring_format: string | null }> | null;
+    if (!Array.isArray(rows)) {
+      console.error('[TIPO] brand_topics ilegible (respuesta no es una lista) — el tipo de pieza cae al formato');
+      return { byTopic, source: 'unavailable' };
+    }
+    for (const r of rows) {
+      const serie = normType(r?.recurring_format);
+      if (serie) byTopic.set(topicKey(r.brand_id, r.domain), serie);
+    }
+    return { byTopic, source: 'ok' };
+  } catch (err) {
+    console.error(`[TIPO] brand_topics ilegible (${err instanceof Error ? err.message : String(err)}) — el tipo de pieza cae al formato`);
+    return { byTopic, source: 'unavailable' };
+  }
+}
+
+/**
+ * EL TIPO DE UNA PIEZA, en este orden de precedencia:
+ *   (a) la serie recurrente de su tema, si la declara;
+ *   (b) `CAROUSEL_FORMAT` si es carrusel según `isCarouselContentPiece`;
+ *   (c) su `format`, en minúsculas y sin espacios; vacío → `DEFAULT_PIECE_TYPE`.
+ *
+ * Un `format = carousel` que NO pasa el criterio (una sola lámina con imagen) se publica y se ve como
+ * una foto: es `DEFAULT_PIECE_TYPE`, no `carousel`. Si (c) lo devolviera tal cual, el filtro «Tipo»
+ * tendría un segundo criterio de carrusel —el literal del formato— que contradiría a la tarjeta.
+ */
+export function pieceTypeOf(p: ContentPiece, recurringByTopic: ReadonlyMap<string, string>): string {
+  const serie = p.domain ? recurringByTopic.get(topicKey(p.brand_id, p.domain)) : undefined;
+  if (serie) return serie;
+  if (isCarouselContentPiece(p)) return CAROUSEL_FORMAT;
+  const formato = normType(p.format);
+  return formato && formato !== CAROUSEL_FORMAT ? formato : DEFAULT_PIECE_TYPE;
+}
+
+/**
+ * El tipo pedido. `type=<valor>` manda; `carousel=1` es el ALIAS LEGADO de `type=carousel` (el
+ * interruptor «Carrusel» del 2026-10-06): sigue funcionando para clientes anteriores. `undefined` =
+ * sin filtro de tipo.
+ */
+export function typeParam(type: unknown, carousel: unknown): string | undefined {
+  const s = normType(Array.isArray(type) ? type[0] : type);
+  if (s) return s;
+  return carouselParam(carousel) ? CAROUSEL_FORMAT : undefined;
+}
+
 /**
  * LOS ESTADOS EN LOS QUE UNA PIEZA ESTÁ VIVA Y PENDIENTE.
  *
