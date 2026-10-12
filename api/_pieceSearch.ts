@@ -16,7 +16,9 @@
  *   · un uuid completo → coincidencia EXACTA;
  *   · un prefijo de al menos `SEARCH_MIN_PREFIX` caracteres hexadecimales (los guiones no cuentan)
  *     → coincidencia por PREFIJO.
- * Mayúsculas y minúsculas dan igual. Los repetidos se quitan.
+ * Mayúsculas y minúsculas dan igual. Los repetidos se quitan. Desde el 2026-10-12, lo invisible
+ * (caracteres de ancho cero) se ignora y lo que sólo envuelve al id (acentos graves, comillas,
+ * paréntesis, el punto final) se recorta: ver `INVISIBLE` y `WRAPPERS`.
  *
  * ── EL MÍNIMO SUBE DE 4 A 8, Y POR QUÉ ────────────────────────────────────────────
  * Con un solo id, un prefijo de 4 era tolerable. Con varios a la vez, cada término corto suma
@@ -67,8 +69,28 @@ export const SEARCH_MAX_TERMS = 50;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** Un prefijo puede traer guiones si Sam pegó parte de un uuid con formato. */
 const PREFIX_RE = /^[0-9a-f-]+$/;
-/** Separadores aceptados entre ids: coma, punto y coma y cualquier espacio (salto de línea incluido). */
-const SEPARATORS = /[\s,;]+/;
+/**
+ * Separadores aceptados entre ids: coma, punto y coma y cualquier espacio (salto de línea incluido).
+ * Desde el 2026-10-12 también la coma y el punto y coma de ancho completo (`，`, `；`, `、`) y
+ * cualquier separador Unicode (`\p{Z}`), por si la lista llega de un teclado o de un documento ajeno.
+ */
+const SEPARATORS = /[\s\p{Z},;，；、]+/u;
+/**
+ * LO INVISIBLE NO ES PARTE DE UN ID (Sam, 2026-10-12: «el filtro no reconoce los espacios en blanco
+ * después de varias comas»). Medido ese día: un espacio normal o uno duro (U+00A0, U+202F) ya
+ * separaban, pero un carácter de formato de ancho cero (U+200B, U+2060, U+00AD…) que se cuela al
+ * copiar una lista desde el chat se pegaba al id siguiente. El error decía «no son ids:
+ * ​85517171», que en pantalla se lee como un espacio que el filtro no entiende. Esos caracteres
+ * (`\p{Cf}`) se quitan ANTES de partir: nunca se escriben a propósito, y quitarlos dentro de un id
+ * también lo repara.
+ */
+const INVISIBLE = /\p{Cf}/gu;
+/**
+ * Lo que ENVUELVE un id al copiarlo de un texto con formato: comillas, acentos graves del markdown,
+ * paréntesis o corchetes y un punto o dos puntos al final de la frase. Se recorta en los bordes de
+ * cada término; dentro de un id no se toca nada, así que un término con texto sigue siendo un error.
+ */
+const WRAPPERS = /^[`"'«»“”‘’()[\]{}<>]+|[`"'«»“”‘’()[\]{}<>.:]+$/g;
 
 /** Error tipado para «uno o más prefijos son demasiado cortos». El endpoint lo traduce a 400. */
 export class SearchTooShort extends Error {
@@ -99,8 +121,8 @@ export class SearchTooMany extends Error {
 export function splitSearchTerms(raw: unknown): string[] {
   const text = typeof raw === 'string' ? raw : Array.isArray(raw) && typeof raw[0] === 'string' ? raw[0] : '';
   const out: string[] = [];
-  for (const t of text.toLowerCase().split(SEPARATORS)) {
-    const v = t.trim();
+  for (const t of text.replace(INVISIBLE, '').toLowerCase().split(SEPARATORS)) {
+    const v = t.trim().replace(WRAPPERS, '');
     if (v && !out.includes(v)) out.push(v);
   }
   return out;
