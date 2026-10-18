@@ -4,10 +4,11 @@ import { CheckCircle2, XCircle, Archive, Wrench, ImagePlay, PenLine, Search } fr
 import { cn, Spinner } from '../../ui/components';
 import {
   saveVerdict, discardPiece, recomposeImage, renderArtifact, CalibrationError,
-  REJECT_REASONS, buildCriterion, fetchResearchCases, openResearchCase,
+  REJECT_REASONS, buildCriterion, fetchResearchCases, openResearchCase, fetchFixCatalog,
   type PieceActionKey, type PieceActions, type SlotRelease, type Verdict, type ResearchCase,
 } from '../../services/calibrationInbox';
 import { savePieceEdit } from '../../services/challengedInbox';
+import { effectiveFixImageMode, type FixRequestCode, type FixImageMode } from '../../../api/_fixRequest';
 import { fmtInZone } from './pieceUi';
 
 /**
@@ -342,6 +343,51 @@ export const REGEN_MODES: ReadonlyArray<{ value: 'edit_from_current' | 'regenera
     hint: 'Genera la escena de nuevo con el prompt entero y todas las directrices. Para cuando la escena completa está mal.' },
 ];
 
+/**
+ * EL FIXABLE DICE QUÉ CORREGIR (2026-10-19). Sam (2026-10-18) pidió pills de selección múltiple en el
+ * panel Fixable —texto e imagen—, un texto de ayuda para elegir entre corregir sobre la imagen actual y
+ * repintar desde cero, y la pill «SIN TOCAR EL RESTO». Las pills son DATO (`intel.fix_request_codes`): esta
+ * pantalla las lee, no las conoce. Lo de abajo es lógica pura, probable sin montar React.
+ */
+export const FIX_MODE_RULE =
+  'Regla práctica: si conservaría la mayor parte de la imagen, corrija sobre la actual. Repinte desde cero '
+  + 'cuando estén mal las personas, la escena o la composición.';
+export const FIX_OVERLAY_NOTE =
+  'El texto que va sobre la imagen sale del título y del gancho: se corrige con las pills de texto.';
+
+/** Por qué el modo está fijado: la pill que lo impone, con su etiqueta del catálogo. */
+export function fixForcedNote(forcedBy: string | null, catalog: readonly FixRequestCode[] | null): string {
+  const pill = (catalog ?? []).find((c) => c.code === forcedBy);
+  if (!pill?.forces_image_mode) return '';
+  const modo = REGEN_MODES.find((m) => m.value === pill.forces_image_mode)?.label ?? pill.forces_image_mode;
+  return `«${pill.label}» fija el modo: ${modo.toLowerCase()}.`;
+}
+
+/** Marca o desmarca una pill. Conserva el orden en que se marcaron. */
+export function toggleFixCode(list: readonly string[], code: string): string[] {
+  return list.includes(code) ? list.filter((c) => c !== code) : [...list, code];
+}
+
+/** Las pills de un canal, en el orden del catálogo. */
+export function fixPillsOf(catalog: readonly FixRequestCode[] | null, channel: 'text' | 'image'): FixRequestCode[] {
+  return (catalog ?? []).filter((c) => c.channel === channel);
+}
+
+/**
+ * Lo que el panel manda con el fixable. El modo de imagen sólo viaja si se marcó alguna pill de imagen:
+ * sin pedir nada de la imagen, un modo no significa nada. Una pill que impone modo («SIN TOCAR EL
+ * RESTO») gana a la elección.
+ */
+export function fixRequestPayload(
+  codes: readonly string[], catalog: readonly FixRequestCode[] | null, chosen: FixImageMode,
+): { fix_codes: string[] | null; image_mode: FixImageMode | null; forced_by: string | null } {
+  const cat = catalog ?? [];
+  const known = codes.filter((c) => cat.some((x) => x.code === c));
+  const hasImage = known.some((c) => cat.find((x) => x.code === c)?.channel === 'image');
+  const eff = effectiveFixImageMode(known, cat, hasImage ? chosen : null);
+  return { fix_codes: known.length ? known : null, image_mode: hasImage ? eff.mode : null, forced_by: hasImage ? eff.forcedBy : null };
+}
+
 export function panelCopyFor(panel: PanelKey, hasImage: boolean | undefined) {
   const base = PANEL_COPY[panel];
   if (panel !== 'regen' || hasImage !== false) return base;
@@ -457,6 +503,12 @@ export function PieceActionsBar({
   const [regenNote, setRegenNote] = useState<null | { compuesta: boolean; refrescado: boolean; posts: number }>(null);
   // BRIEF-IMG-01 fase 4 — por defecto se CORRIGE sobre la imagen actual: da continuidad a lo pedido.
   const [regenMode, setRegenMode] = useState<'edit_from_current' | 'regenerate_full'>('edit_from_current');
+  // 2026-10-19 — las pills del fixable. El catálogo se lee la primera vez que se abre el panel.
+  const [fixCatalog, setFixCatalog] = useState<FixRequestCode[] | null>(null);
+  const [fixCatalogError, setFixCatalogError] = useState<string | null>(null);
+  const [fixCodes, setFixCodes] = useState<string[]>([]);
+  const [fixMode, setFixMode] = useState<FixImageMode>('edit_from_current');
+  const fixReq = fixRequestPayload(fixCodes, fixCatalog, fixMode);
 
   // SIN-IMAGEN-01 — el verbo de la acción de imagen depende de si hay una. Ver `imageActionLabel`.
   const buttons = actionButtons(piece.actions).map((b) =>
@@ -479,6 +531,15 @@ export function PieceActionsBar({
     setNote(p === 'edit' ? (vigente.body ?? '') : '');
     setEditTitle(p === 'edit' ? (vigente.title ?? '') : '');
     setEditNote(null);
+    if (p === 'fix') {
+      setFixCodes([]); setFixMode('edit_from_current');
+      // Sin catálogo el fixable sigue funcionando como antes (sólo con la propuesta escrita), y se dice.
+      if (!fixCatalog) {
+        setFixCatalogError(null);
+        fetchFixCatalog(token).then((r) => setFixCatalog(r.fix_codes))
+          .catch((err) => setFixCatalogError(cardError(err, 'No se pudieron cargar las pills.').message));
+      }
+    }
   };
 
   /** Tras una acción que sella: se dice qué pasó con la franja y se saca la pieza. */
@@ -517,6 +578,7 @@ export function PieceActionsBar({
           verdict,
           criterion: conTexto ? buildCriterion(reason, null) : buildCriterion(reason, note),
           fix_proposal: conTexto ? note.trim() : null,
+          ...(verdict === 'fixable' ? { fix_codes: fixReq.fix_codes, image_mode: fixReq.image_mode } : {}),
         });
       // `approved` pasa por el MISMO acuse que los demás. Que no libere franja no es motivo
       // para que no diga nada: `slot_release` viene null y el acuse lo omite, pero el
@@ -772,6 +834,82 @@ export function PieceActionsBar({
                     {m.label}
                   </button>
                 ))}
+              </div>
+            )}
+
+            {/* 2026-10-19 — LAS PILLS DEL FIXABLE: qué se pide corregir, en texto y en imagen. Son dato. */}
+            {panel === 'fix' && (
+              <div className="space-y-2">
+                {fixCatalogError && (
+                  <p className="text-[11px] font-mono text-amber-300/80">
+                    {fixCatalogError} El fixable se guarda igual, sólo con la propuesta escrita.
+                  </p>
+                )}
+                {!fixCatalog && !fixCatalogError && <p className="text-[11px] font-mono text-zinc-500">Cargando pills…</p>}
+                {(['text', 'image'] as const).map((canal) => {
+                  const pills = fixPillsOf(fixCatalog, canal);
+                  if (!pills.length) return null;
+                  return (
+                    <div key={canal} className="space-y-1">
+                      <p className="text-[10px] uppercase tracking-wide text-zinc-500">{canal === 'text' ? 'Texto' : 'Imagen'}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label={canal === 'text' ? 'Qué corregir del texto' : 'Qué corregir de la imagen'}>
+                        {pills.map((c) => {
+                          const on = fixCodes.includes(c.code);
+                          return (
+                            <button
+                              key={c.code}
+                              aria-pressed={on}
+                              title={c.help ?? undefined}
+                              onClick={() => setFixCodes(toggleFixCode(fixCodes, c.code))}
+                              className={cn(
+                                'text-[11px] px-2 py-1 rounded-lg border transition-colors',
+                                on
+                                  ? (canal === 'text' ? 'border-sky-500/60 bg-sky-500/15 text-sky-200' : 'border-violet-500/60 bg-violet-500/15 text-violet-200')
+                                  : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700',
+                              )}
+                            >
+                              {c.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {canal === 'image' && <p className="text-[10px] text-zinc-500 leading-snug">{FIX_OVERLAY_NOTE}</p>}
+                    </div>
+                  );
+                })}
+                {fixReq.image_mode && piece.has_image !== false && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Cómo corregir la imagen">
+                      {REGEN_MODES.map((m) => {
+                        const bloqueado = !!fixReq.forced_by && m.value !== fixReq.image_mode;
+                        return (
+                          <button
+                            key={m.value}
+                            role="radio"
+                            aria-checked={fixReq.image_mode === m.value}
+                            disabled={bloqueado}
+                            onClick={() => setFixMode(m.value)}
+                            title={m.hint}
+                            className={cn(
+                              'text-[11px] px-2 py-1 rounded-lg border transition-colors',
+                              fixReq.image_mode === m.value
+                                ? 'border-violet-500/60 bg-violet-500/15 text-violet-200'
+                                : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700',
+                              bloqueado && 'opacity-40 cursor-not-allowed',
+                            )}
+                          >
+                            {m.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-zinc-400 leading-snug">
+                      {fixReq.forced_by
+                        ? fixForcedNote(fixReq.forced_by, fixCatalog)
+                        : FIX_MODE_RULE}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
