@@ -4,13 +4,14 @@ import { CheckCircle2, XCircle, Archive, Wrench, ImagePlay, PenLine, Search } fr
 import { cn, Spinner } from '../../ui/components';
 import {
   saveVerdict, discardPiece, recomposeImage, renderArtifact, CalibrationError,
-  REJECT_REASONS, buildCriterion, fetchResearchCases, openResearchCase, fetchFixCatalog,
+  REJECT_REASONS, buildCriterion, fetchResearchCases, openResearchCase, fetchFixCatalog, fetchEmphasisColors, restorePreviousImage,
   type PieceActionKey, type PieceActions, type SlotRelease, type Verdict, type ResearchCase,
 } from '../../services/calibrationInbox';
 import { savePieceEdit } from '../../services/challengedInbox';
 import { effectiveFixImageMode, type FixRequestCode, type FixImageMode } from '../../../api/_fixRequest';
-import { overlayMarkupOf, parseOverlayMarkup, type ImageOverlayView } from '../../../api/_overlayText';
+import { overlayMarkupOf, parseOverlayMarkup, type ImageOverlayView, type EmphasisColorOption } from '../../../api/_overlayText';
 import { highlightPayload, HIGHLIGHT_NOTE_MAX, type HighlightInput } from '../../../api/_highlights';
+import { SCENE_SLOTS, slotDirective, SLOT_CHANGE_MODE, MODE_HELP, type SceneCast, type ImageHistoryEntry } from '../../../api/_sceneCast';
 import { fmtInZone } from './pieceUi';
 
 /**
@@ -362,12 +363,14 @@ export const PANEL_COPY: Record<PanelKey, {
  * cada instrucción continúa la anterior (la imagen vigente + el prompt entero + las directrices
  * acumuladas). Repintar desde cero es la salida cuando la escena entera está mal.
  */
-export const REGEN_MODES: ReadonlyArray<{ value: 'edit_from_current' | 'regenerate_full'; label: string; hint: string }> = [
-  { value: 'edit_from_current', label: 'Corregir sobre la imagen actual',
-    hint: 'Parte de la imagen vigente y aplica tu directriz, sumada a las anteriores. Mantiene lo que ya está bien.' },
-  { value: 'regenerate_full', label: 'Repintar desde cero',
-    hint: 'Genera la escena de nuevo con el prompt entero y todas las directrices. Para cuando la escena completa está mal.' },
+// 2026-10-20 — TRES MODOS, con su ayuda a la vista (Sam, 2026-10-19: «deja un helper que me indique en qué casos usar
+// "desde cero" y cuándo no»). La ayuda vive en `MODE_HELP` (api/_sceneCast), una sola fuente.
+export const REGEN_MODES: ReadonlyArray<{ value: RegenMode; label: string; hint: string }> = [
+  { value: 'edit_from_current', label: 'Corregir sobre la imagen actual', hint: MODE_HELP.edit_from_current },
+  { value: 'same_scene', label: 'Otra persona, misma escena', hint: MODE_HELP.same_scene },
+  { value: 'regenerate_full', label: 'Repintar desde cero', hint: MODE_HELP.regenerate_full },
 ];
+export type RegenMode = 'edit_from_current' | 'same_scene' | 'regenerate_full';
 
 /**
  * EL FIXABLE DICE QUÉ CORREGIR (2026-10-19). Sam (2026-10-18) pidió pills de selección múltiple en el
@@ -537,13 +540,19 @@ export function PieceActionsBar({
   const [vigente, setVigente] = useState<{ title: string | null; body: string | null }>({ title: piece.title, body: piece.body });
   const [editTitle, setEditTitle] = useState('');
   const [editNote, setEditNote] = useState<null | { avisos: string[]; refrescado: boolean }>(null);
-  const [regenNote, setRegenNote] = useState<null | { compuesta: boolean; refrescado: boolean; posts: number }>(null);
+  const [regenNote, setRegenNote] = useState<null | { compuesta: boolean; refrescado: boolean; posts: number; cambioDeModo?: string | null; restaurada?: boolean }>(null);
   // BRIEF-IMG-01 fase 4 — por defecto se CORRIGE sobre la imagen actual: da continuidad a lo pedido.
-  const [regenMode, setRegenMode] = useState<'edit_from_current' | 'regenerate_full'>('edit_from_current');
+  const [regenMode, setRegenMode] = useState<RegenMode>('edit_from_current');
+  // 2026-10-20 — EN LA ESCENA (Ref1, Ref2, Host, Fondo) y las imágenes anteriores. Se leen al abrir el panel.
+  const [cast, setCast] = useState<SceneCast | null>(null);
+  const [history, setHistory] = useState<ImageHistoryEntry[] | null>(null);
   // 2026-10-19 — la pestaña del panel de imagen y el texto de la imagen en edición.
   const [regenTab, setRegenTab] = useState<RegenTab>('scene');
   const [overlayMarkup, setOverlayMarkup] = useState('');
   const [overlaySub, setOverlaySub] = useState('');
+  // 2026-10-19 — el color del resaltado: las opciones de la marca (se leen al abrir el editor) y la elegida.
+  const [emColors, setEmColors] = useState<EmphasisColorOption[] | null>(null);
+  const [overlayRole, setOverlayRole] = useState<string | null>(null);
   // 2026-10-19 — las pills del fixable. El catálogo se lee la primera vez que se abre el panel.
   const [fixCatalog, setFixCatalog] = useState<FixRequestCode[] | null>(null);
   const [fixCatalogError, setFixCatalogError] = useState<string | null>(null);
@@ -562,6 +571,8 @@ export function PieceActionsBar({
    */
   const juicio = buttons.filter((b) => b.weight !== 'tertiary');
   const arreglo = buttons.filter((b) => b.weight === 'tertiary');
+  // 2026-10-19 — el editor del texto de la imagen tiene su botón: disponible cuando se puede tocar la imagen y la hay.
+  const texto = piece.has_image !== false && !!arreglo.find((b) => b.key === 'recompose_image' && b.available);
   const spec = panel ? buttons.find((b) => b.panel === panel) : null;
   const copy = panel ? panelCopyFor(panel, piece.has_image) : null;
   const warning = spec ? slotWarning(spec.seals, piece.slot) : null;
@@ -581,6 +592,12 @@ export function PieceActionsBar({
       setRegenTab('scene');
       setOverlayMarkup(overlayMarkupOf(piece.image_overlay?.headline ?? null, piece.image_overlay?.emphasis ?? []));
       setOverlaySub(piece.image_overlay?.subheadline ?? '');
+      setOverlayRole(piece.image_overlay?.emphasis_role ?? null);
+      // Sin opciones (o si la lectura falla) el editor funciona igual, sin selector de color.
+      // 2026-10-20 — la misma lectura trae En la escena y las imágenes anteriores; se relee cada vez (el historial cambia).
+      fetchEmphasisColors(token, piece.piece_id)
+        .then((r) => { setEmColors(r.options); setCast(r.cast ?? null); setHistory(r.history ?? []); })
+        .catch(() => { setEmColors([]); setCast(null); setHistory([]); });
     }
     if (p === 'approve') setHl({ copy: false, image: false, copyNote: '', imageNote: '' });
     if (p === 'fix') {
@@ -656,11 +673,12 @@ export function PieceActionsBar({
 
   /** 2026-10-19 — el texto de la imagen. `clear` = volver al texto del copy. */
   const submitOverlay = async (clear: boolean) => {
-    let override: { headline: string; subheadline: string | null; emphasis: string[] } | null = null;
+    let override: { headline: string; subheadline: string | null; emphasis: string[]; emphasis_role?: string } | null = null;
     if (!clear) {
       const parsed = parseOverlayMarkup(overlayMarkup);
       if (!parsed.ok) { setError({ message: parsed.error, detail: null }); return; }
-      override = { headline: parsed.headline, subheadline: overlaySub.trim() || null, emphasis: parsed.emphasis };
+      override = { headline: parsed.headline, subheadline: overlaySub.trim() || null, emphasis: parsed.emphasis,
+        ...(overlayRole && parsed.emphasis.length ? { emphasis_role: overlayRole } : {}) };
     }
     setBusy('recompose_image'); setError(null); setRegenNote(null);
     try {
@@ -673,6 +691,27 @@ export function PieceActionsBar({
     } finally { setBusy(null); }
   };
 
+  /** 2026-10-20 — elegir en «En la escena» escribe la directriz y pasa a «Otra persona, misma escena». */
+  const pickSlot = (slot: string, name: string) => {
+    const d = slotDirective(slot, name);
+    if (!d) return;
+    setNote((prev) => (prev.trim() ? `${prev.trim()}. ${d}` : d));
+    setRegenMode(SLOT_CHANGE_MODE);
+  };
+
+  /** 2026-10-20 — volver a una imagen anterior. Sin generar; se puede deshacer volviendo otra vez. */
+  const submitRestore = async (index: number) => {
+    setBusy('recompose_image'); setError(null); setRegenNote(null);
+    try {
+      const r = await restorePreviousImage(token, piece.piece_id, index);
+      onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: true, refreshed: r.artifact_refreshed, posts: 0 });
+      setRegenNote({ compuesta: true, refrescado: r.artifact_refreshed, posts: 0, restaurada: true });
+      setPanel(null);
+    } catch (err) {
+      setError(cardError(err, 'No se pudo volver a la imagen anterior.'));
+    } finally { setBusy(null); }
+  };
+
   const submitRegen = async () => {
     if (regenTab === 'text') return submitOverlay(false);
     setBusy('recompose_image'); setError(null); setRegenNote(null);
@@ -682,7 +721,7 @@ export function PieceActionsBar({
         mode: piece.has_image === false ? 'regenerate_full' : regenMode,
       });
       onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: r.composed, refreshed: r.artifact_refreshed, posts: r.scheduled_posts_updated });
-      setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated });
+      setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated, cambioDeModo: r.mode_switched?.reason ?? null });
       setNote(''); setPanel(null);
     } catch (err) {
       setError(cardError(err, 'No se pudo regenerar la imagen.'));
@@ -824,9 +863,12 @@ export function PieceActionsBar({
 
       {regenNote && (
         <div className="text-[11px] font-mono leading-snug text-violet-300/80 bg-violet-500/[0.06] border border-violet-500/20 rounded-xl px-3 py-2 space-y-0.5">
-          <p>{regenNote.compuesta
-            ? 'Imagen regenerada y compuesta.'
-            : 'Escena regenerada, pero la composición falló: la pieza queda con la imagen limpia, sin titular ni franja.'}</p>
+          <p>{regenNote.restaurada
+            ? 'Volvió la imagen anterior. La que estaba quedó en «Imágenes anteriores»: se puede volver a ella.'
+            : regenNote.compuesta
+              ? 'Imagen regenerada y compuesta.'
+              : 'Escena regenerada, pero la composición falló: la pieza queda con la imagen limpia, sin titular ni franja.'}</p>
+          {regenNote.cambioDeModo && <p className="text-amber-300/80">Se pintó la misma escena con el cambio: {regenNote.cambioDeModo}.</p>}
           {!regenNote.refrescado && <p className="text-amber-300/80">La imagen cambió, pero el artefacto no se pudo rehacer: la vista de arriba puede estar mostrando la anterior.</p>}
           {regenNote.posts > 0 && <p className="text-violet-300/60">{regenNote.posts} post pendiente de publicar actualizado con la imagen nueva.</p>}
           <p className="text-violet-300/50">Sigue sin veredicto: la pieza no se ha movido de la bandeja.</p>
@@ -927,6 +969,28 @@ export function PieceActionsBar({
                   aria-label="Bajada de la imagen"
                   className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
                 />
+                {/* 2026-10-19 — el color del resaltado: sólo los que la marca declara para él. */}
+                {!!emColors?.length && (
+                  <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Color del resaltado">
+                    <span className="text-[10px] text-zinc-400 mr-1">Color del resaltado</span>
+                    {emColors.map((c) => {
+                      const activo = overlayRole ? overlayRole === c.role : c.is_default;
+                      return (
+                        <button
+                          key={c.role}
+                          role="radio"
+                          aria-checked={activo}
+                          aria-label={c.is_default ? `${c.role} (el de siempre)` : c.role}
+                          title={c.is_default ? `${c.role} — el de siempre` : c.role}
+                          onClick={() => setOverlayRole(c.is_default ? null : c.role)}
+                          className={cn('w-6 h-6 rounded-full border-2 transition-transform',
+                            activo ? 'border-white scale-110' : 'border-zinc-700 hover:border-zinc-400')}
+                          style={{ backgroundColor: c.hex }}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
                 {piece.image_overlay?.written && (
                   <button
                     onClick={() => submitOverlay(true)}
@@ -959,6 +1023,57 @@ export function PieceActionsBar({
                     {m.label}
                   </button>
                 ))}
+                {/* 2026-10-20 — la ayuda del modo elegido, a la vista (no sólo en el title). */}
+                <p className="basis-full text-[11px] font-mono text-zinc-500">{REGEN_MODES.find((m) => m.value === regenMode)?.hint}</p>
+              </div>
+            )}
+
+            {/* 2026-10-20 — EN LA ESCENA: Ref1, Ref2, Host y Fondo. Elegir escribe la directriz y pasa a misma escena. */}
+            {panel === 'regen' && regenTab === 'scene' && piece.has_image !== false && cast && (cast.persons.length > 0 || cast.places.length > 0) && (
+              <div className="space-y-1">
+                <p className="text-[11px] font-mono text-zinc-400">
+                  En la escena{cast.in_image.length ? ` (hoy: ${cast.in_image.join(', ')})` : ''}: elige a quién o qué poner
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {SCENE_SLOTS.map((slot) => {
+                    const opciones = slot.kind === 'place' ? cast.places : cast.persons;
+                    if (!opciones.length) return null;
+                    return (
+                      <label key={slot.key} className="flex items-center gap-1 text-[11px] text-zinc-400">
+                        <span className="font-mono">{slot.label}</span>
+                        <select
+                          value=""
+                          onChange={(e) => { pickSlot(slot.key, e.target.value); e.currentTarget.value = ''; }}
+                          className="bg-zinc-900 border border-zinc-800 rounded-lg px-1.5 py-0.5 text-[11px] text-zinc-300"
+                          aria-label={`Cambiar ${slot.label}`}
+                        >
+                          <option value="">cambiar por…</option>
+                          {opciones.map((o) => <option key={o.name} value={o.name}>{o.name}</option>)}
+                        </select>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* 2026-10-20 — VOLVER A UNA IMAGEN ANTERIOR. Sin generar; volver también se deshace. */}
+            {panel === 'regen' && regenTab === 'scene' && !!history?.length && (
+              <div className="space-y-1">
+                <p className="text-[11px] font-mono text-zinc-400">Imágenes anteriores: toca una para volver a ella</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {history.map((h) => (
+                    <button
+                      key={h.index}
+                      onClick={() => submitRestore(h.index)}
+                      disabled={!!busy}
+                      title={`Volver a esta imagen${h.replaced_at ? ` (reemplazada el ${h.replaced_at.slice(0, 16).replace('T', ' ')})` : ''}`}
+                      className="rounded-lg border border-zinc-800 hover:border-violet-500/60 overflow-hidden disabled:opacity-50"
+                    >
+                      <img src={h.url} alt={`Imagen anterior ${h.index + 1}`} className="h-16 w-16 object-cover" loading="lazy" />
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -1005,7 +1120,8 @@ export function PieceActionsBar({
                 {fixReq.image_mode && piece.has_image !== false && (
                   <div className="space-y-1">
                     <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Cómo corregir la imagen">
-                      {REGEN_MODES.map((m) => {
+                      {/* 2026-10-20 — el fixable sigue con sus dos modos: 'same_scene' es del panel de imagen. */}
+                      {REGEN_MODES.filter((m): m is (typeof REGEN_MODES)[number] & { value: FixImageMode } => m.value !== 'same_scene').map((m) => {
                         const bloqueado = !!fixReq.forced_by && m.value !== fixReq.image_mode;
                         return (
                           <button
@@ -1151,7 +1267,21 @@ export function PieceActionsBar({
             <div className="flex gap-2 flex-wrap">{juicio.map(pintar)}</div>
             {/* Arreglos: después, y subordinados. Siguen disponibles — pesan menos, nada más. */}
             {arreglo.length > 0 && (
-              <div className="flex gap-1.5 flex-wrap items-center">{arreglo.map(pintar)}</div>
+              <div className="flex gap-1.5 flex-wrap items-center">
+                {arreglo.map(pintar)}
+                {/* 2026-10-19 — el editor del texto de la imagen, a la vista (Sam no lo encontraba dentro de
+                    «Regenerar imagen»). Es el mismo panel, abierto en su pestaña; cuesta 0 USD. */}
+                {texto && (
+                  <button
+                    onClick={() => { open('regen'); setRegenTab('text'); }}
+                    disabled={!!busy}
+                    title="Cambia el texto que va sobre la imagen: líneas, palabras resaltadas y su color. No regenera la escena (0 USD)."
+                    className={cn('flex items-center justify-center gap-2 transition-colors', WEIGHT_SHAPE.tertiary, BUTTON_STYLE.recompose_image)}
+                  >
+                    {ICON.edit_text} Texto de la imagen
+                  </button>
+                )}
+              </div>
             )}
           </motion.div>
         )}
