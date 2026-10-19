@@ -41,6 +41,7 @@ import {
 } from './_calibrationShared.js';
 import { readingLanguageOf, type BrandLanguageCatalog } from './_brandLanguage.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
+import { imageOverlayOf, type ImageOverlayView } from './_overlayText.js';
 // CHIP DE REGLA (2026-10-05) — el filtro de marca y la forma del código, una sola vez para los dos lados.
 import { ruleTextsFor, codesIn, type RuleTextRow, type RuleTexts } from './_ruleCodes.js';
 
@@ -103,6 +104,8 @@ export interface ChallengedRow {
      * con que se ofrece tampoco puede cambiar según desde dónde se mire.
      */
     has_image: boolean;
+    /** 2026-10-19 — el texto de la imagen para el editor de la tarjeta (ver `imageOverlayOf`). */
+    image_overlay: ImageOverlayView | null;
     id: string;
     title: string | null;
     body: string | null;
@@ -315,6 +318,7 @@ export function toChallengedRow(
           actions: actionsFor(p),
           // Mismo criterio que `toContext`: una url vacía NO es una imagen.
           has_image: typeof p.assets?.image?.url === 'string' && !!p.assets.image.url,
+          image_overlay: imageOverlayOf(p.assets),
           id: p.id,
           title: pieceTitle(p),
           body: pieceBody(p),

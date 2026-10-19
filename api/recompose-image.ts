@@ -73,6 +73,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let body: {
     piece_id?: string; visual_directive?: string; edit_reason?: string; session_token?: string;
     mode?: string;
+    // 2026-10-19 — el texto de la imagen escrito en la bandeja: { headline, subheadline?, emphasis? } o null.
+    overlay_override?: unknown;
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
@@ -124,11 +126,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // SIN-IMAGEN-01 — la directriz se exige sólo si hay una imagen que corregir. Ver arriba.
     const tieneImagen = typeof piece.assets?.image?.url === 'string' && !!piece.assets.image.url;
-    if (tieneImagen && !directive) {
+
+    const conTexto = Object.prototype.hasOwnProperty.call(body, 'overlay_override');
+    if (tieneImagen && !directive && !conTexto) {
       return res.status(400).json({
         error: 'visual_directive required',
         detail: 'regenerar sin directriz devuelve el mismo defecto y cobra una generación por no cambiar nada. '
           + 'Sólo una pieza que TODAVÍA no tiene imagen puede pedirla sin directriz: ahí no hay defecto que repetir.',
+      });
+    }
+
+    // 2026-10-19 — EL TEXTO DE LA IMAGEN, SIN TOCAR LA ESCENA. Con `overlay_override` en el cuerpo no hay
+    // directriz ni generación: se recompone sobre la escena limpia que ya existe (0 USD). El motor valida el
+    // texto antes de componer; acá sólo se exige que haya una imagen sobre la que escribir.
+    if (conTexto) {
+      if (!tieneImagen) {
+        return res.status(409).json({ error: 'no_image', detail: 'la pieza no tiene imagen: primero hay que generarla, después se escribe su texto' });
+      }
+      const ef = await callEdgeFunction('content-run-stage', {
+        action: 'recompose', piece_id: pieceId, regenerate_image: false,
+        overlay_override: body.overlay_override ?? null,
+        edit_reason: editReason || null, edited_by: session.sub || 'sam',
+      });
+      if (!ef.body?.ok) {
+        return res.status(ef.status >= 400 ? ef.status : 422).json({
+          error: 'recompose_failed', detail: ef.body?.error ?? 'el motor no recompuso la imagen',
+          server_detail: typeof ef.body?.error === 'string' ? ef.body.error : null,
+        });
+      }
+      // El motor tiene que ACUSAR que aplicó el texto: uno anterior al soporte de `overlay_override` respondería
+      // «ok» habiéndolo ignorado, y la pantalla diría que se aplicó algo que no se aplicó.
+      if (ef.body.overlay_override_applied !== true) {
+        return res.status(409).json({
+          error: 'overlay_override_unsupported',
+          detail: 'el motor recompuso la imagen pero no aplicó el texto escrito: falta desplegar content-run-stage con overlay_override (unrlvl-iid-functions#411)',
+        });
+      }
+      let html: string | null = null;
+      let artifact_url: string | null = null;
+      try { const art = await ensureArtifact(pieceId); html = art.html; artifact_url = art.artifact_url; }
+      catch (err) { console.error(`[recompose-image] ${pieceId}: texto recompuesto pero el artefacto NO se rehízo: ${String(err)}`); }
+      return res.status(200).json({
+        ok: true, piece_id: pieceId, image_url: ef.body.image_url ?? null,
+        visual_directive_domain: null, visual_directive_piece: null,
+        composed: ef.body.composed === true, scheduled_posts_updated: ef.body.scheduled_posts_updated ?? 0,
+        artifact_url, html, artifact_refreshed: html !== null,
       });
     }
 

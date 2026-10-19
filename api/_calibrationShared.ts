@@ -34,6 +34,7 @@ import type { PieceMetrics } from './_pieceMetrics.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
 import { normalizeFixCatalog, type FixRequestCode } from './_fixRequest.js';
+import { imageOverlayOf, type ImageOverlayView } from './_overlayText.js';
 // Las láminas en el orden en que se publican: el mismo criterio que la publicación manual y el drenaje.
 import { manualImagesOf, isCarouselPiece, CAROUSEL_FORMAT } from './_manualShared.js';
 // La firma canónica del drenaje: la MISMA copia que ya usa la publicación manual (SIGNCANON de
@@ -584,6 +585,11 @@ export interface PieceContext {
    */
   has_image: boolean;
   /**
+   * 2026-10-19 — EL TEXTO DE LA IMAGEN, para el editor de la tarjeta: lo escrito a mano
+   * (`assets.image.overlay_override`) o, si no hay, lo que se compuso. `null` = la imagen no lleva texto.
+   */
+  image_overlay: ImageOverlayView | null;
+  /**
    * INVESTIGAR (2026-10-05) — la pieza espera, cerró, nació de o fue reemplazada por un caso de
    * investigación. Sólo dice a la tarjeta si vale la pena pedir el caso. Ver `researchHintOf`.
    */
@@ -676,6 +682,7 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     // SIN-IMAGEN-01 — mismo criterio que usaba `actionsFor` hasta hoy: una url vacía NO es una
     // imagen. Se conserva al pie de la letra, sólo que ahora informa en vez de cerrar una puerta.
     has_image: tieneImagen(piece),
+    image_overlay: imageOverlayOf(piece.assets),
     // INVESTIGAR — si la tarjeta tiene que pedir el estado de un caso de investigación.
     research_hint: researchHintOf(piece),
     // CARRIL AUTO-FIX — qué corrigió el carril antes de que la pieza naciera, y qué quedó.

@@ -34,6 +34,7 @@ import {
 
 // El error tipado es el mismo mecanismo; se reexporta para no obligar a importar de dos lados.
 import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
+import type { ImageOverlayView } from '../../api/_overlayText';
 export { CalibrationError } from './calibrationInbox';
 export type { FlowGeneration, PieceMetrics } from './calibrationInbox';
 /**
@@ -89,6 +90,8 @@ export interface PieceSlot {
 }
 
 export interface PublishablePiece {
+  /** 2026-10-19 — el texto de la imagen para el editor de la tarjeta. */
+  image_overlay?: ImageOverlayView | null;
   /** U-4 — las seis acciones y su disponibilidad. La pantalla las pinta, no las decide. */
   actions: PieceActions;
   /** U-5 — el texto efectivo de la pieza, que es lo que el panel de edición carga. */

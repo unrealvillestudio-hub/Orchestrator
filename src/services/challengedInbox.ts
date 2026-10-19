@@ -17,6 +17,7 @@
 import { CalibrationError, type SearchInfo, type PieceActions } from './calibrationInbox';
 import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 import type { RuleTexts } from '../../api/_ruleCodes';
+import type { ImageOverlayView } from '../../api/_overlayText';
 
 // ── Tipos (contrato de CALIB-01 §2) ──────────────────────────────────────────
 export type ChallengeVerdict = 'judge_was_right' | 'rule_failed';
@@ -42,6 +43,8 @@ export interface ChallengedPiece {
   actions: PieceActions;
   /** SIN-IMAGEN-01 — si la pieza ya tiene imagen. Lo resuelve el server. */
   has_image: boolean;
+  /** 2026-10-19 — el texto de la imagen para el editor de la tarjeta. */
+  image_overlay?: ImageOverlayView | null;
 }
 
 /** Una fila de la bandeja ES UN ARBITRAJE, no una pieza: el grano es (pieza, regla). */

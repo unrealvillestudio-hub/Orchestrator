@@ -9,6 +9,7 @@ import {
 } from '../../services/calibrationInbox';
 import { savePieceEdit } from '../../services/challengedInbox';
 import { effectiveFixImageMode, type FixRequestCode, type FixImageMode } from '../../../api/_fixRequest';
+import { overlayMarkupOf, parseOverlayMarkup, type ImageOverlayView } from '../../../api/_overlayText';
 import { fmtInZone } from './pieceUi';
 
 /**
@@ -88,6 +89,11 @@ export interface ActionablePiece {
    * tarjeta pide su estado. Lo resuelve el server (`researchHintOf`); `undefined` = no se pide.
    */
   research_hint?: boolean;
+  /**
+   * 2026-10-19 — el texto que va sobre la imagen: lo escrito a mano o lo que se compuso. Precarga el editor
+   * «Texto de la imagen». `undefined`/`null` = no hay texto que precargar.
+   */
+  image_overlay?: ImageOverlayView | null;
 }
 
 /** Lo que le pasa a la pieza cuando una acción termina. `null` = sigue en la bandeja. */
@@ -363,6 +369,17 @@ export function fixForcedNote(forcedBy: string | null, catalog: readonly FixRequ
   return `«${pill.label}» fija el modo: ${modo.toLowerCase()}.`;
 }
 
+/**
+ * 2026-10-19 — EL TEXTO DE LA IMAGEN, EN LA IMAGEN (Sam: «texto de la imagen solo cambia en la imagen»). El
+ * panel de imagen tiene dos pestañas: la escena (directriz, cuesta una generación) y el texto (0 USD: se
+ * recompone sobre la escena limpia). El título y el gancho del copy no se tocan.
+ */
+export type RegenTab = 'scene' | 'text';
+export const OVERLAY_EDITOR_FOOT =
+  'No regenera la escena: recompone el texto sobre la imagen limpia que ya existe (0 USD). La pieza sigue en la bandeja.';
+export const OVERLAY_EDITOR_HELP =
+  'Enter = nueva línea. *Así* = resaltado. Cambia sólo la imagen: el título y el gancho de la pieza no se tocan.';
+
 /** Marca o desmarca una pill. Conserva el orden en que se marcaron. */
 export function toggleFixCode(list: readonly string[], code: string): string[] {
   return list.includes(code) ? list.filter((c) => c !== code) : [...list, code];
@@ -503,6 +520,10 @@ export function PieceActionsBar({
   const [regenNote, setRegenNote] = useState<null | { compuesta: boolean; refrescado: boolean; posts: number }>(null);
   // BRIEF-IMG-01 fase 4 — por defecto se CORRIGE sobre la imagen actual: da continuidad a lo pedido.
   const [regenMode, setRegenMode] = useState<'edit_from_current' | 'regenerate_full'>('edit_from_current');
+  // 2026-10-19 — la pestaña del panel de imagen y el texto de la imagen en edición.
+  const [regenTab, setRegenTab] = useState<RegenTab>('scene');
+  const [overlayMarkup, setOverlayMarkup] = useState('');
+  const [overlaySub, setOverlaySub] = useState('');
   // 2026-10-19 — las pills del fixable. El catálogo se lee la primera vez que se abre el panel.
   const [fixCatalog, setFixCatalog] = useState<FixRequestCode[] | null>(null);
   const [fixCatalogError, setFixCatalogError] = useState<string | null>(null);
@@ -522,7 +543,9 @@ export function PieceActionsBar({
   const spec = panel ? buttons.find((b) => b.panel === panel) : null;
   const copy = panel ? panelCopyFor(panel, piece.has_image) : null;
   const warning = spec ? slotWarning(spec.seals, piece.slot) : null;
-  const faltaTexto = !!copy?.required && !note.trim();
+  // 2026-10-19 — en la pestaña «Texto de la imagen» lo obligatorio es el titular, no la directriz.
+  const enTextoImagen = panel === 'regen' && regenTab === 'text';
+  const faltaTexto = !!copy?.required && !note.trim() && !enTextoImagen || enTextoImagen && !overlayMarkup.trim();
 
   const open = (p: PanelKey) => {
     setPanel(p); setError(null); setWarnings([]);
@@ -531,6 +554,12 @@ export function PieceActionsBar({
     setNote(p === 'edit' ? (vigente.body ?? '') : '');
     setEditTitle(p === 'edit' ? (vigente.title ?? '') : '');
     setEditNote(null);
+    if (p === 'regen') {
+      // El editor abre con el texto que la imagen lleva HOY, con su énfasis marcado.
+      setRegenTab('scene');
+      setOverlayMarkup(overlayMarkupOf(piece.image_overlay?.headline ?? null, piece.image_overlay?.emphasis ?? []));
+      setOverlaySub(piece.image_overlay?.subheadline ?? '');
+    }
     if (p === 'fix') {
       setFixCodes([]); setFixMode('edit_from_current');
       // Sin catálogo el fixable sigue funcionando como antes (sólo con la propuesta escrita), y se dice.
@@ -601,7 +630,27 @@ export function PieceActionsBar({
     }
   };
 
+  /** 2026-10-19 — el texto de la imagen. `clear` = volver al texto del copy. */
+  const submitOverlay = async (clear: boolean) => {
+    let override: { headline: string; subheadline: string | null; emphasis: string[] } | null = null;
+    if (!clear) {
+      const parsed = parseOverlayMarkup(overlayMarkup);
+      if (!parsed.ok) { setError({ message: parsed.error, detail: null }); return; }
+      override = { headline: parsed.headline, subheadline: overlaySub.trim() || null, emphasis: parsed.emphasis };
+    }
+    setBusy('recompose_image'); setError(null); setRegenNote(null);
+    try {
+      const r = await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: '', overlay_override: override });
+      onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: r.composed, refreshed: r.artifact_refreshed, posts: r.scheduled_posts_updated });
+      setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated });
+      setPanel(null);
+    } catch (err) {
+      setError(cardError(err, 'No se pudo recomponer el texto de la imagen.'));
+    } finally { setBusy(null); }
+  };
+
   const submitRegen = async () => {
+    if (regenTab === 'text') return submitOverlay(false);
     setBusy('recompose_image'); setError(null); setRegenNote(null);
     try {
       const r = await recomposeImage(token, {
@@ -814,8 +863,59 @@ export function PieceActionsBar({
               ))}
             </div>
 
-            {/* BRIEF-IMG-01 fase 4 — los dos modos. Sólo con imagen: sin ella no hay de qué partir. */}
+            {/* 2026-10-19 — dos pestañas en el panel de imagen: la escena o el texto que va encima. */}
             {panel === 'regen' && piece.has_image !== false && (
+              <div className="flex items-center gap-1.5" role="tablist" aria-label="Qué corregir de la imagen">
+                {([['scene', 'Escena'], ['text', 'Texto de la imagen']] as const).map(([v, l]) => (
+                  <button
+                    key={v}
+                    role="tab"
+                    aria-selected={regenTab === v}
+                    onClick={() => { setRegenTab(v); setError(null); }}
+                    className={cn(
+                      'text-[11px] px-2 py-1 rounded-lg border transition-colors',
+                      regenTab === v
+                        ? 'border-violet-500/60 bg-violet-500/15 text-violet-200'
+                        : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700',
+                    )}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {panel === 'regen' && regenTab === 'text' && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] text-zinc-400 leading-snug">{OVERLAY_EDITOR_HELP}</p>
+                <textarea
+                  value={overlayMarkup}
+                  onChange={(e) => setOverlayMarkup(e.target.value)}
+                  rows={4}
+                  aria-label="Titular de la imagen"
+                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
+                />
+                <input
+                  value={overlaySub}
+                  onChange={(e) => setOverlaySub(e.target.value)}
+                  placeholder="Bajada (opcional)"
+                  aria-label="Bajada de la imagen"
+                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
+                />
+                {piece.image_overlay?.written && (
+                  <button
+                    onClick={() => submitOverlay(true)}
+                    disabled={!!busy}
+                    className="text-[11px] text-zinc-400 hover:text-zinc-200 underline"
+                  >
+                    Volver al texto del copy
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* BRIEF-IMG-01 fase 4 — los dos modos. Sólo con imagen: sin ella no hay de qué partir. */}
+            {panel === 'regen' && regenTab === 'scene' && piece.has_image !== false && (
               <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Modo de regeneración">
                 {REGEN_MODES.map((m) => (
                   <button
@@ -925,10 +1025,10 @@ export function PieceActionsBar({
                 />
               </>
             )}
-            {copy?.label && (
+            {copy?.label && !enTextoImagen && (
               <label className="block text-[11px] font-medium text-zinc-300">{copy.label}</label>
             )}
-            <textarea
+            {!enTextoImagen && <textarea
               value={note}
               onChange={(e) => { setNote(e.target.value); setError(null); setWarnings([]); }}
               rows={panel === 'edit' ? 8 : 3}
@@ -938,7 +1038,7 @@ export function PieceActionsBar({
                 'w-full bg-[#050508] border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-700 outline-none transition-colors resize-none',
                 copy?.focus,
               )}
-            />
+            />}
 
             {/* LA GUARDA AVISA Y NO BLOQUEA. Se muestran sus avisos y se ofrece insistir:
                 convertirlos en un bloqueo sería cambiar el contrato por la puerta de atrás. */}
@@ -966,7 +1066,7 @@ export function PieceActionsBar({
                   copy?.button,
                 )}
               >
-                {busy ? <Spinner size={14} /> : <>{spec && ICON[spec.key]} {copy?.confirm}</>}
+                {busy ? <Spinner size={14} /> : <>{spec && ICON[spec.key]} {enTextoImagen ? 'Aplicar texto (0 USD)' : copy?.confirm}</>}
               </button>
               <button
                 onClick={() => { setPanel(null); setError(null); setWarnings([]); }}
@@ -976,7 +1076,7 @@ export function PieceActionsBar({
                 Cancelar
               </button>
             </div>
-            <p className="text-[10px] font-mono leading-snug text-zinc-600">{copy?.foot}</p>
+            <p className="text-[10px] font-mono leading-snug text-zinc-600">{enTextoImagen ? OVERLAY_EDITOR_FOOT : copy?.foot}</p>
           </motion.div>
         ) : (
           <motion.div key="actions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
