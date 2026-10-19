@@ -9,8 +9,10 @@
  *   piece_id: string,
  *   visual_directive: string,      // la directriz redactada para el generador
  *   edit_reason?: string,          // en palabras de quien la pide, si se quiere registrar
- *   mode?: 'edit_from_current' | 'regenerate_full'   // BRIEF-IMG-01 fase 4 (2026-09-27)
+ *   mode?: 'edit_from_current' | 'same_scene' | 'regenerate_full'   // BRIEF-IMG-01 fase 4 (2026-09-27); same_scene 2026-10-20
+ *   restore_index?: number         // 2026-10-20 — volver a una imagen anterior (sin generar): ver `volverALaAnterior`
  * }
+ * GET /api/recompose-image?piece_id= → { options (colores del resaltado), cast (En la escena), history (anteriores) }
  *
  * ─── LOS DOS MODOS (BRIEF-IMG-01 fase 4) ─────────────────────────────────────────────
  * `edit_from_current` CORRIGE SOBRE LA IMAGEN ACTUAL: el generador recibe la imagen limpia vigente
@@ -46,6 +48,7 @@ import {
   applyCors, extractToken, ensureArtifact, fetchPiece, PieceNotFound, SB_URL, SB_KEY,
 } from './_calibrationShared.js';
 import { emphasisColorOptions } from './_overlayText.js';
+import { sceneCastOf, imageHistoryOf } from './_sceneCast.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
 import { requireReviewer, guardPiece } from './_reviewScope.js';
@@ -58,13 +61,15 @@ import { callEdgeFunction } from './_challengedShared.js';
  */
 export const DIRECTIVE_MAX_CHARS = 600;
 
-export const IMAGE_MODES = ['edit_from_current', 'regenerate_full'] as const;
+// 2026-10-20 — 'same_scene': OTRA PERSONA, MISMA ESCENA (content-run-stage y ImageLab). Ver `MODE_HELP` en _sceneCast.
+export const IMAGE_MODES = ['edit_from_current', 'same_scene', 'regenerate_full'] as const;
 export type ImageMode = (typeof IMAGE_MODES)[number];
 
 /** El modo que viaja al motor. Sin imagen no hay de qué partir: siempre se repinta. */
 export function resolveRecomposeMode(requested: string | null, hasImage: boolean): ImageMode {
   if (!hasImage) return 'regenerate_full';
-  return requested === 'regenerate_full' ? 'regenerate_full' : 'edit_from_current';
+  if (requested === 'regenerate_full' || requested === 'same_scene') return requested;
+  return 'edit_from_current';
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -79,6 +84,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     mode?: string;
     // 2026-10-19 — el texto de la imagen escrito en la bandeja: { headline, subheadline?, emphasis? } o null.
     overlay_override?: unknown;
+    // 2026-10-20 — volver a la imagen anterior número N (0 = la última que se reemplazó).
+    restore_index?: unknown;
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
@@ -127,6 +134,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         discarded_at: piece.discarded_at,
       });
     }
+
+    // 2026-10-20 — VOLVER A LA IMAGEN ANTERIOR. Sin directriz ni generación: sólo dato (0 USD).
+    if (body.restore_index !== undefined) return volverALaAnterior(res, pieceId, body.restore_index, session.sub || 'sam');
 
     // SIN-IMAGEN-01 — la directriz se exige sólo si hay una imagen que corregir. Ver arriba.
     const tieneImagen = typeof piece.assets?.image?.url === 'string' && !!piece.assets.image.url;
@@ -267,13 +277,52 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
       if (!r.ok) throw new Error(`HTTP ${r.status} ${(await r.text().catch(() => '')).slice(0, 200)}`);
       return r.json();
     };
-    const [tokens, palette] = await Promise.all([
-      leer(`imagelab_overlay_tokens?brand_id=eq.${encodeURIComponent(brandId)}&active=eq.true&select=brand_id,canal,tokens`),
-      leer(`brand_palette?brand_id=eq.${encodeURIComponent(brandId)}&select=role,hex`),
+    const b = encodeURIComponent(brandId);
+    const [tokens, palette, personLinks, places] = await Promise.all([
+      leer(`imagelab_overlay_tokens?brand_id=eq.${b}&active=eq.true&select=brand_id,canal,tokens`),
+      leer(`brand_palette?brand_id=eq.${b}&select=role,hex`),
+      // 2026-10-20 — EN LA ESCENA: las personas y los lugares de la marca que se pueden poner en ella.
+      leer(`brand_persons?brand_id=eq.${b}&active=eq.true&select=person_blueprint_id`),
+      leer(`brand_locations?brand_id=eq.${b}&active=eq.true&select=aliases`),
     ]);
-    return res.status(200).json({ ok: true, brand_id: brandId, options: emphasisColorOptions(tokens, palette, brandId) });
+    const ids = (Array.isArray(personLinks) ? personLinks : []).map((l: any) => String(l?.person_blueprint_id ?? '')).filter(Boolean);
+    const persons = ids.length
+      ? await leer(`person_blueprints?blueprint_id=in.(${ids.map((i) => `"${encodeURIComponent(i)}"`).join(',')})&active=eq.true&select=display_name`)
+      : [];
+    const image = piece.assets?.image ?? null;
+    return res.status(200).json({
+      ok: true, brand_id: brandId, options: emphasisColorOptions(tokens, palette, brandId),
+      cast: sceneCastOf(persons, places, image), history: imageHistoryOf(image),
+    });
   } catch (err) {
     console.error(`[recompose-image] GET colores ${pieceId}: ${String(err)}`);
     return res.status(503).json({ error: 'emphasis_colors_unavailable', detail: String(err instanceof Error ? err.message : err) });
   }
+}
+
+/**
+ * 2026-10-20 — VOLVER A LA IMAGEN ANTERIOR. El motor intercambia la imagen actual con la elegida del historial
+ * (`restore_image`), así que volver también se deshace. El artefacto se rehace sobre la pieza ya cambiada.
+ */
+async function volverALaAnterior(res: VercelResponse, pieceId: string, raw: unknown, by: string) {
+  const index = Number(raw);
+  if (!Number.isInteger(index) || index < 0 || index > 20) {
+    return res.status(400).json({ error: 'invalid restore_index', detail: 'restore_index es la posición de la imagen anterior (0 = la última)' });
+  }
+  const ef = await callEdgeFunction('content-run-stage', { action: 'restore_image', piece_id: pieceId, index, edited_by: by });
+  if (!ef.body?.ok) {
+    return res.status(ef.status >= 400 ? ef.status : 422).json({
+      error: 'restore_failed', detail: ef.body?.error ?? 'el motor no volvió a la imagen anterior',
+      server_detail: typeof ef.body?.error === 'string' ? ef.body.error : null,
+    });
+  }
+  let html: string | null = null;
+  let artifact_url: string | null = null;
+  try { const art = await ensureArtifact(pieceId); html = art.html; artifact_url = art.artifact_url; }
+  catch (err) { console.error(`[recompose-image] ${pieceId}: imagen restaurada pero el artefacto NO se rehízo: ${String(err)}`); }
+  return res.status(200).json({
+    ok: true, piece_id: pieceId, image_url: ef.body.image_url ?? null, restored: true,
+    visual_directive_domain: null, visual_directive_piece: null, mode_switched: null,
+    artifact_url, html, artifact_refreshed: html !== null,
+  });
 }

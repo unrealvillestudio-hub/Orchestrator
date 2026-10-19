@@ -31,6 +31,7 @@ import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 import type { RuleTexts } from '../../api/_ruleCodes';
 import type { FixRequestCode, FixImageMode } from '../../api/_fixRequest';
 import type { ImageOverlayView, EmphasisColorOption } from '../../api/_overlayText';
+import type { SceneCast, ImageHistoryEntry } from '../../api/_sceneCast';
 import type { HighlightFields } from '../../api/_highlights';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
@@ -627,7 +628,7 @@ export function renderArtifact(token: string, piece_id: string): Promise<{ ok: t
 export function recomposeImage(
   token: string,
   input: {
-    piece_id: string; visual_directive: string; edit_reason?: string | null; mode?: 'edit_from_current' | 'regenerate_full';
+    piece_id: string; visual_directive: string; edit_reason?: string | null; mode?: 'edit_from_current' | 'same_scene' | 'regenerate_full';
     // 2026-10-19 — el texto de la imagen escrito en la bandeja. Con él no se regenera la escena.
     overlay_override?: { headline: string; subheadline: string | null; emphasis: string[]; emphasis_role?: string | null } | null;
   },
@@ -652,9 +653,24 @@ export function recomposeImage(
   });
 }
 
-/** 2026-10-19 — los colores que la marca de la pieza declara para el resaltado del texto de la imagen. */
-export function fetchEmphasisColors(token: string, pieceId: string): Promise<{ ok: true; brand_id: string; options: EmphasisColorOption[] }> {
+/**
+ * 2026-10-19 — los colores que la marca de la pieza declara para el resaltado del texto de la imagen.
+ * 2026-10-20 — y lo que el panel de imagen necesita además: quién y qué se puede poner en la escena (`cast`) y las
+ * imágenes anteriores de la pieza (`history`).
+ */
+export function fetchEmphasisColors(token: string, pieceId: string): Promise<{
+  ok: true; brand_id: string; options: EmphasisColorOption[];
+  cast?: SceneCast; history?: ImageHistoryEntry[];
+}> {
   return req(`/api/recompose-image?piece_id=${encodeURIComponent(pieceId)}`, token);
+}
+
+/** 2026-10-20 — VOLVER A UNA IMAGEN ANTERIOR (0 = la última reemplazada). Sin generar: 0 USD. Se puede deshacer. */
+export function restorePreviousImage(token: string, pieceId: string, index: number): Promise<{
+  ok: true; piece_id: string; image_url: string | null; restored: true;
+  artifact_url: string | null; html: string | null; artifact_refreshed: boolean;
+}> {
+  return req('/api/recompose-image', token, { method: 'POST', body: { piece_id: pieceId, restore_index: index } });
 }
 
 /**

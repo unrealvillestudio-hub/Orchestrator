@@ -110,6 +110,7 @@ describe('el cableado del editor', () => {
     expect(API).toContain('mode_switched: ef.body.mode_switched ?? null,');
   });
   it('la tarjeta dice cuándo el carril repintó en lugar de editar', () => {
-    expect(MOD).toContain('Se repintó desde cero: {regenNote.cambioDeModo}.');
+    // 2026-10-20 — diferencia declarada: el carril ya no repinta desde cero, pinta la misma escena con el cambio.
+    expect(MOD).toContain('Se pintó la misma escena con el cambio: {regenNote.cambioDeModo}.');
   });
 });

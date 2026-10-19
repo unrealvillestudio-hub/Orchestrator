@@ -177,6 +177,7 @@ describe('resolveRecomposeMode — corregir sobre la imagen actual por defecto',
     expect(resolveRecomposeMode(null, false)).toBe('regenerate_full');
   });
   it('los modos son exactamente los que el motor entiende', () => {
-    expect([...IMAGE_MODES]).toEqual(['edit_from_current', 'regenerate_full']);
+    // 2026-10-20 — diferencia declarada: el motor entiende también 'same_scene' (otra persona, misma escena).
+    expect([...IMAGE_MODES]).toEqual(['edit_from_current', 'same_scene', 'regenerate_full']);
   });
 });
