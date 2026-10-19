@@ -116,8 +116,10 @@ describe('el cableado', () => {
     expect(valida).toBeGreaterThan(0);
     expect(valida).toBeLessThan(VERDICT.indexOf('ensureArtifact(pieceId)'));
   });
-  it('el veredicto escribe siempre las dos columnas (null limpia un fixable anterior)', () => {
-    expect(VERDICT).toMatch(/fix_proposal,\s+fix_codes,\s+image_mode,/);
+  it('sin pills, el veredicto no nombra las columnas nuevas: aprobar y rechazar no dependen de su migración', () => {
+    expect(VERDICT).toContain('...(fix_codes ? { fix_codes } : {}),');
+    expect(VERDICT).toContain('...(image_mode ? { image_mode } : {}),');
+    expect(VERDICT).not.toMatch(/fix_proposal,\s+fix_codes,\s+image_mode,/);
   });
   it('el panel manda las pills sólo con fixable', () => {
     expect(MOD).toContain("...(verdict === 'fixable' ? { fix_codes: fixReq.fix_codes, image_mode: fixReq.image_mode } : {}),");

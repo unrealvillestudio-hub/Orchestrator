@@ -177,9 +177,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       criterion: criterion || null, // sin criterio → NULL (nunca '' ni relleno)
       // Qué propone Sam para aprovecharla. NULL salvo en `fixable`, donde ya se validó no vacía.
       fix_proposal,
-      // 2026-10-19 — siempre viajan: `null` limpia las pills de un fixable anterior al reevaluar.
-      fix_codes,
-      image_mode,
+      // 2026-10-19 — LAS COLUMNAS DE LAS PILLS VIAJAN SÓLO CUANDO HAY PILLS. Medido ese día: el #75 se mergeó
+      // antes de aplicar la migración que las crea, y como viajaban siempre (en `null` para limpiar), aprobar
+      // y rechazar dependían de una DDL pendiente. Un veredicto sin pills no puede depender de una columna que
+      // sólo usan las pills. Las de un fixable anterior no estorban: el carril sólo las lee con `fixable`.
+      ...(fix_codes ? { fix_codes } : {}),
+      ...(image_mode ? { image_mode } : {}),
       evaluated_by,
       // Primera opinión del watcher, copiada de la pieza (para comparar Sam vs watcher).
       watcher_result: ctx.watcher_result,
