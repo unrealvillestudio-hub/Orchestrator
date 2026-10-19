@@ -30,6 +30,7 @@ import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 // CHIP DE REGLA — la forma del mapa de enunciados es la del server, importada, no espejada.
 import type { RuleTexts } from '../../api/_ruleCodes';
 import type { FixRequestCode, FixImageMode } from '../../api/_fixRequest';
+import type { ImageOverlayView } from '../../api/_overlayText';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
@@ -315,6 +316,8 @@ export interface CalibrationPiece {
    * separa las dos caras de la acción de imagen: corregir una escena, o pedir la primera.
    */
   has_image: boolean;
+  /** 2026-10-19 — el texto de la imagen para el editor de la tarjeta. `null` = la imagen no lleva texto. */
+  image_overlay?: ImageOverlayView | null;
   /**
    * INVESTIGAR (2026-10-05) — la pieza espera, cerró, nació de o fue reemplazada por un caso de
    * investigación: la tarjeta pide su estado a `/api/research-cases`. Lo resuelve el server
@@ -622,7 +625,11 @@ export function renderArtifact(token: string, piece_id: string): Promise<{ ok: t
  */
 export function recomposeImage(
   token: string,
-  input: { piece_id: string; visual_directive: string; edit_reason?: string | null; mode?: 'edit_from_current' | 'regenerate_full' },
+  input: {
+    piece_id: string; visual_directive: string; edit_reason?: string | null; mode?: 'edit_from_current' | 'regenerate_full';
+    // 2026-10-19 — el texto de la imagen escrito en la bandeja. Con él no se regenera la escena.
+    overlay_override?: { headline: string; subheadline: string | null; emphasis: string[] } | null;
+  },
 ): Promise<{
   ok: true; piece_id: string; image_url: string | null; composed: boolean;
   visual_directive_domain: string | null; visual_directive_piece: string | null;
@@ -636,6 +643,8 @@ export function recomposeImage(
       visual_directive: input.visual_directive,
       edit_reason: input.edit_reason ?? null,
       ...(input.mode ? { mode: input.mode } : {}),
+      // 2026-10-19 — la clave viaja sólo si se pidió (null incluido: vuelve al texto del copy).
+      ...('overlay_override' in input ? { overlay_override: input.overlay_override ?? null } : {}),
     },
   });
 }
