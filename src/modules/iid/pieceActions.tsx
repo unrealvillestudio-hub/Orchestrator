@@ -4,12 +4,12 @@ import { CheckCircle2, XCircle, Archive, Wrench, ImagePlay, PenLine, Search } fr
 import { cn, Spinner } from '../../ui/components';
 import {
   saveVerdict, discardPiece, recomposeImage, renderArtifact, CalibrationError,
-  REJECT_REASONS, buildCriterion, fetchResearchCases, openResearchCase, fetchFixCatalog,
+  REJECT_REASONS, buildCriterion, fetchResearchCases, openResearchCase, fetchFixCatalog, fetchEmphasisColors,
   type PieceActionKey, type PieceActions, type SlotRelease, type Verdict, type ResearchCase,
 } from '../../services/calibrationInbox';
 import { savePieceEdit } from '../../services/challengedInbox';
 import { effectiveFixImageMode, type FixRequestCode, type FixImageMode } from '../../../api/_fixRequest';
-import { overlayMarkupOf, parseOverlayMarkup, type ImageOverlayView } from '../../../api/_overlayText';
+import { overlayMarkupOf, parseOverlayMarkup, type ImageOverlayView, type EmphasisColorOption } from '../../../api/_overlayText';
 import { highlightPayload, HIGHLIGHT_NOTE_MAX, type HighlightInput } from '../../../api/_highlights';
 import { fmtInZone } from './pieceUi';
 
@@ -537,13 +537,16 @@ export function PieceActionsBar({
   const [vigente, setVigente] = useState<{ title: string | null; body: string | null }>({ title: piece.title, body: piece.body });
   const [editTitle, setEditTitle] = useState('');
   const [editNote, setEditNote] = useState<null | { avisos: string[]; refrescado: boolean }>(null);
-  const [regenNote, setRegenNote] = useState<null | { compuesta: boolean; refrescado: boolean; posts: number }>(null);
+  const [regenNote, setRegenNote] = useState<null | { compuesta: boolean; refrescado: boolean; posts: number; cambioDeModo?: string | null }>(null);
   // BRIEF-IMG-01 fase 4 — por defecto se CORRIGE sobre la imagen actual: da continuidad a lo pedido.
   const [regenMode, setRegenMode] = useState<'edit_from_current' | 'regenerate_full'>('edit_from_current');
   // 2026-10-19 — la pestaña del panel de imagen y el texto de la imagen en edición.
   const [regenTab, setRegenTab] = useState<RegenTab>('scene');
   const [overlayMarkup, setOverlayMarkup] = useState('');
   const [overlaySub, setOverlaySub] = useState('');
+  // 2026-10-19 — el color del resaltado: las opciones de la marca (se leen al abrir el editor) y la elegida.
+  const [emColors, setEmColors] = useState<EmphasisColorOption[] | null>(null);
+  const [overlayRole, setOverlayRole] = useState<string | null>(null);
   // 2026-10-19 — las pills del fixable. El catálogo se lee la primera vez que se abre el panel.
   const [fixCatalog, setFixCatalog] = useState<FixRequestCode[] | null>(null);
   const [fixCatalogError, setFixCatalogError] = useState<string | null>(null);
@@ -562,6 +565,8 @@ export function PieceActionsBar({
    */
   const juicio = buttons.filter((b) => b.weight !== 'tertiary');
   const arreglo = buttons.filter((b) => b.weight === 'tertiary');
+  // 2026-10-19 — el editor del texto de la imagen tiene su botón: disponible cuando se puede tocar la imagen y la hay.
+  const texto = piece.has_image !== false && !!arreglo.find((b) => b.key === 'recompose_image' && b.available);
   const spec = panel ? buttons.find((b) => b.panel === panel) : null;
   const copy = panel ? panelCopyFor(panel, piece.has_image) : null;
   const warning = spec ? slotWarning(spec.seals, piece.slot) : null;
@@ -581,6 +586,9 @@ export function PieceActionsBar({
       setRegenTab('scene');
       setOverlayMarkup(overlayMarkupOf(piece.image_overlay?.headline ?? null, piece.image_overlay?.emphasis ?? []));
       setOverlaySub(piece.image_overlay?.subheadline ?? '');
+      setOverlayRole(piece.image_overlay?.emphasis_role ?? null);
+      // Sin opciones (o si la lectura falla) el editor funciona igual, sin selector de color.
+      if (!emColors) fetchEmphasisColors(token, piece.piece_id).then((r) => setEmColors(r.options)).catch(() => setEmColors([]));
     }
     if (p === 'approve') setHl({ copy: false, image: false, copyNote: '', imageNote: '' });
     if (p === 'fix') {
@@ -656,11 +664,12 @@ export function PieceActionsBar({
 
   /** 2026-10-19 — el texto de la imagen. `clear` = volver al texto del copy. */
   const submitOverlay = async (clear: boolean) => {
-    let override: { headline: string; subheadline: string | null; emphasis: string[] } | null = null;
+    let override: { headline: string; subheadline: string | null; emphasis: string[]; emphasis_role?: string } | null = null;
     if (!clear) {
       const parsed = parseOverlayMarkup(overlayMarkup);
       if (!parsed.ok) { setError({ message: parsed.error, detail: null }); return; }
-      override = { headline: parsed.headline, subheadline: overlaySub.trim() || null, emphasis: parsed.emphasis };
+      override = { headline: parsed.headline, subheadline: overlaySub.trim() || null, emphasis: parsed.emphasis,
+        ...(overlayRole && parsed.emphasis.length ? { emphasis_role: overlayRole } : {}) };
     }
     setBusy('recompose_image'); setError(null); setRegenNote(null);
     try {
@@ -682,7 +691,7 @@ export function PieceActionsBar({
         mode: piece.has_image === false ? 'regenerate_full' : regenMode,
       });
       onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: r.composed, refreshed: r.artifact_refreshed, posts: r.scheduled_posts_updated });
-      setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated });
+      setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated, cambioDeModo: r.mode_switched?.reason ?? null });
       setNote(''); setPanel(null);
     } catch (err) {
       setError(cardError(err, 'No se pudo regenerar la imagen.'));
@@ -827,6 +836,7 @@ export function PieceActionsBar({
           <p>{regenNote.compuesta
             ? 'Imagen regenerada y compuesta.'
             : 'Escena regenerada, pero la composición falló: la pieza queda con la imagen limpia, sin titular ni franja.'}</p>
+          {regenNote.cambioDeModo && <p className="text-amber-300/80">Se repintó desde cero: {regenNote.cambioDeModo}.</p>}
           {!regenNote.refrescado && <p className="text-amber-300/80">La imagen cambió, pero el artefacto no se pudo rehacer: la vista de arriba puede estar mostrando la anterior.</p>}
           {regenNote.posts > 0 && <p className="text-violet-300/60">{regenNote.posts} post pendiente de publicar actualizado con la imagen nueva.</p>}
           <p className="text-violet-300/50">Sigue sin veredicto: la pieza no se ha movido de la bandeja.</p>
@@ -927,6 +937,28 @@ export function PieceActionsBar({
                   aria-label="Bajada de la imagen"
                   className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
                 />
+                {/* 2026-10-19 — el color del resaltado: sólo los que la marca declara para él. */}
+                {!!emColors?.length && (
+                  <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Color del resaltado">
+                    <span className="text-[10px] text-zinc-400 mr-1">Color del resaltado</span>
+                    {emColors.map((c) => {
+                      const activo = overlayRole ? overlayRole === c.role : c.is_default;
+                      return (
+                        <button
+                          key={c.role}
+                          role="radio"
+                          aria-checked={activo}
+                          aria-label={c.is_default ? `${c.role} (el de siempre)` : c.role}
+                          title={c.is_default ? `${c.role} — el de siempre` : c.role}
+                          onClick={() => setOverlayRole(c.is_default ? null : c.role)}
+                          className={cn('w-6 h-6 rounded-full border-2 transition-transform',
+                            activo ? 'border-white scale-110' : 'border-zinc-700 hover:border-zinc-400')}
+                          style={{ backgroundColor: c.hex }}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
                 {piece.image_overlay?.written && (
                   <button
                     onClick={() => submitOverlay(true)}
@@ -1151,7 +1183,21 @@ export function PieceActionsBar({
             <div className="flex gap-2 flex-wrap">{juicio.map(pintar)}</div>
             {/* Arreglos: después, y subordinados. Siguen disponibles — pesan menos, nada más. */}
             {arreglo.length > 0 && (
-              <div className="flex gap-1.5 flex-wrap items-center">{arreglo.map(pintar)}</div>
+              <div className="flex gap-1.5 flex-wrap items-center">
+                {arreglo.map(pintar)}
+                {/* 2026-10-19 — el editor del texto de la imagen, a la vista (Sam no lo encontraba dentro de
+                    «Regenerar imagen»). Es el mismo panel, abierto en su pestaña; cuesta 0 USD. */}
+                {texto && (
+                  <button
+                    onClick={() => { open('regen'); setRegenTab('text'); }}
+                    disabled={!!busy}
+                    title="Cambia el texto que va sobre la imagen: líneas, palabras resaltadas y su color. No regenera la escena (0 USD)."
+                    className={cn('flex items-center justify-center gap-2 transition-colors', WEIGHT_SHAPE.tertiary, BUTTON_STYLE.recompose_image)}
+                  >
+                    {ICON.edit_text} Texto de la imagen
+                  </button>
+                )}
+              </div>
             )}
           </motion.div>
         )}

@@ -30,7 +30,7 @@ import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 // CHIP DE REGLA — la forma del mapa de enunciados es la del server, importada, no espejada.
 import type { RuleTexts } from '../../api/_ruleCodes';
 import type { FixRequestCode, FixImageMode } from '../../api/_fixRequest';
-import type { ImageOverlayView } from '../../api/_overlayText';
+import type { ImageOverlayView, EmphasisColorOption } from '../../api/_overlayText';
 import type { HighlightFields } from '../../api/_highlights';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
@@ -629,11 +629,13 @@ export function recomposeImage(
   input: {
     piece_id: string; visual_directive: string; edit_reason?: string | null; mode?: 'edit_from_current' | 'regenerate_full';
     // 2026-10-19 — el texto de la imagen escrito en la bandeja. Con él no se regenera la escena.
-    overlay_override?: { headline: string; subheadline: string | null; emphasis: string[] } | null;
+    overlay_override?: { headline: string; subheadline: string | null; emphasis: string[]; emphasis_role?: string | null } | null;
   },
 ): Promise<{
   ok: true; piece_id: string; image_url: string | null; composed: boolean;
   visual_directive_domain: string | null; visual_directive_piece: string | null;
+  /** 2026-10-19 — el motor cambió el modo pedido y dice por qué (p. ej. editar no cambia a una persona). */
+  mode_switched?: { from: string; to: string; reason: string } | null;
   scheduled_posts_updated: number;
   artifact_url: string | null; html: string | null; artifact_refreshed: boolean;
 }> {
@@ -648,6 +650,11 @@ export function recomposeImage(
       ...('overlay_override' in input ? { overlay_override: input.overlay_override ?? null } : {}),
     },
   });
+}
+
+/** 2026-10-19 — los colores que la marca de la pieza declara para el resaltado del texto de la imagen. */
+export function fetchEmphasisColors(token: string, pieceId: string): Promise<{ ok: true; brand_id: string; options: EmphasisColorOption[] }> {
+  return req(`/api/recompose-image?piece_id=${encodeURIComponent(pieceId)}`, token);
 }
 
 /**

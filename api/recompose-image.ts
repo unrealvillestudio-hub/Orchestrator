@@ -43,8 +43,10 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
-  applyCors, extractToken, ensureArtifact, fetchPiece, PieceNotFound,
+  applyCors, extractToken, ensureArtifact, fetchPiece, PieceNotFound, SB_URL, SB_KEY,
 } from './_calibrationShared.js';
+import { emphasisColorOptions } from './_overlayText.js';
+import { fetchWithTimeout } from './_fetchWithTimeout.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
 import { requireReviewer, guardPiece } from './_reviewScope.js';
 import { callEdgeFunction } from './_challengedShared.js';
@@ -66,9 +68,11 @@ export function resolveRecomposeMode(requested: string | null, hasImage: boolean
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCors(res, 'POST, OPTIONS');
+  applyCors(res, 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  // 2026-10-19 — GET ?piece_id= : los colores que la marca de la pieza declara para el resaltado.
+  if (req.method === 'GET') return coloresDelResaltado(req, res);
+  if (req.method !== 'POST') return res.status(405).json({ error: 'GET or POST only' });
 
   let body: {
     piece_id?: string; visual_directive?: string; edit_reason?: string; session_token?: string;
@@ -168,7 +172,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       catch (err) { console.error(`[recompose-image] ${pieceId}: texto recompuesto pero el artefacto NO se rehízo: ${String(err)}`); }
       return res.status(200).json({
         ok: true, piece_id: pieceId, image_url: ef.body.image_url ?? null,
-        visual_directive_domain: null, visual_directive_piece: null,
+        visual_directive_domain: null, visual_directive_piece: null, mode_switched: null,
         composed: ef.body.composed === true, scheduled_posts_updated: ef.body.scheduled_posts_updated ?? 0,
         artifact_url, html, artifact_refreshed: html !== null,
       });
@@ -225,6 +229,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       image_url: ef.body.image_url ?? null,
       visual_directive_domain: ef.body.visual_directive_domain ?? null,
       visual_directive_piece: ef.body.visual_directive_piece ?? null,
+      // 2026-10-19 — si el motor cambió el modo pedido (p. ej. editar no puede cambiar a una persona), lo dice.
+      mode_switched: ef.body.mode_switched ?? null,
       composed: ef.body.composed === true,
       scheduled_posts_updated: ef.body.scheduled_posts_updated ?? 0,
       artifact_url,
@@ -239,5 +245,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     console.error(`[recompose-image] ${pieceId}: ${String(err)}`);
     return res.status(500).json({ error: 'recompose_failed', detail: String(err instanceof Error ? err.message : err) });
+  }
+}
+
+/**
+ * 2026-10-19 — LOS COLORES DEL RESALTADO de la marca de una pieza (ver `emphasisColorOptions`). Lo pide el editor
+ * del texto de la imagen al abrirse. Sin opciones, la pantalla no ofrece el selector y todo sigue como antes.
+ */
+async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
+  const session = await requireReviewer(req, res, extractToken(req));
+  if (!session) return;
+  const pieceId = typeof req.query?.piece_id === 'string' ? req.query.piece_id.trim() : '';
+  if (!pieceId) return res.status(400).json({ error: 'piece_id required' });
+  if (!(await guardPiece(res, session, pieceId))) return;
+  try {
+    const piece = await fetchPiece(pieceId);
+    if (!piece) return res.status(404).json({ error: 'piece_not_found', detail: `la pieza ${pieceId} no existe` });
+    const brandId = String(piece.brand_id ?? '');
+    const leer = async (path: string) => {
+      const r = await fetchWithTimeout('db', `${SB_URL()}/rest/v1/${path}`, { headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}` } });
+      if (!r.ok) throw new Error(`HTTP ${r.status} ${(await r.text().catch(() => '')).slice(0, 200)}`);
+      return r.json();
+    };
+    const [tokens, palette] = await Promise.all([
+      leer(`imagelab_overlay_tokens?brand_id=eq.${encodeURIComponent(brandId)}&active=eq.true&select=brand_id,canal,tokens`),
+      leer(`brand_palette?brand_id=eq.${encodeURIComponent(brandId)}&select=role,hex`),
+    ]);
+    return res.status(200).json({ ok: true, brand_id: brandId, options: emphasisColorOptions(tokens, palette, brandId) });
+  } catch (err) {
+    console.error(`[recompose-image] GET colores ${pieceId}: ${String(err)}`);
+    return res.status(503).json({ error: 'emphasis_colors_unavailable', detail: String(err instanceof Error ? err.message : err) });
   }
 }

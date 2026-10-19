@@ -21,6 +21,8 @@ export interface ImageOverlayView {
   emphasis: string[];
   /** true si el texto de la imagen lo escribió una persona (no sale del título ni del gancho). */
   written: boolean;
+  /** 2026-10-19 — el color del resaltado elegido por una persona (rol de la paleta de la marca), si lo hay. */
+  emphasis_role: string | null;
 }
 
 /** Lo que la tarjeta necesita del texto de la imagen, leído de `assets.image`. PURO. */
@@ -34,6 +36,7 @@ export function imageOverlayOf(assets: any): ImageOverlayView | null {
       subheadline: typeof ov.subheadline === 'string' && ov.subheadline.trim() ? ov.subheadline : null,
       emphasis: Array.isArray(ov.emphasis) ? ov.emphasis.filter((t: unknown) => typeof t === 'string' && t) : [],
       written: true,
+      emphasis_role: typeof ov.emphasis_role === 'string' && ov.emphasis_role ? ov.emphasis_role : null,
     };
   }
   const o = img.overlay;
@@ -43,6 +46,7 @@ export function imageOverlayOf(assets: any): ImageOverlayView | null {
     subheadline: typeof o.subheadline === 'string' && o.subheadline.trim() ? o.subheadline : null,
     emphasis: Array.isArray(o.emphasis) ? o.emphasis.filter((t: unknown) => typeof t === 'string' && t) : [],
     written: false,
+    emphasis_role: null,
   };
 }
 
@@ -80,4 +84,36 @@ export function parseOverlayMarkup(markup: string):
   const headline = plain.join('\n');
   if (headline.length > OVERLAY_TEXT_MAX) return { ok: false, error: `El texto tiene ${headline.length} caracteres; el máximo es ${OVERLAY_TEXT_MAX}.` };
   return { ok: true, headline, emphasis };
+}
+
+// ── EL COLOR DEL RESALTADO (2026-10-19) ─────────────────────────────────────────────────────────
+// Sam, 2026-10-19: «no he visto … cambiar de color de accent». Las opciones NO son colores libres: son los
+// roles que la propia marca declara para el resaltado del titular en ImageLab —el de siempre
+// (`palette.headline_emphasis`) y las alternativas (`layout.emphasis_contrast.fallbacks`)— con su hex de
+// `brand_palette`. Una marca nueva ofrece lo que declare, sin tocar código.
+
+export interface EmphasisColorOption { role: string; hex: string; is_default: boolean }
+
+/**
+ * Las opciones de color del resaltado de una marca. `tokenRows` son filas de `imagelab_overlay_tokens`; sólo
+ * cuenta la de la marca sin canal (la general). Un rol que la paleta no tiene no se ofrece. PURO.
+ */
+export function emphasisColorOptions(
+  tokenRows: Array<{ brand_id?: unknown; canal?: unknown; tokens?: any }>,
+  palette: Array<{ role?: unknown; hex?: unknown }>,
+  brandId: string,
+): EmphasisColorOption[] {
+  const fila = (tokenRows ?? []).find((r) => r?.brand_id === brandId && (r?.canal == null || r?.canal === ''));
+  const t = fila?.tokens ?? {};
+  const porDefecto = typeof t?.palette?.headline_emphasis === 'string' ? t.palette.headline_emphasis : null;
+  const alternativas = Array.isArray(t?.layout?.emphasis_contrast?.fallbacks) ? t.layout.emphasis_contrast.fallbacks : [];
+  const hexDe = new Map((palette ?? []).filter((p) => typeof p?.role === 'string' && typeof p?.hex === 'string')
+    .map((p) => [String(p.role), String(p.hex)]));
+  const out: EmphasisColorOption[] = [];
+  for (const role of [porDefecto, ...alternativas]) {
+    if (typeof role !== 'string' || !role || out.some((o) => o.role === role)) continue;
+    const hex = hexDe.get(role);
+    if (hex) out.push({ role, hex, is_default: role === porDefecto });
+  }
+  return out;
 }
