@@ -29,6 +29,7 @@
 import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 // CHIP DE REGLA — la forma del mapa de enunciados es la del server, importada, no espejada.
 import type { RuleTexts } from '../../api/_ruleCodes';
+import type { FixRequestCode, FixImageMode } from '../../api/_fixRequest';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
@@ -649,9 +650,21 @@ export function recomposeImage(
  * el criterio explica un juicio ya tomado y puede llegar después, mientras que la propuesta
  * ES el veredicto — un `fixable` sin propuesta no dice nada que un rechazo no diga ya.
  */
+/**
+ * 2026-10-19 — EL CATÁLOGO DE PILLS DEL PANEL FIXABLE (`intel.fix_request_codes`), sólo las activas, en su
+ * orden. Lo sirve el mismo endpoint del veredicto (GET). La pantalla no conoce ningún código: los lee.
+ */
+export function fetchFixCatalog(token: string): Promise<{ ok: true; fix_codes: FixRequestCode[] }> {
+  return req('/api/calibration-verdict', token);
+}
+
 export function saveVerdict(
   token: string,
-  input: { piece_id: string; verdict: Verdict; criterion?: string | null; fix_proposal?: string | null },
+  input: {
+    piece_id: string; verdict: Verdict; criterion?: string | null; fix_proposal?: string | null;
+    // 2026-10-19 — las pills del fixable y el modo de imagen pedido. Ausentes = sin pills, como antes.
+    fix_codes?: string[] | null; image_mode?: FixImageMode | null;
+  },
 ): Promise<{
   ok: true; row: VerdictRow; piece_applied: boolean; piece_status: string | null; note?: string;
   /** U-3 — qué pasó con la franja. `null` en `approved`, que no libera. */
@@ -664,6 +677,8 @@ export function saveVerdict(
       verdict: input.verdict,
       criterion: input.criterion ?? null,
       fix_proposal: input.fix_proposal ?? null,
+      ...(input.fix_codes?.length ? { fix_codes: input.fix_codes } : {}),
+      ...(input.image_mode ? { image_mode: input.image_mode } : {}),
     },
   });
 }

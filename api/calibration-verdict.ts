@@ -12,8 +12,14 @@
  *   verdict: 'approved' | 'rejected' | 'fixable',
  *   criterion?: string,            // OPCIONAL en los tres veredictos (párrafo libre)
  *   fix_proposal?: string,         // OBLIGATORIO con 'fixable', ignorado en los otros dos
+ *   fix_codes?: string[],          // 2026-10-19 — las pills marcadas (intel.fix_request_codes); sólo con 'fixable'
+ *   image_mode?: 'edit_from_current' | 'regenerate_full',  // 2026-10-19 — el modo de imagen pedido; sólo con 'fixable'
  *   evaluated_by?: string          // default 'sam'
  * }
+ *
+ * GET /api/calibration-verdict  (2026-10-19)
+ *   Auth: la misma. Devuelve { ok: true, fix_codes: FixRequestCode[] }: el catálogo de pills del panel
+ *   Fixable. Va en este endpoint, y no en uno propio, porque es el vocabulario de ESTE veredicto.
  * Returns 200: { ok: true, row }   (la fila del corpus, con contexto completo)
  *
  * Reglas:
@@ -53,8 +59,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { actionsFor,
   applyCors, extractToken,
   ensureArtifact, toContext, watcherRulesForCorpus, upsertVerdict, applyVerdictToPiece, PieceNotFound,
-  CorpusColumnMissing, type CalibrationVerdict,
+  CorpusColumnMissing, type CalibrationVerdict, fetchFixRequestCodes, FixCatalogUnavailable,
 } from './_calibrationShared.js';
+import { resolveFixRequest } from './_fixRequest.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
 import { requireReviewer, guardPiece, signerOf } from './_reviewScope.js';
 import { releaseSlotsForPiece, type SlotRelease } from './_publishSlots.js';
@@ -62,12 +69,14 @@ import { releaseSlotsForPiece, type SlotRelease } from './_publishSlots.js';
 const VERDICTS: readonly CalibrationVerdict[] = ['approved', 'rejected', 'fixable'];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  applyCors(res, 'POST, OPTIONS');
+  applyCors(res, 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  if (req.method === 'GET') return catalogo(req, res);
+  if (req.method !== 'POST') return res.status(405).json({ error: 'GET or POST only' });
 
   let body: {
     piece_id?: string; verdict?: string; criterion?: string; fix_proposal?: string;
+    fix_codes?: unknown; image_mode?: unknown;
     evaluated_by?: string; session_token?: string;
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
@@ -106,6 +115,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
   const fix_proposal = verdict === 'fixable' ? proposal : null;
+
+  // 2026-10-19 — LAS PILLS. Sólo con `fixable`, y se validan contra el catálogo ANTES de tocar nada. Sin
+  // pills (ausentes o vacías) todo es como antes: la propuesta escrita sigue siendo lo obligatorio.
+  let fix_codes: string[] | null = null;
+  let image_mode: 'edit_from_current' | 'regenerate_full' | null = null;
+  if (verdict === 'fixable' && (body.fix_codes != null || body.image_mode != null)) {
+    let catalog;
+    try { catalog = await fetchFixRequestCodes(); } catch (err) {
+      const detail = err instanceof FixCatalogUnavailable ? err.server_detail : String(err);
+      return res.status(503).json({ error: 'fix_catalog_unavailable', detail });
+    }
+    const fr = resolveFixRequest({ fix_codes: body.fix_codes, image_mode: body.image_mode }, catalog);
+    if (!fr.ok) return res.status(400).json({ error: fr.error, detail: fr.detail });
+    fix_codes = fr.fix_codes;
+    image_mode = fr.image_mode;
+  }
 
   // Criterio opcional en los TRES veredictos: la DB lo deja nullable y el corpus prefiere
   // una fila sin criterio a una con relleno. Lo escribe Claude desde el chat, después.
@@ -152,6 +177,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       criterion: criterion || null, // sin criterio → NULL (nunca '' ni relleno)
       // Qué propone Sam para aprovecharla. NULL salvo en `fixable`, donde ya se validó no vacía.
       fix_proposal,
+      // 2026-10-19 — siempre viajan: `null` limpia las pills de un fixable anterior al reevaluar.
+      fix_codes,
+      image_mode,
       evaluated_by,
       // Primera opinión del watcher, copiada de la pieza (para comparar Sam vs watcher).
       watcher_result: ctx.watcher_result,
@@ -240,5 +268,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // `message` viaja con el texto del server: la interfaz lo muestra en vez de colapsarlo en
     // `verdict_failed`, que no dice nada de lo que pasó.
     return res.status(500).json({ error: 'verdict_failed', message });
+  }
+}
+
+// ── GET · el catálogo de pills del panel Fixable (2026-10-19) ─────────────────────────────
+async function catalogo(req: VercelRequest, res: VercelResponse) {
+  const session = await requireReviewer(req, res, extractToken(req));
+  if (!session) return;
+  try {
+    return res.status(200).json({ ok: true, fix_codes: await fetchFixRequestCodes() });
+  } catch (err) {
+    const detail = err instanceof FixCatalogUnavailable ? err.server_detail : (err instanceof Error ? err.message : String(err));
+    console.error('[calibration-verdict] GET catálogo', detail);
+    return res.status(503).json({ error: 'fix_catalog_unavailable', detail });
   }
 }

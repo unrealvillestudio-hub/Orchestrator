@@ -33,6 +33,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { PieceMetrics } from './_pieceMetrics.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
+import { normalizeFixCatalog, type FixRequestCode } from './_fixRequest.js';
 // Las láminas en el orden en que se publican: el mismo criterio que la publicación manual y el drenaje.
 import { manualImagesOf, isCarouselPiece, CAROUSEL_FORMAT } from './_manualShared.js';
 // La firma canónica del drenaje: la MISMA copia que ya usa la publicación manual (SIGNCANON de
@@ -2024,6 +2025,26 @@ export const FIXABLE_REASON_PREFIX = 'fixable:';
  * ahí es indistinguible de un fallo real, y el operador no puede saber que el arreglo es aplicar
  * la migración.
  */
+/**
+ * 2026-10-19 — EL CATÁLOGO DE PILLS DEL FIXABLE (`intel.fix_request_codes`), sólo las activas, en su orden.
+ * Lanza si no se puede leer: una pantalla sin catálogo no puede validar lo que el panel manda, y el
+ * endpoint lo dice con su propio error en vez de aceptar códigos a ciegas.
+ */
+export class FixCatalogUnavailable extends Error {
+  constructor(public server_detail: string) {
+    super('fix_request_codes unavailable');
+    this.name = 'FixCatalogUnavailable';
+  }
+}
+export async function fetchFixRequestCodes(): Promise<FixRequestCode[]> {
+  const url = `${SB_URL()}/rest/v1/fix_request_codes?active=eq.true&select=code,channel,label,help,sort,forces_image_mode&order=sort.asc`;
+  const res = await fetchWithTimeout('db', url, {
+    headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': 'intel' },
+  });
+  if (!res.ok) throw new FixCatalogUnavailable(`HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`);
+  return normalizeFixCatalog(await res.json().catch(() => []));
+}
+
 export class CorpusColumnMissing extends Error {
   constructor(public column: string, public server_detail: string) {
     super(`corpus column missing: ${column}`);
@@ -2051,6 +2072,13 @@ export async function upsertVerdict(row: {
   // Nivel de REGLA (de assets.watcher.failed_rules / rules_evaluated). NULL ≠ [] a propósito:
   // NULL = no registrado (pre-v56); [] = registrado, sin regla disparada. Ver watcherRulesForCorpus().
   watcher_rules: string[] | null; watcher_rules_evaluated: number | null;
+  /**
+   * 2026-10-19 — las pills del fixable (`intel.fix_request_codes`) y el modo de imagen pedido. AUSENTES
+   * (undefined) = la clave no viaja y la fila conserva lo que tenía: así las llama quien no maneja
+   * pills (Investigar). `null` = se escriben vacías: así las llama el veredicto, para que reevaluar
+   * una pieza no deje las pills de un fixable anterior colgadas de un `approved`.
+   */
+  fix_codes?: string[] | null; image_mode?: 'edit_from_current' | 'regenerate_full' | null;
 }): Promise<Record<string, unknown>> {
   const url = `${SB_URL()}/rest/v1/approval_calibration?on_conflict=piece_id`;
   const post = (payload: Record<string, unknown>) => fetchWithTimeout('db', url, {
@@ -2079,6 +2107,8 @@ export async function upsertVerdict(row: {
   if (!res.ok) {
     const detail = (await res.text().catch(() => '')).slice(0, 300);
     if (detail.includes('fix_proposal')) throw new CorpusColumnMissing('fix_proposal', detail);
+    // 2026-10-19 — las columnas de las pills llegan con la migración 20261019000000 de unrlvl-iid-functions.
+    for (const col of ['fix_codes', 'image_mode']) if (detail.includes(col)) throw new CorpusColumnMissing(col, detail);
     throw new Error(`corpus upsert failed: ${res.status} ${detail}`);
   }
   const rows = (await res.json().catch(() => [])) as Array<Record<string, unknown>>;
