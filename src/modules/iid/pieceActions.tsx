@@ -982,7 +982,9 @@ export function PieceActionsBar({
                           aria-checked={activo}
                           aria-label={c.is_default ? `${c.role} (el de siempre)` : c.role}
                           title={c.is_default ? `${c.role} — el de siempre` : c.role}
-                          onClick={() => setOverlayRole(c.is_default ? null : c.role)}
+                          // 2026-10-20 — el chip tocado viaja SIEMPRE, también el de siempre: sin rol, el compositor corrige el color
+                          // por contraste y lo cambia (medido en 6738a414: se eligió el de siempre y salió accent_3).
+                          onClick={() => setOverlayRole(c.role)}
                           className={cn('w-6 h-6 rounded-full border-2 transition-transform',
                             activo ? 'border-white scale-110' : 'border-zinc-700 hover:border-zinc-400')}
                           style={{ backgroundColor: c.hex }}
@@ -1364,12 +1366,18 @@ export function ResearchCaseLine({ pieceId, token }: { pieceId: string; token: s
       {s.link && (
         <a href={s.link.href} target="_blank" rel="noreferrer" className="underline hover:text-white">{s.link.label}</a>
       )}
+      {/* 2026-10-20 — las fuentes, plegadas (Sam: «hazla desplegable para que no ocupen tanto espacio»). */}
       {s.sources.length > 0 && (
-        <ul className="list-disc pl-4 space-y-0.5">
-          {s.sources.map((f) => (
-            <li key={f.url}><a href={f.url} target="_blank" rel="noreferrer" className="underline break-all hover:text-white">{f.title}</a></li>
-          ))}
-        </ul>
+        <details className="group">
+          <summary className="cursor-pointer select-none underline-offset-2 hover:underline">
+            {s.sources.length === 1 ? 'Ver la fuente' : `Ver las ${s.sources.length} fuentes`}
+          </summary>
+          <ul className="list-disc pl-4 space-y-0.5 mt-1">
+            {s.sources.map((f) => (
+              <li key={f.url}><a href={f.url} target="_blank" rel="noreferrer" className="underline break-all hover:text-white">{f.title}</a></li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );

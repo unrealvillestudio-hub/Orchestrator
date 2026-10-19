@@ -102,8 +102,15 @@ describe('el cableado del editor', () => {
     expect(MOD).toContain("onClick={() => { open('regen'); setRegenTab('text'); }}");
     expect(MOD).toContain('Texto de la imagen');
   });
-  it('el color viaja sólo si se eligió uno distinto del de siempre y hay resaltado', () => {
+  it('el color viaja si se tocó un chip (también el de siempre) y hay resaltado', () => {
     expect(MOD).toContain('...(overlayRole && parsed.emphasis.length ? { emphasis_role: overlayRole } : {})');
+    // 2026-10-20 — medido en 6738a414: el chip de siempre mandaba null y el compositor lo cambiaba por contraste.
+    expect(MOD).toContain('onClick={() => setOverlayRole(c.role)}');
+    expect(MOD).not.toContain('setOverlayRole(c.is_default ? null : c.role)');
+  });
+  it('las fuentes de la investigación van plegadas', () => {
+    expect(MOD).toContain('<details className="group">');
+    expect(MOD).toContain("`Ver las ${s.sources.length} fuentes`");
   });
   it('el endpoint sirve los colores por GET y devuelve el cambio de modo del motor', () => {
     expect(API).toContain("if (req.method === 'GET') return coloresDelResaltado(req, res);");
