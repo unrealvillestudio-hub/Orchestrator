@@ -10,6 +10,7 @@ import {
 import { savePieceEdit } from '../../services/challengedInbox';
 import { effectiveFixImageMode, type FixRequestCode, type FixImageMode } from '../../../api/_fixRequest';
 import { overlayMarkupOf, parseOverlayMarkup, type ImageOverlayView } from '../../../api/_overlayText';
+import { highlightPayload, HIGHLIGHT_NOTE_MAX, type HighlightInput } from '../../../api/_highlights';
 import { fmtInZone } from './pieceUi';
 
 /**
@@ -110,8 +111,9 @@ export type ActionOutcome = 'approved' | 'rejected' | 'fixable' | 'research' | '
  * mirar una clase de CSS. Una prueba de estilos se rompe al cambiar un color; una de orden
  * se rompe sólo cuando cambia la doctrina, que es cuando tiene que romperse.
  *
- * `panel` dice qué panel de texto abre. `null` = se ejecuta de un clic, sin panel: aprobar
- * es la única que no pide nada escrito, porque no hay nada que explicar en un visto bueno.
+ * `panel` dice qué panel de texto abre. `null` = se ejecuta de un clic, sin panel.
+ * PR 6 (2026-10-19) — aprobar ABRE su panel: la calificación «Destacada» del copy y de la imagen se da
+ * antes de aprobar (Sam: «tendría que hacerlo antes de aprobar»). Sin marcar nada, aprueba igual.
  *
  * `seals` marca las tres que SACAN LA PIEZA DE CIRCULACIÓN. Es lo que decide si el texto de
  * confirmación habla de la franja: son exactamente las que la liberan (U-3). No coincide
@@ -128,8 +130,8 @@ export const ACTION_SPECS: ReadonlyArray<{
   hint: string;
 }> = [
   // Nivel primario — juicio: escriben el corpus. Van primero y juntas.
-  { key: 'approve', label: 'Aprobar', panel: null, seals: false, weight: 'primary',
-    hint: 'Habilita la pieza. La franja la calcula content-scheduler.' },
+  { key: 'approve', label: 'Aprobar', panel: 'approve', seals: false, weight: 'primary',
+    hint: 'Habilita la pieza. Antes, si quieres, marca el copy o la imagen como destacados. La franja la calcula content-scheduler.' },
   { key: 'reject', label: 'Rechazar', panel: 'reject', seals: true, weight: 'primary',
     hint: 'Entra al corpus como rechazo y sella la pieza.' },
   // `seals: false` — y es el cambio del 2026-09-20. Un fixable RETA la pieza: la saca de
@@ -167,7 +169,7 @@ export function imageActionLabel(hasImage: boolean | undefined): string {
   return hasImage === false ? 'Generar imagen' : 'Regenerar imagen';
 }
 
-export type PanelKey = 'reject' | 'fix' | 'research' | 'edit' | 'regen' | 'discard';
+export type PanelKey = 'approve' | 'reject' | 'fix' | 'research' | 'edit' | 'regen' | 'discard';
 
 // ── Lógica pura, probable sin montar React ───────────────────────────────────────
 /**
@@ -268,10 +270,28 @@ export const OUTCOME_COPY: Record<ActionOutcome, { tone: 'ok' | 'sealed'; text: 
 };
 
 /** El copy de cada panel. Un solo sitio, porque el mismo textarea significa cosas distintas. */
+/** PR 6 — lo que el panel de Aprobar dice de la calificación. Sin pulgar negativo: para eso está Fixable. */
+export const HIGHLIGHT_FOOT =
+  'Sin marcar = pasable. «Destacado» le dice al carril que esto es un ejemplo a seguir; el copy y la imagen se '
+  + 'califican por separado. El comentario es opcional, también para decir qué le falta a algo pasable. Lo '
+  + 'que está mal no se califica aquí: va por Fixable.';
+export const HIGHLIGHT_SECTIONS: ReadonlyArray<{ key: 'copy' | 'image'; title: string; thumb: string; placeholder: string }> = [
+  { key: 'copy', title: 'Copy', thumb: 'Destacado', placeholder: 'Comentario sobre el copy (opcional)…' },
+  { key: 'image', title: 'Imagen', thumb: 'Destacada', placeholder: 'Comentario sobre la imagen (opcional)…' },
+];
+
 export const PANEL_COPY: Record<PanelKey, {
   label: string | null; placeholder: string; confirm: string; foot: string;
   focus: string; button: string; required: boolean;
 }> = {
+  // PR 6 (2026-10-19) — no lleva el cuadro de texto general: cada sección (copy, imagen) trae el suyo.
+  approve: {
+    label: null,
+    placeholder: '',
+    confirm: 'Aprobar',
+    foot: HIGHLIGHT_FOOT,
+    focus: 'focus:border-accent/60', button: 'bg-accent hover:bg-accent/90 text-black', required: false,
+  },
   reject: {
     label: null,
     placeholder: 'Criterio del rechazo (opcional — normalmente lo escribe Claude desde el chat)…',
@@ -530,6 +550,8 @@ export function PieceActionsBar({
   const [fixCodes, setFixCodes] = useState<string[]>([]);
   const [fixMode, setFixMode] = useState<FixImageMode>('edit_from_current');
   const fixReq = fixRequestPayload(fixCodes, fixCatalog, fixMode);
+  // PR 6 — la calificación «Destacada» del panel de Aprobar.
+  const [hl, setHl] = useState<HighlightInput>({ copy: false, image: false, copyNote: '', imageNote: '' });
 
   // SIN-IMAGEN-01 — el verbo de la acción de imagen depende de si hay una. Ver `imageActionLabel`.
   const buttons = actionButtons(piece.actions).map((b) =>
@@ -560,6 +582,7 @@ export function PieceActionsBar({
       setOverlayMarkup(overlayMarkupOf(piece.image_overlay?.headline ?? null, piece.image_overlay?.emphasis ?? []));
       setOverlaySub(piece.image_overlay?.subheadline ?? '');
     }
+    if (p === 'approve') setHl({ copy: false, image: false, copyNote: '', imageNote: '' });
     if (p === 'fix') {
       setFixCodes([]); setFixMode('edit_from_current');
       // Sin catálogo el fixable sigue funcionando como antes (sólo con la propuesta escrita), y se dice.
@@ -608,6 +631,7 @@ export function PieceActionsBar({
           criterion: conTexto ? buildCriterion(reason, null) : buildCriterion(reason, note),
           fix_proposal: conTexto ? note.trim() : null,
           ...(verdict === 'fixable' ? { fix_codes: fixReq.fix_codes, image_mode: fixReq.image_mode } : {}),
+          ...(verdict === 'approved' ? { highlights: highlightPayload(hl, piece.has_image) } : {}),
         });
       // `approved` pasa por el MISMO acuse que los demás. Que no libere franja no es motivo
       // para que no diga nada: `slot_release` viene null y el acuse lo omite, pero el
@@ -714,6 +738,7 @@ export function PieceActionsBar({
   };
 
   const confirm = () => {
+    if (panel === 'approve') return submitVerdict('approved', 'approve');
     if (panel === 'reject') return submitVerdict('rejected', 'reject');
     if (panel === 'fix') return submitVerdict('fixable', 'fixable');
     if (panel === 'research') return submitVerdict('research', 'research');
@@ -1013,6 +1038,48 @@ export function PieceActionsBar({
               </div>
             )}
 
+            {/* PR 6 — LA CALIFICACIÓN, copy e imagen por separado. Una pieza sin imagen sólo califica el copy. */}
+            {panel === 'approve' && (
+              <div className="space-y-3">
+                {HIGHLIGHT_SECTIONS.filter((sec) => sec.key === 'copy' || piece.has_image !== false).map((sec) => {
+                  const marcado = sec.key === 'copy' ? hl.copy : hl.image;
+                  const nota = sec.key === 'copy' ? hl.copyNote : hl.imageNote;
+                  return (
+                    <div key={sec.key} className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 w-14">{sec.title}</span>
+                        <button
+                          role="switch"
+                          aria-checked={marcado}
+                          aria-label={`${sec.title}: ${sec.thumb}`}
+                          onClick={() => setHl((h) => (sec.key === 'copy' ? { ...h, copy: !h.copy } : { ...h, image: !h.image }))}
+                          className={cn(
+                            'text-[11px] px-2.5 py-1 rounded-lg border transition-colors',
+                            marcado
+                              ? 'border-accent/70 bg-accent/15 text-accent'
+                              : 'border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700',
+                          )}
+                        >
+                          👍 {sec.thumb}
+                        </button>
+                      </div>
+                      <input
+                        value={nota}
+                        maxLength={HIGHLIGHT_NOTE_MAX}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setHl((h) => (sec.key === 'copy' ? { ...h, copyNote: v } : { ...h, imageNote: v }));
+                        }}
+                        placeholder={sec.placeholder}
+                        aria-label={sec.placeholder}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white placeholder:text-zinc-700 outline-none focus:border-accent/50"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* El TÍTULO también se edita (2026-10-01: «ni body, ni hashtags, ni title»). Los
                 hashtags viven dentro del cuerpo, así que se corrigen en el cuadro de abajo. */}
             {panel === 'edit' && (
@@ -1028,7 +1095,7 @@ export function PieceActionsBar({
             {copy?.label && !enTextoImagen && (
               <label className="block text-[11px] font-medium text-zinc-300">{copy.label}</label>
             )}
-            {!enTextoImagen && <textarea
+            {!enTextoImagen && panel !== 'approve' && <textarea
               value={note}
               onChange={(e) => { setNote(e.target.value); setError(null); setWarnings([]); }}
               rows={panel === 'edit' ? 8 : 3}

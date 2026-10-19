@@ -2086,6 +2086,8 @@ export async function upsertVerdict(row: {
    * una pieza no deje las pills de un fixable anterior colgadas de un `approved`.
    */
   fix_codes?: string[] | null; image_mode?: 'edit_from_current' | 'regenerate_full' | null;
+  /** PR 6 (2026-10-19) — la calificación «Destacada» de un `approved`. Ausentes = no se calificó. */
+  highlight_copy?: true; highlight_image?: true; copy_note?: string; image_note?: string;
 }): Promise<Record<string, unknown>> {
   const url = `${SB_URL()}/rest/v1/approval_calibration?on_conflict=piece_id`;
   const post = (payload: Record<string, unknown>) => fetchWithTimeout('db', url, {
@@ -2116,6 +2118,8 @@ export async function upsertVerdict(row: {
     if (detail.includes('fix_proposal')) throw new CorpusColumnMissing('fix_proposal', detail);
     // 2026-10-19 — las columnas de las pills llegan con la migración 20261019000000 de unrlvl-iid-functions.
     for (const col of ['fix_codes', 'image_mode']) if (detail.includes(col)) throw new CorpusColumnMissing(col, detail);
+    // PR 6 — las de la calificación llegan con la migración 20261019240000 de unrlvl-iid-functions.
+    for (const col of ['highlight_copy', 'highlight_image', 'copy_note', 'image_note']) if (detail.includes(col)) throw new CorpusColumnMissing(col, detail);
     throw new Error(`corpus upsert failed: ${res.status} ${detail}`);
   }
   const rows = (await res.json().catch(() => [])) as Array<Record<string, unknown>>;

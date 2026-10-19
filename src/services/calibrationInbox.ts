@@ -31,6 +31,7 @@ import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 import type { RuleTexts } from '../../api/_ruleCodes';
 import type { FixRequestCode, FixImageMode } from '../../api/_fixRequest';
 import type { ImageOverlayView } from '../../api/_overlayText';
+import type { HighlightFields } from '../../api/_highlights';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
@@ -673,6 +674,8 @@ export function saveVerdict(
     piece_id: string; verdict: Verdict; criterion?: string | null; fix_proposal?: string | null;
     // 2026-10-19 — las pills del fixable y el modo de imagen pedido. Ausentes = sin pills, como antes.
     fix_codes?: string[] | null; image_mode?: FixImageMode | null;
+    // PR 6 — la calificación «Destacada» de un aprobado. Sólo las claves marcadas (ver `highlightPayload`).
+    highlights?: HighlightFields;
   },
 ): Promise<{
   ok: true; row: VerdictRow; piece_applied: boolean; piece_status: string | null; note?: string;
@@ -688,6 +691,7 @@ export function saveVerdict(
       fix_proposal: input.fix_proposal ?? null,
       ...(input.fix_codes?.length ? { fix_codes: input.fix_codes } : {}),
       ...(input.image_mode ? { image_mode: input.image_mode } : {}),
+      ...(input.verdict === 'approved' ? (input.highlights ?? {}) : {}),
     },
   });
 }

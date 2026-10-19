@@ -62,6 +62,7 @@ import { actionsFor,
   CorpusColumnMissing, type CalibrationVerdict, fetchFixRequestCodes, FixCatalogUnavailable,
 } from './_calibrationShared.js';
 import { resolveFixRequest } from './_fixRequest.js';
+import { resolveHighlights, type HighlightFields } from './_highlights.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
 import { requireReviewer, guardPiece, signerOf } from './_reviewScope.js';
 import { releaseSlotsForPiece, type SlotRelease } from './_publishSlots.js';
@@ -132,6 +133,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     image_mode = fr.image_mode;
   }
 
+  // PR 6 (2026-10-19) — LA CALIFICACIÓN «DESTACADA», sólo con `approved`, validada ANTES de tocar nada. Sin
+  // marcar nada no viaja ninguna columna nueva: aprobar no depende de su migración.
+  let highlights: HighlightFields = {};
+  if (verdict === 'approved') {
+    const hr = resolveHighlights(body);
+    if (!hr.ok) return res.status(400).json({ error: hr.error, detail: hr.detail });
+    highlights = hr.fields;
+  }
+
   // Criterio opcional en los TRES veredictos: la DB lo deja nullable y el corpus prefiere
   // una fila sin criterio a una con relleno. Lo escribe Claude desde el chat, después.
   const criterion = typeof body.criterion === 'string' ? body.criterion.trim() : '';
@@ -183,6 +193,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // sólo usan las pills. Las de un fixable anterior no estorban: el carril sólo las lee con `fixable`.
       ...(fix_codes ? { fix_codes } : {}),
       ...(image_mode ? { image_mode } : {}),
+      ...highlights,
       evaluated_by,
       // Primera opinión del watcher, copiada de la pieza (para comparar Sam vs watcher).
       watcher_result: ctx.watcher_result,
