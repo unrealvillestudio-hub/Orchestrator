@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { shortId } from '../../services/iidInbound';
+import { shortId, type TopicSeed } from '../../services/iidInbound';
+import { memoParaLeer, lecturaDelResultado, lecturaDelMemo } from './readableTopic';
 
 /**
  * SEEDS DE TEMA E «INVESTIGACIONES» (Sam, 2026-10-20).
@@ -54,5 +55,45 @@ describe('«Investigaciones» y el formulario de tema', () => {
     for (const src of [MOD, VIEW, FORM])
       for (const m of ['NeuroneSCF', 'ForumPHs', 'LucienSael', 'UnrealvilleStudio', 'Patricia'])
         expect(src).not.toContain(m);
+  });
+});
+
+describe('lectura en voz alta del resultado y del memo (Sam, 2026-10-20)', () => {
+  const seed = {
+    id: '9a55e66d-0000-0000-0000-000000000000', raw_signal: 'Un tema de prueba', seeder_rationale: null,
+    mapped_brand_id: 'MarcaInventada', captured_by: 'sam', status: 'researched', researched_at: null,
+    failures: 0, last_error: null, created_at: '', updated_at: '',
+    research: {
+      memo: '# Memo\n\n**Clave:** un dato [con enlace](https://a.org/x) y https://b.org/y suelto.\n\n---\nFUENTES CONSULTADAS:\n- A — https://a.org/x',
+      fuentes: [], agente: 'AG', stop_reason: 'end_turn', truncado: false, resumen: 'Lo esencial.',
+      hallazgos: [{ afirmacion: 'Primera afirmación', fuente: 'https://a.org/x' }],
+      dominio: { encaja_en: 'ai-cognition', propuesto: null, por_que: 'Cabe.' }, resumen_error: null,
+    },
+  } as unknown as TopicSeed;
+
+  it('el memo se lee sin la lista de fuentes, sin URLs y sin marcas de formato', () => {
+    const t = memoParaLeer(seed.research!.memo);
+    expect(t).toContain('Clave: un dato con enlace');
+    expect(t).not.toMatch(/https?:\/\//);
+    expect(t).not.toMatch(/FUENTES CONSULTADAS|\*\*|^#/m);
+  });
+  it('el resultado se lee con resumen, dominio y hallazgos, sin URLs', () => {
+    const r = lecturaDelResultado(seed)!;
+    expect(r.title).toContain('9a55e66d');
+    const body = String(r.body);
+    expect(body).toContain('Lo esencial.');
+    expect(body).toContain('cabe en ai cognition');
+    expect(body).toContain('1. Primera afirmación');
+    expect(body).not.toMatch(/https?:\/\//);
+    expect(String(lecturaDelMemo(seed)?.body ?? '').length).toBeGreaterThan(0);
+  });
+  it('sin resultado no hay lector', () => {
+    expect(lecturaDelResultado({ ...seed, research: null })).toBeNull();
+    expect(lecturaDelMemo({ ...seed, research: null })).toBeNull();
+  });
+  it('la vista monta el mismo SpeechReader de Calibración para el resultado y el memo', () => {
+    expect(VIEW).toContain("import { SpeechReader } from '../../ui/SpeechReader'");
+    expect(VIEW).toContain('<SpeechReader piece={lecturaResultado} suggestedLang="es" />');
+    expect(VIEW).toMatch(/<SpeechReader piece=\{lecturaMemo\} suggestedLang="en"/);
   });
 });
