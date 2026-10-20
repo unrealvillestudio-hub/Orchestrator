@@ -45,10 +45,14 @@ export type SeedStatus =
   | 'approved'
   | 'dispatched'
   | 'failed'
-  | 'rejected';
+  | 'rejected'
+  // Seeds de tema (2026-10-20): en investigación y con resultado listo para la sesión.
+  | 'researching'
+  | 'researched';
 
 export interface Seed {
   id: string;
+  /** Null sólo en un seed de tema, que no parte de un post (la cola de aprobación no los lista). */
   source_url: string;
   handle: string | null;
   raw_signal: string;
@@ -91,6 +95,61 @@ export interface ApproveResult {
 export interface RejectResult {
   seed_id: string;
   status: 'rejected';
+}
+
+// ── Seeds de tema (2026-10-20) ───────────────────────────────────────────────
+// Sam propone un tema para una marca; `iid-research` lo investiga y el resultado vuelve con su ID para
+// decidirlo en sesión. Nada de esto entra al carril sin esa decisión.
+
+export interface TopicFinding { afirmacion: string; fuente: string }
+
+export interface TopicDomain {
+  /** Dominio de la marca en el que el tema cabe, o null. */
+  encaja_en: string | null;
+  /** Dominio nuevo propuesto cuando no cabe en ninguno. Se activa sólo en sesión. */
+  propuesto: { slug: string; nombre: string; angulos: string[] } | null;
+  por_que: string | null;
+}
+
+export interface TopicResearch {
+  memo: string;
+  fuentes: Array<{ url: string; title: string }>;
+  agente: string;
+  stop_reason: string | null;
+  truncado: boolean;
+  resumen: string | null;
+  hallazgos: TopicFinding[];
+  dominio: TopicDomain | null;
+  /** Si el resumen falló, el memo se guarda igual y aquí queda el motivo. */
+  resumen_error: string | null;
+}
+
+export interface TopicSeed {
+  id: string;
+  raw_signal: string;
+  seeder_rationale: string | null;
+  mapped_brand_id: string;
+  captured_by: string;
+  status: SeedStatus;
+  research: TopicResearch | null;
+  researched_at: string | null;
+  failures: number;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CaptureTopicResult {
+  seed_id: string;
+  status: 'captured';
+  /** false: la investigación no se lanzó al momento y la toma el barrido (cada 15 min). */
+  research_started: boolean;
+  created_at: string;
+}
+
+/** El ID corto con el que un resultado se nombra en sesión. */
+export function shortId(id: string): string {
+  return String(id ?? '').slice(0, 8);
 }
 
 /** Error tipado: conserva el status HTTP y el cuerpo crudo de la EF. */
@@ -206,4 +265,24 @@ export function approve(
 /** Rechaza (admin): motivo obligatorio. */
 export function reject(token: string, seed_id: string, rejected_reason: string): Promise<RejectResult> {
   return call<RejectResult>({ action: 'reject', session_token: token, seed_id, rejected_reason });
+}
+
+/** Propone un tema para una marca (admin) y lanza su investigación. */
+export function captureTopic(
+  token: string,
+  input: { brand_id: string; topic: string; context?: string | null },
+): Promise<CaptureTopicResult> {
+  return call<CaptureTopicResult>({
+    action: 'capture_topic',
+    session_token: token,
+    brand_id: input.brand_id,
+    topic: input.topic,
+    context: input.context ?? null,
+  });
+}
+
+/** Los temas propuestos con su resultado, los más recientes primero (admin). */
+export async function listTopics(token: string): Promise<TopicSeed[]> {
+  const r = await call<{ count: number; seeds: TopicSeed[] }>({ action: 'list_topics', session_token: token });
+  return r.seeds ?? [];
 }

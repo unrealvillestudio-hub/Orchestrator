@@ -10,6 +10,8 @@ export const STATUS_META: Record<SeedStatus, { label: string; color: string; bg:
   dispatched:        { label: 'Despachada',    color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' },
   failed:            { label: 'Fallida',       color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/30' },
   rejected:          { label: 'Rechazada',     color: 'text-zinc-500',    bg: 'bg-zinc-700/20',    border: 'border-zinc-700/40' },
+  researching:       { label: 'Investigando',  color: 'text-sky-400',     bg: 'bg-sky-500/10',     border: 'border-sky-500/30' },
+  researched:        { label: 'Lista',         color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' },
 };
 
 export function StatusBadge({ status }: { status: SeedStatus }) {
