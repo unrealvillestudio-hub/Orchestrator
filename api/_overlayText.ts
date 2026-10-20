@@ -29,10 +29,12 @@ export interface ImageOverlayView {
   shadow_spans: string[];
   /** 2026-10-20 — el color del filete (la franja bajo el titular) elegido por una persona; null = el de la marca. */
   rule_role: string | null;
+  /** 2026-10-20 — el color de la barra lateral (franja de identidad) elegido por una persona; null = el de la marca. */
+  identity_role: string | null;
 }
 
 /** Lo que la persona eligió para la imagen además del texto. Fuera del texto escrito, todo es lo de la marca. */
-const SIN_ELECCION = { emphasis_role: null, text_shadow: null, shadow_spans: [] as string[], rule_role: null };
+const SIN_ELECCION = { emphasis_role: null, text_shadow: null, shadow_spans: [] as string[], rule_role: null, identity_role: null };
 
 const textos = (xs: unknown): string[] => (Array.isArray(xs) ? xs.filter((t: unknown): t is string => typeof t === 'string' && !!t) : []);
 
@@ -51,6 +53,7 @@ export function imageOverlayOf(assets: any): ImageOverlayView | null {
       text_shadow: ov.text_shadow === 'on' || ov.text_shadow === 'off' ? ov.text_shadow : null,
       shadow_spans: textos(ov.shadow_spans),
       rule_role: typeof ov.rule_role === 'string' && ov.rule_role ? ov.rule_role : null,
+      identity_role: typeof ov.identity_role === 'string' && ov.identity_role ? ov.identity_role : null,
     };
   }
   const o = img.overlay;
@@ -106,7 +109,7 @@ export function overlayMarkupOf(headline: string | null, emphasis: readonly stri
 
 /** Los campos del editor a partir del texto vigente de la imagen. PURO. */
 export function overlayEditorSeed(view: ImageOverlayView | null | undefined): {
-  markup: string; sub: string; role: string | null; shadow: 'on' | 'off' | null; ruleRole: string | null;
+  markup: string; sub: string; role: string | null; shadow: 'on' | 'off' | null; ruleRole: string | null; identityRole: string | null;
 } {
   return {
     markup: overlayMarkupOf(view?.headline ?? null, view?.emphasis ?? [], view?.shadow_spans ?? []),
@@ -114,13 +117,14 @@ export function overlayEditorSeed(view: ImageOverlayView | null | undefined): {
     role: view?.emphasis_role ?? null,
     shadow: view?.text_shadow ?? null,
     ruleRole: view?.rule_role ?? null,
+    identityRole: view?.identity_role ?? null,
   };
 }
 
 /** Lo que el editor manda al motor como texto escrito para la imagen. */
 export interface OverlayOverrideOut {
   headline: string; subheadline: string | null; emphasis: string[]; emphasis_role?: string;
-  text_shadow?: 'on' | 'off'; shadow_spans?: string[]; rule_role?: string;
+  text_shadow?: 'on' | 'off'; shadow_spans?: string[]; rule_role?: string; identity_role?: string;
 }
 
 /**
@@ -133,6 +137,7 @@ export function overlayViewAfterApply(override: OverlayOverrideOut | null): Imag
     headline: override.headline, subheadline: override.subheadline, emphasis: [...override.emphasis],
     written: true, emphasis_role: override.emphasis_role ?? null,
     text_shadow: override.text_shadow ?? null, shadow_spans: [...(override.shadow_spans ?? [])], rule_role: override.rule_role ?? null,
+    identity_role: override.identity_role ?? null,
   };
 }
 
@@ -260,4 +265,30 @@ export function shadowDefaultLabel(o: ShadowOption): string {
   if (o.when === 'low_contrast') return 'sólo cuando el fondo no deja leer';
   if (o.when === 'on_request') return 'sin sombra';
   return 'siempre con sombra';
+}
+
+/**
+ * 2026-10-20 — los colores posibles de la barra lateral (la franja de identidad, `tokens.identity`): el suyo de siempre
+ * y los accent con los que la marca resalta. Es la lista que acepta el compositor (`identityAllowedRoles`, ImageLab
+ * 1.10.0). Sin franja en la capa de la marca, nada que elegir. PURO.
+ */
+export function identityColorOptions(
+  tokenRows: Array<{ brand_id?: unknown; canal?: unknown; tokens?: any }>,
+  palette: Array<{ role?: unknown; hex?: unknown }>,
+  brandId: string,
+): EmphasisColorOption[] {
+  const fila = (tokenRows ?? []).find((r) => r?.brand_id === brandId && (r?.canal == null || r?.canal === ''));
+  const id = fila?.tokens?.identity;
+  const propio = id && String(id.mode ?? 'none') !== 'none' && typeof id.palette === 'string' ? id.palette : null;
+  if (!propio) return [];
+  const hexDe = new Map((palette ?? []).filter((p) => typeof p?.role === 'string' && typeof p?.hex === 'string')
+    .map((p) => [String(p.role), String(p.hex)]));
+  const out: EmphasisColorOption[] = [];
+  const add = (role: string, is_default: boolean) => {
+    const hex = hexDe.get(role);
+    if (hex && !out.some((o) => o.role === role)) out.push({ role, hex, is_default });
+  };
+  add(propio, true);
+  for (const o of emphasisColorOptions(tokenRows, palette, brandId)) add(o.role, false);
+  return out;
 }

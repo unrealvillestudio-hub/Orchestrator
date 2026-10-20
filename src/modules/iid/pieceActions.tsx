@@ -564,6 +564,8 @@ export function PieceActionsBar({
   // 2026-10-20 — la sombra de todo el texto (null = la de la marca) y el color del filete, con sus opciones.
   const [overlayShadow, setOverlayShadow] = useState<'on' | 'off' | null>(null);
   const [overlayRule, setOverlayRule] = useState<string | null>(null);
+  const [overlayIdentity, setOverlayIdentity] = useState<string | null>(null);
+  const [identityColors, setIdentityColors] = useState<EmphasisColorOption[] | null>(null);
   const [shadowOpt, setShadowOpt] = useState<ShadowOption | null>(null);
   const [ruleColors, setRuleColors] = useState<EmphasisColorOption[] | null>(null);
   // 2026-10-20 — EL TEXTO VIGENTE DE LA IMAGEN. `piece.image_overlay` es el de cuando cargó la bandeja y no cambia al
@@ -574,7 +576,7 @@ export function PieceActionsBar({
   const sembrarEditor = (view: ImageOverlayView | null) => {
     const s = overlayEditorSeed(view);
     setOverlayMarkup(s.markup); setOverlaySub(s.sub); setOverlayRole(s.role);
-    setOverlayShadow(s.shadow); setOverlayRule(s.ruleRole);
+    setOverlayShadow(s.shadow); setOverlayRule(s.ruleRole); setOverlayIdentity(s.identityRole);
   };
   // 2026-10-19 — las pills del fixable. El catálogo se lee la primera vez que se abre el panel.
   const [fixCatalog, setFixCatalog] = useState<FixRequestCode[] | null>(null);
@@ -620,7 +622,7 @@ export function PieceActionsBar({
       fetchEmphasisColors(token, piece.piece_id)
         .then((r) => {
           setEmColors(r.options); setCast(r.cast ?? null); setHistory(r.history ?? []);
-          setShadowOpt(r.shadow ?? null); setRuleColors(r.rule_options ?? []);
+          setShadowOpt(r.shadow ?? null); setRuleColors(r.rule_options ?? []); setIdentityColors(r.identity_options ?? []);
           if (r.overlay !== undefined) { setOverlayVigente(r.overlay); if (!overlayTocado.current) sembrarEditor(r.overlay); }
         })
         .catch(() => { setEmColors([]); setCast(null); setHistory([]); });
@@ -708,7 +710,8 @@ export function PieceActionsBar({
         // 2026-10-20 — la sombra (toda o por tramos) y el color del filete: viajan sólo si se eligieron.
         ...(overlayShadow ? { text_shadow: overlayShadow } : {}),
         ...(parsed.shadow_spans.length ? { shadow_spans: parsed.shadow_spans } : {}),
-        ...(overlayRule ? { rule_role: overlayRule } : {}) };
+        ...(overlayRule ? { rule_role: overlayRule } : {}),
+        ...(overlayIdentity ? { identity_role: overlayIdentity } : {}) };
     }
     setBusy('recompose_image'); setError(null); setRegenNote(null);
     try {
@@ -1056,6 +1059,28 @@ export function PieceActionsBar({
                           aria-label={c.is_default ? `${c.role} (el de siempre)` : c.role}
                           title={c.is_default ? `${c.role} — el de siempre` : c.role}
                           onClick={() => setOverlayRule(c.role)}
+                          className={cn('w-6 h-6 rounded-full border-2 transition-transform',
+                            activo ? 'border-white scale-110' : 'border-zinc-700 hover:border-zinc-400')}
+                          style={{ backgroundColor: c.hex }}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+                {/* 2026-10-20 — el color de la barra lateral (franja de identidad): su color o los accent de la marca. */}
+                {!!identityColors?.length && (
+                  <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Color de la barra lateral">
+                    <span className="text-[10px] text-zinc-400 mr-1">Color de la barra lateral</span>
+                    {identityColors.map((c) => {
+                      const activo = overlayIdentity ? overlayIdentity === c.role : c.is_default;
+                      return (
+                        <button
+                          key={c.role}
+                          role="radio"
+                          aria-checked={activo}
+                          aria-label={c.is_default ? `${c.role} (el de siempre)` : c.role}
+                          title={c.is_default ? `${c.role} — el de siempre` : c.role}
+                          onClick={() => setOverlayIdentity(c.role)}
                           className={cn('w-6 h-6 rounded-full border-2 transition-transform',
                             activo ? 'border-white scale-110' : 'border-zinc-700 hover:border-zinc-400')}
                           style={{ backgroundColor: c.hex }}

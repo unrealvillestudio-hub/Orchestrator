@@ -13,7 +13,7 @@
  *   restore_index?: number         // 2026-10-20 — volver a una imagen anterior (sin generar): ver `volverALaAnterior`
  * }
  * GET /api/recompose-image?piece_id= → { options (colores del resaltado), cast (En la escena), history (anteriores), overlay (texto vigente),
- *   shadow (la sombra de la marca), rule_options (colores del filete) }
+ *   shadow (la sombra de la marca), rule_options (colores del filete), identity_options (colores de la barra lateral) }
  *
  * ─── LOS DOS MODOS (BRIEF-IMG-01 fase 4) ─────────────────────────────────────────────
  * `edit_from_current` CORRIGE SOBRE LA IMAGEN ACTUAL: el generador recibe la imagen limpia vigente
@@ -48,7 +48,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   applyCors, extractToken, ensureArtifact, fetchPiece, PieceNotFound, SB_URL, SB_KEY,
 } from './_calibrationShared.js';
-import { emphasisColorOptions, imageOverlayOf, ruleColorOptions, shadowOptionOf } from './_overlayText.js';
+import { emphasisColorOptions, identityColorOptions, imageOverlayOf, ruleColorOptions, shadowOptionOf } from './_overlayText.js';
 import { sceneCastOf, imageHistoryOf } from './_sceneCast.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
@@ -299,6 +299,7 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
       overlay: imageOverlayOf(piece.assets),
       // 2026-10-20 — la sombra de la marca y los colores posibles del filete (ImageLab ≥ 1.9.0).
       shadow: shadowOptionOf(tokens, brandId), rule_options: ruleColorOptions(tokens, palette, brandId),
+      identity_options: identityColorOptions(tokens, palette, brandId),
     });
   } catch (err) {
     console.error(`[recompose-image] GET colores ${pieceId}: ${String(err)}`);

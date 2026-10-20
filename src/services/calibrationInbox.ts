@@ -664,7 +664,7 @@ export function fetchEmphasisColors(token: string, pieceId: string): Promise<{
   /** 2026-10-20 — el texto que la imagen lleva ahora, leído de la pieza. */
   overlay?: ImageOverlayView | null;
   /** 2026-10-20 — la sombra de la marca y los colores posibles del filete. */
-  shadow?: ShadowOption; rule_options?: EmphasisColorOption[];
+  shadow?: ShadowOption; rule_options?: EmphasisColorOption[]; identity_options?: EmphasisColorOption[];
 }> {
   return req(`/api/recompose-image?piece_id=${encodeURIComponent(pieceId)}`, token);
 }

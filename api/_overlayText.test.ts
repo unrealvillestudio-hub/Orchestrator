@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { imageOverlayOf, overlayMarkupOf, parseOverlayMarkup, emphasisColorOptions, overlayEditorSeed, overlayViewAfterApply, ruleColorOptions, shadowOptionOf, shadowDefaultLabel } from './_overlayText.js';
+import { imageOverlayOf, overlayMarkupOf, parseOverlayMarkup, emphasisColorOptions, overlayEditorSeed, overlayViewAfterApply, ruleColorOptions, shadowOptionOf, shadowDefaultLabel, identityColorOptions } from './_overlayText.js';
 
 /**
  * EL TEXTO DE LA IMAGEN SE ESCRIBE EN LA BANDEJA (2026-10-19). Sam: ajustar «en sitio» dónde se corta cada
@@ -40,11 +40,11 @@ describe('de lo que la imagen lleva al marcado', () => {
 describe('lo que la tarjeta recibe', () => {
   it('lo escrito a mano manda y se marca como escrito', () => {
     expect(imageOverlayOf({ image: { overlay_override: { headline: 'A\nB', subheadline: null, emphasis: ['B'] }, overlay: { headline: 'otro' } } }))
-      .toEqual({ headline: 'A\nB', subheadline: null, emphasis: ['B'], written: true, emphasis_role: null, text_shadow: null, shadow_spans: [], rule_role: null });
+      .toEqual({ headline: 'A\nB', subheadline: null, emphasis: ['B'], written: true, emphasis_role: null, text_shadow: null, shadow_spans: [], rule_role: null, identity_role: null });
   });
   it('sin texto escrito, lo que se compuso', () => {
     expect(imageOverlayOf({ image: { overlay: { headline: 'Compuesto', subheadline: 'Bajada', emphasis: [] } } }))
-      .toEqual({ headline: 'Compuesto', subheadline: 'Bajada', emphasis: [], written: false, emphasis_role: null, text_shadow: null, shadow_spans: [], rule_role: null });
+      .toEqual({ headline: 'Compuesto', subheadline: 'Bajada', emphasis: [], written: false, emphasis_role: null, text_shadow: null, shadow_spans: [], rule_role: null, identity_role: null });
   });
   it('sin imagen o sin texto, null', () => {
     expect(imageOverlayOf({})).toBeNull();
@@ -129,12 +129,12 @@ describe('el editor abre con el texto que la imagen lleva ahora (2026-10-20)', (
   const API = sin(readFileSync(new URL('./recompose-image.ts', import.meta.url), 'utf8'));
   it('la semilla del editor sale del texto vigente, con su resaltado y su color', () => {
     expect(overlayEditorSeed({ headline: 'Uno dos\ntres', subheadline: 'b', emphasis: ['dos'], written: true, emphasis_role: 'accent_x', text_shadow: 'off', shadow_spans: ['Uno'], rule_role: 'r2' }))
-      .toEqual({ markup: '~Uno~ *dos*\ntres', sub: 'b', role: 'accent_x', shadow: 'off', ruleRole: 'r2' });
-    expect(overlayEditorSeed(null)).toEqual({ markup: '', sub: '', role: null, shadow: null, ruleRole: null });
+      .toEqual({ markup: '~Uno~ *dos*\ntres', sub: 'b', role: 'accent_x', shadow: 'off', ruleRole: 'r2', identityRole: null });
+    expect(overlayEditorSeed(null)).toEqual({ markup: '', sub: '', role: null, shadow: null, ruleRole: null, identityRole: null });
   });
   it('después de aplicar, lo vigente es exactamente lo que se mandó; volver al copy no se conoce hasta releer', () => {
     const v = overlayViewAfterApply({ headline: 'A\nB', subheadline: null, emphasis: ['B'], emphasis_role: 'r' });
-    expect(v).toEqual({ headline: 'A\nB', subheadline: null, emphasis: ['B'], written: true, emphasis_role: 'r', text_shadow: null, shadow_spans: [], rule_role: null });
+    expect(v).toEqual({ headline: 'A\nB', subheadline: null, emphasis: ['B'], written: true, emphasis_role: 'r', text_shadow: null, shadow_spans: [], rule_role: null, identity_role: null });
     expect(overlayEditorSeed(v).markup).toBe('A\n*B*');
     expect(overlayViewAfterApply(null)).toBeNull();
   });
@@ -212,10 +212,28 @@ describe('las opciones de sombra y franja salen del dato de la marca (2026-10-20
     expect(API).toContain('imagelab_overlay_tokens?or=(brand_id.eq.${b},brand_id.is.null)');
     expect(MOD).toContain('...(overlayShadow ? { text_shadow: overlayShadow } : {}),');
     expect(MOD).toContain('...(parsed.shadow_spans.length ? { shadow_spans: parsed.shadow_spans } : {}),');
-    expect(MOD).toContain('...(overlayRule ? { rule_role: overlayRule } : {}) };');
+    expect(MOD).toContain('...(overlayRule ? { rule_role: overlayRule } : {}),');
   });
   it('sin marcas en el código', () => {
     const src = readFileSync(new URL('./_overlayText.ts', import.meta.url), 'utf8');
     for (const lit of ['ForumPHs', 'NeuroneSCF', 'terra', 'accent_warm']) expect(src.includes(lit)).toBe(false);
+  });
+});
+
+describe('la barra lateral (2026-10-20)', () => {
+  const PAL = [{ role: 'cobre', hex: '#B5651D' }, { role: 'mar', hex: '#1E6091' }, { role: 'arena', hex: '#E9D8A6' }];
+  const fila = (identity: unknown) => [{ brand_id: 'Viajes', canal: null, tokens: { identity, palette: { headline_emphasis: 'mar' }, layout: { emphasis_contrast: { fallbacks: ['arena'] } } } }];
+  it('su color primero y después los accent de resaltado; sin franja, nada', () => {
+    expect(identityColorOptions(fila({ mode: 'edge_left', palette: 'cobre' }), PAL, 'Viajes').map((o) => [o.role, o.is_default]))
+      .toEqual([['cobre', true], ['mar', false], ['arena', false]]);
+    expect(identityColorOptions(fila({ mode: 'none', palette: 'cobre' }), PAL, 'Viajes')).toEqual([]);
+    expect(identityColorOptions(fila(undefined), PAL, 'Viajes')).toEqual([]);
+  });
+  it('se guarda, se siembra y viaja', () => {
+    expect(imageOverlayOf({ image: { overlay_override: { headline: 'A', identity_role: 'mar' } } })?.identity_role).toBe('mar');
+    expect(overlayViewAfterApply({ headline: 'A', subheadline: null, emphasis: [], identity_role: 'mar' })?.identity_role).toBe('mar');
+    const MOD = readFileSync(new URL('../src/modules/iid/pieceActions.tsx', import.meta.url), 'utf8');
+    expect(MOD).toContain('...(overlayIdentity ? { identity_role: overlayIdentity } : {}) };');
+    expect(readFileSync(new URL('./recompose-image.ts', import.meta.url), 'utf8')).toContain('identity_options: identityColorOptions(tokens, palette, brandId),');
   });
 });
