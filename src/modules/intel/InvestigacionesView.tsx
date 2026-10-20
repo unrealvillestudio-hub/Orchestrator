@@ -1,9 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronDown, ChevronRight, Inbox, RefreshCw, AlertTriangle, Compass, Link2 } from 'lucide-react';
 import { cn } from '../../ui/components';
 import { listTopics, shortId, IidError, type IidSession, type TopicSeed } from '../../services/iidInbound';
 import { StatusBadge, fmtDate } from '../iid/seedUi';
+import { SpeechReader } from '../../ui/SpeechReader';
+import { lecturaDelResultado, lecturaDelMemo } from './readableTopic';
 
 /**
  * InvestigacionesView — los resultados de los seeds de tema, cada uno con su ID.
@@ -15,6 +17,11 @@ import { StatusBadge, fmtDate } from '../iid/seedUi';
  * muestra como fallo.
  *
  * Sólo lectura, a propósito: lo que se hace con cada resultado se decide y se ejecuta en sesión.
+ *
+ * 2026-10-20 — LECTURA EN VOZ ALTA (Sam: «incluyas a cada panel de lectura de los hallazgos incluyendo Memo
+ * completo el tts como está en calibración»). El mismo `SpeechReader` de Calibración: uno para el resultado
+ * (resumen, dominio y hallazgos, en español) y otro para el memo completo (en inglés, como lo escribe el
+ * investigador). Los textos los arma `readableTopic.ts`.
  */
 const EN_CURSO = new Set(['captured', 'researching']);
 const REFRESCO_MS = 30_000;
@@ -99,6 +106,8 @@ function TopicCard({ seed }: { seed: TopicSeed }) {
   const [memo, setMemo] = useState(false);
   const r = seed.research;
   const dom = r?.dominio ?? null;
+  const lecturaResultado = useMemo(() => lecturaDelResultado(seed), [seed]);
+  const lecturaMemo = useMemo(() => lecturaDelMemo(seed), [seed]);
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-700 transition-colors">
@@ -160,6 +169,7 @@ function TopicCard({ seed }: { seed: TopicSeed }) {
                       No se pudo generar el resumen ({r.resumen_error}). El memo completo está abajo.
                     </p>
                   )}
+                  {lecturaResultado && <SpeechReader piece={lecturaResultado} suggestedLang="es" />}
                   {r.resumen && <p className="text-sm text-zinc-300 leading-relaxed">{r.resumen}</p>}
 
                   {dom && (
@@ -224,6 +234,7 @@ function TopicCard({ seed }: { seed: TopicSeed }) {
                     >
                       {memo ? <ChevronDown size={12} /> : <ChevronRight size={12} />} Memo completo
                     </button>
+                    {memo && lecturaMemo && <SpeechReader piece={lecturaMemo} suggestedLang="en" className="mt-2" />}
                     {memo && (
                       <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs text-zinc-400 bg-[#050508] border border-zinc-800 rounded-xl p-3 font-body leading-relaxed">
                         {r.memo}
