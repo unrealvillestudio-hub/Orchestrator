@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { imageOverlayOf, overlayMarkupOf, parseOverlayMarkup, emphasisColorOptions, overlayEditorSeed, overlayViewAfterApply } from './_overlayText.js';
+import { imageOverlayOf, overlayMarkupOf, parseOverlayMarkup, emphasisColorOptions, overlayEditorSeed, overlayViewAfterApply, ruleColorOptions, shadowOptionOf, shadowDefaultLabel } from './_overlayText.js';
 
 /**
  * EL TEXTO DE LA IMAGEN SE ESCRIBE EN LA BANDEJA (2026-10-19). Sam: ajustar «en sitio» dónde se corta cada
@@ -10,11 +10,11 @@ import { imageOverlayOf, overlayMarkupOf, parseOverlayMarkup, emphasisColorOptio
 describe('del marcado a lo que el motor espera', () => {
   it('Enter es línea y *así* es resaltado', () => {
     expect(parseOverlayMarkup('¿Por qué el color\n*SE VA ANTES*\nde la próxima cita?'))
-      .toEqual({ ok: true, headline: '¿Por qué el color\nSE VA ANTES\nde la próxima cita?', emphasis: ['SE VA ANTES'] });
+      .toEqual({ ok: true, headline: '¿Por qué el color\nSE VA ANTES\nde la próxima cita?', emphasis: ['SE VA ANTES'], shadow_spans: [] });
   });
   it('líneas vacías y espacios sobran; un resaltado repetido cuenta una vez', () => {
     expect(parseOverlayMarkup('  Tu *PUNTA* y tu *RAÍZ*  \n\n no tienen la misma edad. '))
-      .toEqual({ ok: true, headline: 'Tu PUNTA y tu RAÍZ\nno tienen la misma edad.', emphasis: ['PUNTA', 'RAÍZ'] });
+      .toEqual({ ok: true, headline: 'Tu PUNTA y tu RAÍZ\nno tienen la misma edad.', emphasis: ['PUNTA', 'RAÍZ'], shadow_spans: [] });
   });
   it('lo que no se puede componer se dice antes de mandar nada', () => {
     expect(parseOverlayMarkup('').ok).toBe(false);
@@ -33,18 +33,18 @@ describe('de lo que la imagen lleva al marcado', () => {
   });
   it('ida y vuelta: el marcado de lo compuesto se vuelve a leer igual', () => {
     const h = '¿Por qué el color SE VA ANTES de la próxima cita?';
-    expect(parseOverlayMarkup(overlayMarkupOf(h, ['SE VA ANTES']))).toEqual({ ok: true, headline: h, emphasis: ['SE VA ANTES'] });
+    expect(parseOverlayMarkup(overlayMarkupOf(h, ['SE VA ANTES']))).toEqual({ ok: true, headline: h, emphasis: ['SE VA ANTES'], shadow_spans: [] });
   });
 });
 
 describe('lo que la tarjeta recibe', () => {
   it('lo escrito a mano manda y se marca como escrito', () => {
     expect(imageOverlayOf({ image: { overlay_override: { headline: 'A\nB', subheadline: null, emphasis: ['B'] }, overlay: { headline: 'otro' } } }))
-      .toEqual({ headline: 'A\nB', subheadline: null, emphasis: ['B'], written: true, emphasis_role: null });
+      .toEqual({ headline: 'A\nB', subheadline: null, emphasis: ['B'], written: true, emphasis_role: null, text_shadow: null, shadow_spans: [], rule_role: null });
   });
   it('sin texto escrito, lo que se compuso', () => {
     expect(imageOverlayOf({ image: { overlay: { headline: 'Compuesto', subheadline: 'Bajada', emphasis: [] } } }))
-      .toEqual({ headline: 'Compuesto', subheadline: 'Bajada', emphasis: [], written: false, emphasis_role: null });
+      .toEqual({ headline: 'Compuesto', subheadline: 'Bajada', emphasis: [], written: false, emphasis_role: null, text_shadow: null, shadow_spans: [], rule_role: null });
   });
   it('sin imagen o sin texto, null', () => {
     expect(imageOverlayOf({})).toBeNull();
@@ -128,13 +128,13 @@ describe('el editor abre con el texto que la imagen lleva ahora (2026-10-20)', (
   const MOD = sin(readFileSync(new URL('../src/modules/iid/pieceActions.tsx', import.meta.url), 'utf8'));
   const API = sin(readFileSync(new URL('./recompose-image.ts', import.meta.url), 'utf8'));
   it('la semilla del editor sale del texto vigente, con su resaltado y su color', () => {
-    expect(overlayEditorSeed({ headline: 'Uno dos\ntres', subheadline: 'b', emphasis: ['dos'], written: true, emphasis_role: 'accent_x' }))
-      .toEqual({ markup: 'Uno *dos*\ntres', sub: 'b', role: 'accent_x' });
-    expect(overlayEditorSeed(null)).toEqual({ markup: '', sub: '', role: null });
+    expect(overlayEditorSeed({ headline: 'Uno dos\ntres', subheadline: 'b', emphasis: ['dos'], written: true, emphasis_role: 'accent_x', text_shadow: 'off', shadow_spans: ['Uno'], rule_role: 'r2' }))
+      .toEqual({ markup: '~Uno~ *dos*\ntres', sub: 'b', role: 'accent_x', shadow: 'off', ruleRole: 'r2' });
+    expect(overlayEditorSeed(null)).toEqual({ markup: '', sub: '', role: null, shadow: null, ruleRole: null });
   });
   it('después de aplicar, lo vigente es exactamente lo que se mandó; volver al copy no se conoce hasta releer', () => {
     const v = overlayViewAfterApply({ headline: 'A\nB', subheadline: null, emphasis: ['B'], emphasis_role: 'r' });
-    expect(v).toEqual({ headline: 'A\nB', subheadline: null, emphasis: ['B'], written: true, emphasis_role: 'r' });
+    expect(v).toEqual({ headline: 'A\nB', subheadline: null, emphasis: ['B'], written: true, emphasis_role: 'r', text_shadow: null, shadow_spans: [], rule_role: null });
     expect(overlayEditorSeed(v).markup).toBe('A\n*B*');
     expect(overlayViewAfterApply(null)).toBeNull();
   });
@@ -153,5 +153,69 @@ describe('el editor abre con el texto que la imagen lleva ahora (2026-10-20)', (
       expect(src).toContain('if (alive && !rehecha.current) { setArtHtml(r.html); setArtUrl(r.artifact_url); }');
       expect(src).toContain('if (r.html) { rehecha.current = true; setArtHtml(r.html); setArtErr(null); }');
     }
+  });
+});
+
+describe('la sombra y la franja (2026-10-20)', () => {
+  // Sam, 2026-10-20: «quitar o poner la sombra de las letras… en palabras» y «cambiar el accent color de la franja».
+  it('~así~ marca un tramo con la sombra al revés; se puede cruzar con un resaltado', () => {
+    expect(parseOverlayMarkup('La ~cuota *no* se~ vota'))
+      .toEqual({ ok: true, headline: 'La cuota no se vota', emphasis: ['no'], shadow_spans: ['cuota no se'] });
+    expect(parseOverlayMarkup('*Uno ~dos* tres~'))
+      .toEqual({ ok: true, headline: 'Uno dos tres', emphasis: ['Uno dos'], shadow_spans: ['dos tres'] });
+  });
+  it('lo que no se puede componer se dice', () => {
+    expect(parseOverlayMarkup('Hola ~mundo').ok).toBe(false);
+    expect(parseOverlayMarkup('Hola ~~ mundo').ok).toBe(false);
+    expect(parseOverlayMarkup('~a~ ~b~ ~c~ ~d~').ok).toBe(false);
+  });
+  it('ida y vuelta con resaltado y sombra a la vez', () => {
+    const h = 'La cuota extraordinaria no se vota a mano alzada';
+    const m = overlayMarkupOf(h, ['no se vota'], ['cuota extraordinaria no']);
+    expect(m).toBe('La ~cuota extraordinaria *no~ se vota* a mano alzada');
+    expect(parseOverlayMarkup(m)).toEqual({ ok: true, headline: h, emphasis: ['no se vota'], shadow_spans: ['cuota extraordinaria no'] });
+  });
+  it('la tarjeta recibe la sombra y el filete elegidos; un valor raro no se inventa', () => {
+    const v = imageOverlayOf({ image: { overlay_override: { headline: 'A b', emphasis: [], text_shadow: 'on', shadow_spans: ['b'], rule_role: 'mar' } } });
+    expect(v).toMatchObject({ text_shadow: 'on', shadow_spans: ['b'], rule_role: 'mar' });
+    expect(imageOverlayOf({ image: { overlay_override: { headline: 'A', text_shadow: 'tal vez' } } })?.text_shadow).toBeNull();
+  });
+});
+
+describe('las opciones de sombra y franja salen del dato de la marca (2026-10-20)', () => {
+  // Marca N+1 inventada: una agencia de viajes en Chile con su paleta y sus roles.
+  const PAL = [{ role: 'cobre', hex: '#B5651D' }, { role: 'mar', hex: '#1E6091' }, { role: 'arena', hex: '#E9D8A6' }, { role: 'noche', hex: '#111111' }];
+  const FILAS = [
+    { brand_id: null, canal: null, tokens: { layout: { text_effect: { kind: 'shadow', color: '#000000', when: 'low_contrast' } } } },
+    { brand_id: 'Viajes', canal: null, tokens: { layout: { rule: { enabled: true, palette: 'cobre' }, emphasis_contrast: { fallbacks: ['arena', 'inexistente'] } }, palette: { headline_emphasis: 'mar' } } },
+    { brand_id: 'Viajes', canal: 'CAROUSEL', tokens: { layout: { rule: { enabled: true, palette: 'noche' } } } },
+  ];
+  it('la franja: su color primero, después los accent de resaltado; sin repetir y sólo con hex', () => {
+    expect(ruleColorOptions(FILAS, PAL, 'Viajes')).toEqual([
+      { role: 'cobre', hex: '#B5651D', is_default: true }, { role: 'mar', hex: '#1E6091', is_default: false }, { role: 'arena', hex: '#E9D8A6', is_default: false },
+    ]);
+  });
+  it('sin franja encendida en la capa de la marca, nada que elegir', () => {
+    expect(ruleColorOptions([{ brand_id: 'Viajes', canal: null, tokens: { layout: { rule: { enabled: false, palette: 'cobre' } } } }], PAL, 'Viajes')).toEqual([]);
+  });
+  it('la sombra: la de la marca o, si no tiene, la regla global; sin ninguna, no se ofrece', () => {
+    expect(shadowOptionOf(FILAS, 'Viajes')).toEqual({ declared: true, when: 'low_contrast' });
+    expect(shadowOptionOf([{ brand_id: 'Viajes', canal: null, tokens: { layout: { text_effect: { kind: 'shadow' } } } }, ...FILAS], 'Viajes')).toEqual({ declared: true, when: 'always' });
+    expect(shadowOptionOf([], 'Viajes')).toEqual({ declared: false, when: null });
+    expect(shadowDefaultLabel({ declared: true, when: 'low_contrast' })).toBe('sólo cuando el fondo no deja leer');
+  });
+  it('el cableado: el GET sirve las opciones y el editor manda lo elegido sólo si se eligió', () => {
+    const sinC = (s: string) => s.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+    const MOD = sinC(readFileSync(new URL('../src/modules/iid/pieceActions.tsx', import.meta.url), 'utf8'));
+    const API = sinC(readFileSync(new URL('./recompose-image.ts', import.meta.url), 'utf8'));
+    expect(API).toContain('shadow: shadowOptionOf(tokens, brandId), rule_options: ruleColorOptions(tokens, palette, brandId),');
+    expect(API).toContain('imagelab_overlay_tokens?or=(brand_id.eq.${b},brand_id.is.null)');
+    expect(MOD).toContain('...(overlayShadow ? { text_shadow: overlayShadow } : {}),');
+    expect(MOD).toContain('...(parsed.shadow_spans.length ? { shadow_spans: parsed.shadow_spans } : {}),');
+    expect(MOD).toContain('...(overlayRule ? { rule_role: overlayRule } : {}) };');
+  });
+  it('sin marcas en el código', () => {
+    const src = readFileSync(new URL('./_overlayText.ts', import.meta.url), 'utf8');
+    for (const lit of ['ForumPHs', 'NeuroneSCF', 'terra', 'accent_warm']) expect(src.includes(lit)).toBe(false);
   });
 });

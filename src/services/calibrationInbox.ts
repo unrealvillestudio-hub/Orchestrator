@@ -30,7 +30,7 @@ import { fetchWithTimeout, mensajeDeFallo } from './fetchWithTimeout';
 // CHIP DE REGLA — la forma del mapa de enunciados es la del server, importada, no espejada.
 import type { RuleTexts } from '../../api/_ruleCodes';
 import type { FixRequestCode, FixImageMode } from '../../api/_fixRequest';
-import type { ImageOverlayView, EmphasisColorOption } from '../../api/_overlayText';
+import type { ImageOverlayView, EmphasisColorOption, OverlayOverrideOut, ShadowOption } from '../../api/_overlayText';
 import type { SceneCast, ImageHistoryEntry } from '../../api/_sceneCast';
 import type { HighlightFields } from '../../api/_highlights';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
@@ -630,7 +630,7 @@ export function recomposeImage(
   input: {
     piece_id: string; visual_directive: string; edit_reason?: string | null; mode?: 'edit_from_current' | 'same_scene' | 'regenerate_full';
     // 2026-10-19 — el texto de la imagen escrito en la bandeja. Con él no se regenera la escena.
-    overlay_override?: { headline: string; subheadline: string | null; emphasis: string[]; emphasis_role?: string | null } | null;
+    overlay_override?: OverlayOverrideOut | null;
   },
 ): Promise<{
   ok: true; piece_id: string; image_url: string | null; composed: boolean;
@@ -663,6 +663,8 @@ export function fetchEmphasisColors(token: string, pieceId: string): Promise<{
   cast?: SceneCast; history?: ImageHistoryEntry[];
   /** 2026-10-20 — el texto que la imagen lleva ahora, leído de la pieza. */
   overlay?: ImageOverlayView | null;
+  /** 2026-10-20 — la sombra de la marca y los colores posibles del filete. */
+  shadow?: ShadowOption; rule_options?: EmphasisColorOption[];
 }> {
   return req(`/api/recompose-image?piece_id=${encodeURIComponent(pieceId)}`, token);
 }

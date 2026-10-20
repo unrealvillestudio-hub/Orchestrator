@@ -12,7 +12,8 @@
  *   mode?: 'edit_from_current' | 'same_scene' | 'regenerate_full'   // BRIEF-IMG-01 fase 4 (2026-09-27); same_scene 2026-10-20
  *   restore_index?: number         // 2026-10-20 — volver a una imagen anterior (sin generar): ver `volverALaAnterior`
  * }
- * GET /api/recompose-image?piece_id= → { options (colores del resaltado), cast (En la escena), history (anteriores), overlay (texto vigente) }
+ * GET /api/recompose-image?piece_id= → { options (colores del resaltado), cast (En la escena), history (anteriores), overlay (texto vigente),
+ *   shadow (la sombra de la marca), rule_options (colores del filete) }
  *
  * ─── LOS DOS MODOS (BRIEF-IMG-01 fase 4) ─────────────────────────────────────────────
  * `edit_from_current` CORRIGE SOBRE LA IMAGEN ACTUAL: el generador recibe la imagen limpia vigente
@@ -47,7 +48,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   applyCors, extractToken, ensureArtifact, fetchPiece, PieceNotFound, SB_URL, SB_KEY,
 } from './_calibrationShared.js';
-import { emphasisColorOptions, imageOverlayOf } from './_overlayText.js';
+import { emphasisColorOptions, imageOverlayOf, ruleColorOptions, shadowOptionOf } from './_overlayText.js';
 import { sceneCastOf, imageHistoryOf } from './_sceneCast.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
@@ -279,7 +280,8 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
     };
     const b = encodeURIComponent(brandId);
     const [tokens, palette, personLinks, places] = await Promise.all([
-      leer(`imagelab_overlay_tokens?brand_id=eq.${b}&active=eq.true&select=brand_id,canal,tokens`),
+      // 2026-10-20 — también la capa global: la sombra de una marca sin sombra propia sale de ahí.
+      leer(`imagelab_overlay_tokens?or=(brand_id.eq.${b},brand_id.is.null)&active=eq.true&select=brand_id,canal,tokens`),
       leer(`brand_palette?brand_id=eq.${b}&select=role,hex`),
       // 2026-10-20 — EN LA ESCENA: las personas y los lugares de la marca que se pueden poner en ella.
       leer(`brand_persons?brand_id=eq.${b}&active=eq.true&select=person_blueprint_id`),
@@ -295,6 +297,8 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
       cast: sceneCastOf(persons, places, image), history: imageHistoryOf(image),
       // 2026-10-20 — el texto que la imagen lleva AHORA: el editor se siembra con esto, no con lo que la tarjeta trajo al cargar.
       overlay: imageOverlayOf(piece.assets),
+      // 2026-10-20 — la sombra de la marca y los colores posibles del filete (ImageLab ≥ 1.9.0).
+      shadow: shadowOptionOf(tokens, brandId), rule_options: ruleColorOptions(tokens, palette, brandId),
     });
   } catch (err) {
     console.error(`[recompose-image] GET colores ${pieceId}: ${String(err)}`);

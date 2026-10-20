@@ -9,7 +9,7 @@ import {
 } from '../../services/calibrationInbox';
 import { savePieceEdit } from '../../services/challengedInbox';
 import { effectiveFixImageMode, type FixRequestCode, type FixImageMode } from '../../../api/_fixRequest';
-import { overlayEditorSeed, overlayViewAfterApply, parseOverlayMarkup, type ImageOverlayView, type EmphasisColorOption } from '../../../api/_overlayText';
+import { overlayEditorSeed, overlayViewAfterApply, parseOverlayMarkup, shadowDefaultLabel, type ImageOverlayView, type EmphasisColorOption, type OverlayOverrideOut, type ShadowOption } from '../../../api/_overlayText';
 import { highlightPayload, HIGHLIGHT_NOTE_MAX, type HighlightInput } from '../../../api/_highlights';
 import { SCENE_SLOTS, slotDirective, SLOT_CHANGE_MODE, MODE_HELP, type SceneCast, type ImageHistoryEntry } from '../../../api/_sceneCast';
 import { fmtInZone } from './pieceUi';
@@ -401,7 +401,15 @@ export type RegenTab = 'scene' | 'text';
 export const OVERLAY_EDITOR_FOOT =
   'No regenera la escena: recompone el texto sobre la imagen limpia que ya existe (0 USD). La pieza sigue en la bandeja.';
 export const OVERLAY_EDITOR_HELP =
-  'Enter = nueva línea. *Así* = resaltado. Cambia sólo la imagen: el título y el gancho de la pieza no se tocan.';
+  'Enter = nueva línea. *Así* = resaltado. ~Así~ = ese tramo con la sombra al revés del resto (sin sombra si el texto ' +
+  'la lleva; con sombra si no). Cambia sólo la imagen: el título y el gancho de la pieza no se tocan.';
+
+/** 2026-10-20 — la sombra de todo el texto. `null` = lo que la marca hace (se dice cuál en el botón). */
+export const SHADOW_CHOICES: ReadonlyArray<{ value: 'on' | 'off' | null; label: string }> = [
+  { value: null, label: 'Como la marca' },
+  { value: 'on', label: 'Con sombra' },
+  { value: 'off', label: 'Sin sombra' },
+];
 
 /** Marca o desmarca una pill. Conserva el orden en que se marcaron. */
 export function toggleFixCode(list: readonly string[], code: string): string[] {
@@ -553,6 +561,11 @@ export function PieceActionsBar({
   // 2026-10-19 — el color del resaltado: las opciones de la marca (se leen al abrir el editor) y la elegida.
   const [emColors, setEmColors] = useState<EmphasisColorOption[] | null>(null);
   const [overlayRole, setOverlayRole] = useState<string | null>(null);
+  // 2026-10-20 — la sombra de todo el texto (null = la de la marca) y el color del filete, con sus opciones.
+  const [overlayShadow, setOverlayShadow] = useState<'on' | 'off' | null>(null);
+  const [overlayRule, setOverlayRule] = useState<string | null>(null);
+  const [shadowOpt, setShadowOpt] = useState<ShadowOption | null>(null);
+  const [ruleColors, setRuleColors] = useState<EmphasisColorOption[] | null>(null);
   // 2026-10-20 — EL TEXTO VIGENTE DE LA IMAGEN. `piece.image_overlay` es el de cuando cargó la bandeja y no cambia al
   // corregir: sembrar el editor con él volvía a mandar el texto viejo (medido en 5b842958). Se guarda lo último aplicado
   // y se reemplaza por lo que la pieza tiene en la base en cuanto llega la lectura; si ya se escribió, no se pisa.
@@ -561,6 +574,7 @@ export function PieceActionsBar({
   const sembrarEditor = (view: ImageOverlayView | null) => {
     const s = overlayEditorSeed(view);
     setOverlayMarkup(s.markup); setOverlaySub(s.sub); setOverlayRole(s.role);
+    setOverlayShadow(s.shadow); setOverlayRule(s.ruleRole);
   };
   // 2026-10-19 — las pills del fixable. El catálogo se lee la primera vez que se abre el panel.
   const [fixCatalog, setFixCatalog] = useState<FixRequestCode[] | null>(null);
@@ -606,6 +620,7 @@ export function PieceActionsBar({
       fetchEmphasisColors(token, piece.piece_id)
         .then((r) => {
           setEmColors(r.options); setCast(r.cast ?? null); setHistory(r.history ?? []);
+          setShadowOpt(r.shadow ?? null); setRuleColors(r.rule_options ?? []);
           if (r.overlay !== undefined) { setOverlayVigente(r.overlay); if (!overlayTocado.current) sembrarEditor(r.overlay); }
         })
         .catch(() => { setEmColors([]); setCast(null); setHistory([]); });
@@ -684,12 +699,16 @@ export function PieceActionsBar({
 
   /** 2026-10-19 — el texto de la imagen. `clear` = volver al texto del copy. */
   const submitOverlay = async (clear: boolean) => {
-    let override: { headline: string; subheadline: string | null; emphasis: string[]; emphasis_role?: string } | null = null;
+    let override: OverlayOverrideOut | null = null;
     if (!clear) {
       const parsed = parseOverlayMarkup(overlayMarkup);
       if (!parsed.ok) { setError({ message: parsed.error, detail: null }); return; }
       override = { headline: parsed.headline, subheadline: overlaySub.trim() || null, emphasis: parsed.emphasis,
-        ...(overlayRole && parsed.emphasis.length ? { emphasis_role: overlayRole } : {}) };
+        ...(overlayRole && parsed.emphasis.length ? { emphasis_role: overlayRole } : {}),
+        // 2026-10-20 — la sombra (toda o por tramos) y el color del filete: viajan sólo si se eligieron.
+        ...(overlayShadow ? { text_shadow: overlayShadow } : {}),
+        ...(parsed.shadow_spans.length ? { shadow_spans: parsed.shadow_spans } : {}),
+        ...(overlayRule ? { rule_role: overlayRule } : {}) };
     }
     setBusy('recompose_image'); setError(null); setRegenNote(null);
     try {
@@ -997,6 +1016,46 @@ export function PieceActionsBar({
                           // 2026-10-20 — el chip tocado viaja SIEMPRE, también el de siempre: sin rol, el compositor corrige el color
                           // por contraste y lo cambia (medido en 6738a414: se eligió el de siempre y salió accent_3).
                           onClick={() => setOverlayRole(c.role)}
+                          className={cn('w-6 h-6 rounded-full border-2 transition-transform',
+                            activo ? 'border-white scale-110' : 'border-zinc-700 hover:border-zinc-400')}
+                          style={{ backgroundColor: c.hex }}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+                {/* 2026-10-20 — la sombra de todo el texto. Sólo si la marca (o la regla del sistema) declara una. */}
+                {shadowOpt?.declared && (
+                  <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Sombra de las letras">
+                    <span className="text-[10px] text-zinc-400 mr-1">Sombra</span>
+                    {SHADOW_CHOICES.map((c) => (
+                      <button
+                        key={c.label}
+                        role="radio"
+                        aria-checked={overlayShadow === c.value}
+                        onClick={() => setOverlayShadow(c.value)}
+                        className={cn('px-2 py-0.5 rounded-lg text-[11px] border transition-colors',
+                          overlayShadow === c.value ? 'border-violet-400/70 text-violet-200 bg-violet-500/10' : 'border-zinc-700 text-zinc-400 hover:text-zinc-200')}
+                      >
+                        {c.value === null ? `Como la marca (${shadowDefaultLabel(shadowOpt)})` : c.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {/* 2026-10-20 — el color de la franja bajo el titular: su color o los accent de la marca. */}
+                {!!ruleColors?.length && (
+                  <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Color de la franja">
+                    <span className="text-[10px] text-zinc-400 mr-1">Color de la franja</span>
+                    {ruleColors.map((c) => {
+                      const activo = overlayRule ? overlayRule === c.role : c.is_default;
+                      return (
+                        <button
+                          key={c.role}
+                          role="radio"
+                          aria-checked={activo}
+                          aria-label={c.is_default ? `${c.role} (el de siempre)` : c.role}
+                          title={c.is_default ? `${c.role} — el de siempre` : c.role}
+                          onClick={() => setOverlayRule(c.role)}
                           className={cn('w-6 h-6 rounded-full border-2 transition-transform',
                             activo ? 'border-white scale-110' : 'border-zinc-700 hover:border-zinc-400')}
                           style={{ backgroundColor: c.hex }}
