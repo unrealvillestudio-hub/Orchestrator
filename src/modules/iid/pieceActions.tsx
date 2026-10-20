@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle2, XCircle, Archive, Wrench, ImagePlay, PenLine, Search } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
@@ -9,7 +9,7 @@ import {
 } from '../../services/calibrationInbox';
 import { savePieceEdit } from '../../services/challengedInbox';
 import { effectiveFixImageMode, type FixRequestCode, type FixImageMode } from '../../../api/_fixRequest';
-import { overlayMarkupOf, parseOverlayMarkup, type ImageOverlayView, type EmphasisColorOption } from '../../../api/_overlayText';
+import { overlayEditorSeed, overlayViewAfterApply, parseOverlayMarkup, type ImageOverlayView, type EmphasisColorOption } from '../../../api/_overlayText';
 import { highlightPayload, HIGHLIGHT_NOTE_MAX, type HighlightInput } from '../../../api/_highlights';
 import { SCENE_SLOTS, slotDirective, SLOT_CHANGE_MODE, MODE_HELP, type SceneCast, type ImageHistoryEntry } from '../../../api/_sceneCast';
 import { fmtInZone } from './pieceUi';
@@ -553,6 +553,15 @@ export function PieceActionsBar({
   // 2026-10-19 — el color del resaltado: las opciones de la marca (se leen al abrir el editor) y la elegida.
   const [emColors, setEmColors] = useState<EmphasisColorOption[] | null>(null);
   const [overlayRole, setOverlayRole] = useState<string | null>(null);
+  // 2026-10-20 — EL TEXTO VIGENTE DE LA IMAGEN. `piece.image_overlay` es el de cuando cargó la bandeja y no cambia al
+  // corregir: sembrar el editor con él volvía a mandar el texto viejo (medido en 5b842958). Se guarda lo último aplicado
+  // y se reemplaza por lo que la pieza tiene en la base en cuanto llega la lectura; si ya se escribió, no se pisa.
+  const [overlayVigente, setOverlayVigente] = useState<ImageOverlayView | null>(piece.image_overlay ?? null);
+  const overlayTocado = useRef(false);
+  const sembrarEditor = (view: ImageOverlayView | null) => {
+    const s = overlayEditorSeed(view);
+    setOverlayMarkup(s.markup); setOverlaySub(s.sub); setOverlayRole(s.role);
+  };
   // 2026-10-19 — las pills del fixable. El catálogo se lee la primera vez que se abre el panel.
   const [fixCatalog, setFixCatalog] = useState<FixRequestCode[] | null>(null);
   const [fixCatalogError, setFixCatalogError] = useState<string | null>(null);
@@ -590,13 +599,15 @@ export function PieceActionsBar({
     if (p === 'regen') {
       // El editor abre con el texto que la imagen lleva HOY, con su énfasis marcado.
       setRegenTab('scene');
-      setOverlayMarkup(overlayMarkupOf(piece.image_overlay?.headline ?? null, piece.image_overlay?.emphasis ?? []));
-      setOverlaySub(piece.image_overlay?.subheadline ?? '');
-      setOverlayRole(piece.image_overlay?.emphasis_role ?? null);
+      overlayTocado.current = false;
+      sembrarEditor(overlayVigente);
       // Sin opciones (o si la lectura falla) el editor funciona igual, sin selector de color.
       // 2026-10-20 — la misma lectura trae En la escena y las imágenes anteriores; se relee cada vez (el historial cambia).
       fetchEmphasisColors(token, piece.piece_id)
-        .then((r) => { setEmColors(r.options); setCast(r.cast ?? null); setHistory(r.history ?? []); })
+        .then((r) => {
+          setEmColors(r.options); setCast(r.cast ?? null); setHistory(r.history ?? []);
+          if (r.overlay !== undefined) { setOverlayVigente(r.overlay); if (!overlayTocado.current) sembrarEditor(r.overlay); }
+        })
         .catch(() => { setEmColors([]); setCast(null); setHistory([]); });
     }
     if (p === 'approve') setHl({ copy: false, image: false, copyNote: '', imageNote: '' });
@@ -683,6 +694,7 @@ export function PieceActionsBar({
     setBusy('recompose_image'); setError(null); setRegenNote(null);
     try {
       const r = await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: '', overlay_override: override });
+      setOverlayVigente(overlayViewAfterApply(override));
       onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: r.composed, refreshed: r.artifact_refreshed, posts: r.scheduled_posts_updated });
       setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated });
       setPanel(null);
@@ -953,7 +965,7 @@ export function PieceActionsBar({
             )}
 
             {panel === 'regen' && regenTab === 'text' && (
-              <div className="space-y-1.5">
+              <div className="space-y-1.5" onChangeCapture={() => { overlayTocado.current = true; }} onClickCapture={() => { overlayTocado.current = true; }}>
                 <p className="text-[10px] text-zinc-400 leading-snug">{OVERLAY_EDITOR_HELP}</p>
                 <textarea
                   value={overlayMarkup}
@@ -993,7 +1005,7 @@ export function PieceActionsBar({
                     })}
                   </div>
                 )}
-                {piece.image_overlay?.written && (
+                {overlayVigente?.written && (
                   <button
                     onClick={() => submitOverlay(true)}
                     disabled={!!busy}

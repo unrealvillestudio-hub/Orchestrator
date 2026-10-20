@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { RefreshCw, Inbox, AlertTriangle, Send, Radio, RadioTower, Lock } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
@@ -308,12 +308,15 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
   // mecanismo que la bandeja de calibración: srcdoc, porque el CDN sirve text/plain.
   const [artHtml, setArtHtml] = useState<string | null>(null);
   const [artUrl, setArtUrl]   = useState<string | null>(null);
+  const rehecha = useRef(false);
   const [artErr, setArtErr]   = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
+    rehecha.current = false;
     renderArtifact(token, piece.piece_id)
-      .then((r) => { if (alive) { setArtHtml(r.html); setArtUrl(r.artifact_url); } })
+      // 2026-10-20 — si la pieza ya se corrigió mientras esta lectura viajaba, su HTML es el de ANTES: no pisa la vista.
+      .then((r) => { if (alive && !rehecha.current) { setArtHtml(r.html); setArtUrl(r.artifact_url); } })
       .catch((err) => { if (alive) setArtErr(err instanceof CalibrationError ? err.message : 'No se pudo renderizar el artefacto.'); });
     return () => { alive = false; };
   }, [piece.piece_id, token]);
@@ -439,7 +442,7 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
           token={token}
           onResolved={(id) => onResolved(id)}
           onRegenerated={(r) => {
-            if (r.html) { setArtHtml(r.html); setArtErr(null); }
+            if (r.html) { rehecha.current = true; setArtHtml(r.html); setArtErr(null); }
             if (r.artifact_url) setArtUrl(r.artifact_url);
           }}
         />
