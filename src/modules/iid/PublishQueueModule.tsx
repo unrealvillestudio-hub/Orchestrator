@@ -225,9 +225,9 @@ function ScheduledQueue({ session }: { session: IidSession }) {
           onChange={(v) => apply({ gen: v as GenerationFilter })}
           options={[['all', 'Todas'], ['current', 'Solo corregido']]}
         />
-        {/* U-7 — EL ESTADO DE LA PIEZA, y va acá y no en calibración: esa bandeja lista un
+        {/* U-7 — EL ESTADO DE LA PIEZA, y va aquí y no en calibración: esa bandeja lista un
             solo estado por contrato, así que un filtro de estado allí no filtraría nada.
-            Las opciones salen del LOTE, nunca de una lista escrita acá: si el carril empieza
+            Las opciones salen del LOTE, nunca de una lista escrita aquí: si el carril empieza
             a producir un estado nuevo, aparece solo. */}
         <Selector
           label="Estado"
@@ -276,7 +276,7 @@ function ScheduledQueue({ session }: { session: IidSession }) {
 }
 
 // ── Canal de destino ─────────────────────────────────────────────────────────────
-// El nombre del canal y su proveedor salen del dato. Acá no hay lista de canales.
+// El nombre del canal y su proveedor salen del dato. Aquí no hay lista de canales.
 function ChannelBadge({ channel }: { channel: ChannelInfo }) {
   const operational = channel.status === 'operational';
   return (
@@ -340,7 +340,7 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
 
         {/* Cabecera (la MISMA que la bandeja de calibración) + canal + watcher + generación.
             FIX-CARD-06: identidad y conteos salen de `PieceHeader`; el canal es lo propio
-            de esta bandeja y por eso se queda acá. */}
+            de esta bandeja y por eso se queda aquí. */}
         <div className="hidden md:block space-y-1.5">
           <PieceHeader piece={piece} />
           <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono text-zinc-600">

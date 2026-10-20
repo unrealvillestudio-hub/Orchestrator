@@ -70,7 +70,7 @@ describe('por qué versión va una pieza', () => {
   });
 
   it('EDITADA Y SIN RASTRO NO ES v1: no se sabe, y eso se dice', () => {
-    // El caso de las 32 piezas medidas el 2026-09-22. Un `1` acá afirmaría «está como nació».
+    // El caso de las 32 piezas medidas el 2026-09-22. Un `1` aquí afirmaría «está como nació».
     const f = fixFlowOf(
       { id: 'p1', challenged_at: RETO, edited_at: '2026-09-20T11:00:00.000Z' },
       [],
@@ -161,7 +161,7 @@ describe('nada de esto sabe de marcas', () => {
     }
     // Y tampoco una lista cerrada de campos: `field` llega como DATO. Medido el 2026-09-22, la
     // tabla ya trae diez valores distintos, entre ellos rutas dentro de `assets`; una lista escrita
-    // acá los escondería en silencio.
+    // aquí los escondería en silencio.
     expect(src).not.toMatch(/\[\s*'title'\s*,\s*'body'\s*\]/);
   });
 

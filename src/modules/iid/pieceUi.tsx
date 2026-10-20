@@ -25,7 +25,7 @@ import type {
  * del bloque de procedencia habrían divergido en el primer cambio, y la procedencia es
  * justamente el dato que las dos vistas tienen que contar igual.
  *
- * Acá vive lo PRESENTACIONAL y transversal. Lo específico de cada bandeja (qué acciones
+ * Aquí vive lo PRESENTACIONAL y transversal. Lo específico de cada bandeja (qué acciones
  * hay, qué se lista) se queda en su módulo.
  * ════════════════════════════════════════════════════════════════════════════ */
 
@@ -51,7 +51,7 @@ export function fmtDate(iso: string | null | undefined): string {
 // este repo ya tiene el precedente documentado con el idioma. Si hace falta formatear una
 // fecha con huso en cualquier otra pantalla, se importa ésta.
 //
-// NI UN HUSO NI UN DESFASE ESCRITOS ACÁ. El `timeZone` llega como dato desde
+// NI UN HUSO NI UN DESFASE ESCRITOS AQUÍ. El `timeZone` llega como dato desde
 // `public.brands.publish_timezone`, en forma IANA. Un desfase cableado acertaría hasta el
 // cambio de horario y luego mentiría en silencio; el nombre IANA no.
 //
@@ -122,7 +122,7 @@ export function fmtInZone(iso: string | null | undefined, timeZone: string | nul
 //     otra pieza aprobada antes se la lleva.
 //
 // Llamar «fecha de publicación» a las dos sería tener dos cosas distintas con el mismo
-// nombre. Los dos bloques viven acá, juntos, por el mismo motivo que el formateador: separados
+// nombre. Los dos bloques viven aquí, juntos, por el mismo motivo que el formateador: separados
 // divergen.
 
 const DATE_ROW = 'flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] font-mono leading-snug border';
@@ -161,7 +161,7 @@ export function SlotsNotice({ source }: { source: 'ok' | 'unavailable' | undefin
         <p className="font-semibold text-amber-200">Las fechas de esta pantalla faltan, no están vacías.</p>
         <p className="mt-1 text-amber-300/75">
           No se pudo leer <span className="text-amber-200">intel.brand_publish_slots</span>, así que ninguna
-          tarjeta muestra franja. Que no aparezca una fecha acá no significa que la pieza no la tenga.
+          tarjeta muestra franja. Que no aparezca una fecha aquí no significa que la pieza no la tenga.
         </p>
       </div>
     </div>
@@ -175,7 +175,7 @@ function ZoneMissing({ what }: { what: string }) {
       <CalendarClock size={13} className="shrink-0 mt-0.5" />
       <span>
         {what} — el huso de esta marca no está sembrado (<span className="text-amber-200">public.brands.publish_timezone</span>),
-        así que la hora no se sitúa. Sembrar esa fila la muestra; acá no se supone ninguna.
+        así que la hora no se sitúa. Sembrar esa fila la muestra; aquí no se supone ninguna.
       </span>
     </div>
   );
@@ -701,7 +701,7 @@ export function CopyableId({ id, title }: { id: string; title: string }) {
 // Pintar verde lo que nadie midió es una ausencia con forma de aprobación, que es el mismo
 // defecto que ya hizo rechazar material bueno en esta bandeja (ver `WatcherBadge`).
 //
-// NINGÚN NÚMERO DE TOPE VIVE ACÁ. Salen de `public.platform_configs` por canal y la firma
+// NINGÚN NÚMERO DE TOPE VIVE AQUÍ. Salen de `public.platform_configs` por canal y la firma
 // esperada de `brand_voice_genome`, resueltos en el server (`api/_pieceMetrics.ts`). Este
 // archivo sólo pinta lo que le llega.
 
@@ -1038,9 +1038,9 @@ export function Provenance({ piece }: { piece: PieceProvenance }) {
 // tienen `status='challenged'` en la base y lo que las separa es quién decidió — ver
 // `pendingStateOf`. Pintar las dos igual sería volver a esconder una dentro de la otra.
 //
-// EL COLOR VIVE ACÁ Y EL EJE EN EL SERVER, a propósito. `pendingStateOf` decide el estado sin saber
+// EL COLOR VIVE AQUÍ Y EL EJE EN EL SERVER, a propósito. `pendingStateOf` decide el estado sin saber
 // de colores; esta tabla decide el color sin saber de reglas. Un estado nuevo entra en las dos, y
-// el `Record` tipado hace que TypeScript falle si se añade allá y se olvida acá.
+// el `Record` tipado hace que TypeScript falle si se añade allá y se olvida aquí.
 //
 // Por qué el borde izquierdo y no una píldora más: el borde se ve ANTES de leer, y esta bandeja se
 // recorre en vertical. Lo que Sam necesita distinguir a distancia es qué le toca hacer, no qué

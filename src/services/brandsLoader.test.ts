@@ -27,7 +27,7 @@ const FILA = (id: string, display_name: string | null = null, market: string | n
  *
  * `import.meta.env` NO es un objeto compartido en vitest: **cada módulo recibe el suyo**
  * [`medido` con una sonda el 2026-09-13, dos módulos comparándolos dieron `false`]. Así que
- * escribirlo desde acá no lo cambia allá, y `vi.stubEnv` tampoco lo alcanza.
+ * escribirlo desde aquí no lo cambia allá, y `vi.stubEnv` tampoco lo alcanza.
  *
  * Por eso el loader consulta los dos sitios donde las variables pueden estar, que además de
  * hacer esto probable es más robusto: el mismo módulo funciona en el navegador y fuera de él.

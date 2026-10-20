@@ -8,7 +8,7 @@ import {
 import { useFlowStore } from '../../store/useFlowStore';
 import { executeStage } from '../../services/orchestratorEngine';
 import { getLabById } from '../../config/labs';
-// U-9 — las marcas salen del dato. Acá sólo se resuelve una por su id.
+// U-9 — las marcas salen del dato. Aquí sólo se resuelve una por su id.
 import { useBrands } from '../../services/useBrands';
 import { getBrandById } from '../../services/brandsLoader';
 import { FlowStage, FlowStageStatus } from '../../core/types';

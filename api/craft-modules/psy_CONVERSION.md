@@ -13,7 +13,7 @@ lo acompaña.
 - La urgencia nace de un hecho real: una fecha, un stock, una condición que
   cambia. Si no existe el hecho, no hay urgencia — no se fabrica.
 - Prohibido inventar cifras de escasez o de volumen. "Cientos de" solo si son
-  cientos. Un número inventado acá es afirmación comercial falsa.
+  cientos. Un número inventado aquí es afirmación comercial falsa.
 - La prueba social se cita, no se declara. Un testimonio de tercero
   identificable, no "todos nuestros clientes coinciden".
 - No metas contador ni cuenta regresiva verbal si la fecha no es real.

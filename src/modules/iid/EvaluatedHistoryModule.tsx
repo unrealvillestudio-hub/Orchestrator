@@ -52,7 +52,7 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
   const [offset, setOffset]   = useState(0);
   const [open, setOpen]       = useState<string | null>(null);
 
-  // U-7 — buscar por id. Acá es donde MÁS falta hacía: una pieza sellada ya no está en
+  // U-7 — buscar por id. Aquí es donde MÁS falta hacía: una pieza sellada ya no está en
   // ninguna de las otras tres bandejas, así que éste es el único sitio donde volver a
   // encontrarla. Medido el 2026-09-13 con `5b14caa7`: sellada, en el corpus, invisible en
   // las tres bandejas vivas.

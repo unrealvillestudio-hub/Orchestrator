@@ -3,7 +3,7 @@
  *
  * Lo ESPECÍFICO de la bandeja de publicación. Todo lo común —fuente `content_pieces`,
  * `latestPerQueue`, traza de `watcher_log`, conteo de intentos, `generationOf`— se importa
- * de `_calibrationShared.ts`; acá no se reimplementa nada de eso.
+ * de `_calibrationShared.ts`; aquí no se reimplementa nada de eso.
  *
  * (Si aparece una tercera bandeja, el núcleo común conviene renombrarlo a `_piecesShared.ts`:
  *  hoy sirve a dos bandejas con nombre de una. No se hace en este PR para no mezclar.)
@@ -20,12 +20,12 @@
  * > ⛔ NO OPERATIVO — motivo anterior, derogado. Se conserva por trazabilidad y NO se
  * > obedece: *«el eje de colocación de una pieza ya producida en la franja de su canal NO
  * > EXISTE en el ecosistema (verificado el 2026-08-23); ni content-scheduler ni
- * > scheduled_posts lo ofrecen; hasta que ese eje exista, aprobar desde acá sería prometer
+ * > scheduled_posts lo ofrecen; hasta que ese eje exista, aprobar desde aquí sería prometer
  * > una fecha que nadie honra.»*
  * >
  * > Ese eje EXISTE desde PLACE-01 (`content-scheduler` en modo `placement`, franjas en
  * > `intel.brand_publish_slots`). El mismo aviso ya se había retirado de `publish-queue.ts`
- * > por obsoleto; acá sobrevivió. Un comentario que describe un sistema que ya cambió es
+ * > por obsoleto; aquí sobrevivió. Un comentario que describe un sistema que ya cambió es
  * > peor que ninguno: enseña a desconfiar de los comentarios.
  */
 
@@ -42,7 +42,7 @@ import { fetchWithTimeout } from './_fetchWithTimeout.js';
  * falló. Son ejes de ESTADO del sistema (los del CHECK de `content.content_pieces`), no
  * vocabulario de marca ni de canal — cualquier marca los atraviesa igual.
  *
- * `rejected` está acá a propósito: es una pieza que Sam rechazó, no material publicable.
+ * `rejected` está aquí a propósito: es una pieza que Sam rechazó, no material publicable.
  * Meterla en la bandeja para tener casos de prueba sería ensuciar la fuente.
  *
  * ── PR-C · POR QUÉ `scheduled` YA NO ESTÁ EN ESTA LISTA ──────────────────────────
@@ -68,7 +68,7 @@ export const RESOLVED_STATUSES = ['published', 'rejected', 'failed'];
  * LO QUE LA PESTAÑA DE PUBLICACIÓN ENSEÑA (2026-09-30, «una pieza, una pestaña»).
  *
  * La bandeja leía «todo lo que no se resolvió» (`not in RESOLVED_STATUSES`), así que lo pendiente de
- * aprobar —que ya está en Calibración, Arreglos o Retenidas— salía también acá, con el mismo botón
+ * aprobar —que ya está en Calibración, Arreglos o Retenidas— salía también aquí, con el mismo botón
  * de aprobar. Sam lo leyó como piezas repetidas y como aprobaciones que no se quedaban. Publicación
  * es lo que YA se aprobó y espera salir: `scheduled`. Lo que no se aprobó tiene su pestaña.
  */
@@ -77,7 +77,7 @@ export const PUBLISH_STATUSES = ['scheduled'];
 // ── Canal de destino ─────────────────────────────────────────────────────────────
 /**
  * Un canal operativo de una marca. La fila manda: un canal nuevo se habilita sembrando
- * `intel.brand_publish_channels`, sin tocar código. Acá no hay ninguna lista de canales
+ * `intel.brand_publish_channels`, sin tocar código. Aquí no hay ninguna lista de canales
  * ni de proveedores — `platform_key` y `provider` son dato, siempre.
  */
 export interface PublishChannel {

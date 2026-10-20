@@ -122,14 +122,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const channelKey    = strParam(req.query.channel);
   const channelStatus = enumParam<ChannelStatusFilter>(req.query.channel_status, CHANNEL_STATUS_FILTERS, 'all');
   const generation    = enumParam<GenerationFilter>(req.query.generation, GENERATION_FILTERS, 'all');
-  // U-7 — EL ESTADO DE LA PIEZA. Va acá y no en calibración, y no es indiferente.
+  // U-7 — EL ESTADO DE LA PIEZA. Va aquí y no en calibración, y no es indiferente.
   //
   // PRECISIÓN 2026-09-18: el argumento original decía que calibración lista «UN SOLO estado por
   // contrato». Ya no es cierto — `CALIBRATION_STATUSES` lista los tres estados VIVOS, porque
   // esconder una aplazada era esconder trabajo pendiente. Lo que sí sigue siendo cierto, y es lo
   // que este filtro defiende, es el REPARTO: calibración lista lo que espera una decisión y lo
   // distingue con `pendingStateOf`; esta bandeja lista el ciclo entero —incluido lo ya sellado y
-  // lo ya publicado— y por eso es acá donde hay estados que filtrar. Darle un filtro de estado a
+  // lo ya publicado— y por eso es aquí donde hay estados que filtrar. Darle un filtro de estado a
   // calibración la convertiría en ésta.
   const status        = strParam(req.query.status);
   // 2026-10-06 — sólo carruseles, de cualquier canal. Se combina con `channel`: un carrusel es un
@@ -214,7 +214,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const page    = ordered.slice(offset, offset + limit);
 
     // Procedencia y franja: sólo para la página visible (el `in.()` de PostgREST crece con
-    // la lista). La fecha se resuelve acá, junto al resto de la fila — nunca con una llamada
+    // la lista). La fecha se resuelve aquí, junto al resto de la fila — nunca con una llamada
     // extra desde el navegador por cada tarjeta.
     const [traces, attempts, slots] = await Promise.all([
       fetchWatcherTraces(page.map((p) => p.orchestrator_job_id ?? '')),
@@ -270,7 +270,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // aviso «Aprobada sin franja asignada» se dispararía en todas las tarjetas aprobadas
       // a la vez. Mismo mecanismo que `cutoffs_source`: la ausencia se declara.
       slots_source: slots === null ? 'unavailable' : 'ok',
-      // ── EL CAMPO `approval` SE RETIRÓ ACÁ · U-6, 2026-09-13 ──────────────────────
+      // ── EL CAMPO `approval` SE RETIRÓ AQUÍ · U-6, 2026-09-13 ──────────────────────
       // NACIÓ en SIGN-01 corte E como un booleano DE BANDEJA: decía si esta pantalla entera
       // podía aprobar. U-4 lo marcó `deprecated:true` al mover la respuesta al nivel de la
       // PIEZA (`pieces[].actions`, una entrada por acción con su motivo), U-5 le quitó el

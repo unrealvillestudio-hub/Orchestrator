@@ -172,7 +172,7 @@ describe('los plazos: uno por destino, y el del modelo por debajo de su maxDurat
   });
 
   it('ESTA es la prueba del corte: el plazo del modelo cabe dentro del maxDuration', () => {
-    // Si alguien sube el plazo o baja el maxDuration, falla acá y no en producción.
+    // Si alguien sube el plazo o baja el maxDuration, falla aquí y no en producción.
     for (const ruta of MODEL_ROUTES) {
       const maxMs = (VERCEL.functions[ruta].maxDuration ?? 0) * 1000;
       expect(TIMEOUT_MS.model, `${ruta}: el plazo no deja margen para responder`).toBeLessThan(maxMs);

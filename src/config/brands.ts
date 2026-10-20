@@ -1,5 +1,5 @@
 /**
- * brands.ts — ⛔ VACIADO EN U-9, 2026-09-13. NO VOLVER A PONER MARCAS ACÁ.
+ * brands.ts — ⛔ VACIADO EN U-9, 2026-09-13. NO VOLVER A PONER MARCAS AQUÍ.
  *
  * ── QUÉ HABÍA Y POR QUÉ SE FUE ───────────────────────────────────────────────────
  * Este archivo contenía una lista de once marcas con su color y su mercado: la SEGUNDA
@@ -22,7 +22,7 @@
  * encontrar una lista vieja y seguir funcionando mal en silencio. Es el alias legacy que
  * la regla multimarca manda conservar documentado durante un corte.
  *
- * **Su borrado es un tercer PR**, cuando no quede ningún import apuntando acá.
+ * **Su borrado es un tercer PR**, cuando no quede ningún import apuntando aquí.
  */
 
 export {};

@@ -142,13 +142,13 @@ export interface PieceAssets {
   copy?: { aife_filtered?: string; raw?: string; title?: string };
   image?: { url?: string };
   // CARRIL AUTO-FIX (2026-10-01) — lo que el carril hizo con la pieza antes de que naciera. Lo escribe
-  // `content-run-stage` (bloque AUTOFIX); acá sólo se lee. `enabled:false` = el carril estaba apagado
+  // `content-run-stage` (bloque AUTOFIX); aquí sólo se lee. `enabled:false` = el carril estaba apagado
   // y la clave sólo anota lo que HABRÍA entrado: no es una corrección y no se enseña como tal.
   autofix?: {
     enabled?: boolean; ran?: boolean; outcome?: string; attempts?: number; reason?: string;
     entered?: string[]; resolved?: string[]; residual?: string[]; applied?: boolean; cost_usd?: number;
   } | null;
-  // F2 (2026-10-02) — las imágenes DENTRO del cuerpo de un artículo. Las escribe el carril; acá
+  // F2 (2026-10-02) — las imágenes DENTRO del cuerpo de un artículo. Las escribe el carril; aquí
   // sólo se leen, con la regla de lectura de `inlineFigureHtml`. Forma: `InlineImageEntry`.
   inline_images?: InlineImageEntry[] | null;
   // Las láminas de un carrusel, cada una con su imagen (`n` = posición; la 1 es la portada).
@@ -271,7 +271,7 @@ export function watcherOf(piece: ContentPiece): WatcherVerdict {
 // violaciones: en `c92b2b9f` aparecían 19 códigos y el Watcher había dado OK. Con eso a la vista,
 // rechazar material perfecto es lo esperable, no lo excepcional — y Sam rechazó dos piezas íntegras.
 //
-// La distinción se hace acá, en el server, y viaja nombrada: `violated` frente a `evaluated`.
+// La distinción se hace aquí, en el server, y viaja nombrada: `violated` frente a `evaluated`.
 
 /** Qué pasó, en una línea que un humano puede leer sin abrir el gate_detail. */
 export function verdictReason(v: WatcherVerdict): string | null {
@@ -399,11 +399,11 @@ export function generationOf(piece: ContentPiece, cutoffs: PipelineCutoff[]): Ge
  *
  * Hasta U-4 la respuesta dependía de la PANTALLA: editar sólo en retenidas, recomponer
  * sólo en calibración, y en publicación nada. Eso no era una regla, era el orden en que
- * se construyeron las bandejas. Acá la respuesta depende del ESTADO DE LA PIEZA, que es
+ * se construyeron las bandejas. Aquí la respuesta depende del ESTADO DE LA PIEZA, que es
  * lo único que la gobierna de verdad.
  *
  * Es una función PURA sobre la fila: no lee la red, no mira la franja y no sabe desde qué
- * bandeja la llaman. Si algún día una acción se habilita o se cierra, se cambia acá y
+ * bandeja la llaman. Si algún día una acción se habilita o se cierra, se cambia aquí y
  * NINGUNA pantalla se toca — que es el motivo entero de este corte.
  *
  * El MOTIVO es obligatorio cuando `available` es false. Un botón apagado sin explicación
@@ -487,7 +487,7 @@ export function actionsFor(piece: {
      * motor, y el motor la hace cumplir con `RECOMPOSE_CANAL_NONE` ANTES de leer `lab_configs` y
      * ANTES de gastar una generación.
      *
-     * POR QUÉ NO SE COPIA ESA LISTA ACÁ. Porque una copia se queda vieja, y cuando se quede
+     * POR QUÉ NO SE COPIA ESA LISTA AQUÍ. Porque una copia se queda vieja, y cuando se quede
      * vieja fallará EN ESTA MISMA DIRECCIÓN: negándole la imagen a una plataforma nueva que sí la
      * lleva. El costo de ofrecer de más es un 4xx barato con el motivo del motor —que esta ruta
      * ya propaga sin traducir—; el de negar de menos es una pieza que no puede arreglarse nunca.
@@ -601,7 +601,7 @@ export interface PieceContext {
    *
    * `toContext` YA los devolvía desde el 2026-09-18 y la interfaz no los declaraba. No daba error
    * porque `api/` queda fuera de `tsc -b` —sólo se compila `src`—, así que el contrato del server
-   * decía una cosa y el server devolvía otra, sin que nada lo señalara. Se declaran acá al pasar,
+   * decía una cosa y el server devolvía otra, sin que nada lo señalara. Se declaran aquí al pasar,
    * que es donde se vio: un campo que viaja y no está en el tipo es un campo que el próximo
    * llamante no sabe que puede pedir.
    */
@@ -647,7 +647,7 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     // o corrige". Un RESCHEDULE no es una opinión sobre la pieza: es "todavía no". El veredicto
     // COMPLETO viaja en `watcher_verdict`, que es el que lee la tarjeta.
     //
-    // CORREGIDO 2026-09-18: acá decía además que "una aplazada no llega a la bandeja de
+    // CORREGIDO 2026-09-18: aquí decía además que "una aplazada no llega a la bandeja de
     // calibración". Dejó de ser cierto — las aplazadas vuelven, distinguidas por `pendingStateOf`.
     // El resto del párrafo sigue valiendo, y por eso se conserva: un RESCHEDULE sigue sin ser una
     // opinión, y por eso sigue sin viajar al corpus.
@@ -1083,7 +1083,7 @@ export interface PublishedTextInput {
 // index.ts` en `main` 8ec1c42): `leerAdaptadas` (:2248), `filtrarAlCanalDeLaFranja` (:2265),
 // `stripInlineImageMarks` (bloque INLINE-MARK-STRIP, :2351) y `buildPlacementRows` (:2362). Se porta
 // lo mínimo, sin DB ni red. `canonicalizeSignature` (:1741) NO se copia otra vez: es la de
-// `_manualShared.ts`, que ya es copia del bloque SIGNCANON. Si cambia allá, cambia acá.
+// `_manualShared.ts`, que ya es copia del bloque SIGNCANON. Si cambia allá, cambia aquí.
 
 /** `leerAdaptadas`: el arreglo tal cual, o el arreglo serializado como cadena. Sin filtrar. */
 function adaptedAsScheduler(assets: PublishedTextInput['assets']): unknown[] {
@@ -1422,7 +1422,7 @@ export async function fetchLivePieces(
   const brandFilter = opts.brand ? `&brand_id=eq.${encodeURIComponent(opts.brand)}` : '';
   // Exclusión por estado, opcional: la bandeja de calibración juzga cualquier pieza viva,
   // la de publicación sólo las que todavía no salieron del circuito. El eje lo decide el
-  // llamante; acá sólo se traduce a PostgREST.
+  // llamante; aquí sólo se traduce a PostgREST.
   const statuses = (opts.excludeStatuses ?? []).filter((s) => typeof s === 'string' && s);
   // El filtro POSITIVO gana al negativo cuando el llamante lo declara: "sólo estos estados" es una
   // afirmación más fuerte que "todos menos éstos", y mezclarlos produciría un conjunto que ninguno
@@ -1661,7 +1661,7 @@ export const CALIBRATION_STATUSES = ['awaiting_approval', 'deferred', 'challenge
  * así que una pieza retada CON veredicto humano registrado sólo puede venir de un `fixable`.
  *
  * Es una función PURA sobre (estado, ¿tiene fila en el corpus?): sin DB y sin red, para que el test
- * la ejecute tal cual. El COLOR no vive acá — vive en la interfaz, que es quien pinta. Acá sólo el
+ * la ejecute tal cual. El COLOR no vive aquí — vive en la interfaz, que es quien pinta. Aquí sólo el
  * eje, que es lo que las dos mitades comparten.
  */
 export type PendingState =
@@ -1670,7 +1670,7 @@ export type PendingState =
   // `challenged` con el residuo escrito. Es trabajo de Arreglos (decisión de Sam), no de Calibración.
   | 'autofix_residuo';
 
-/** Todos los ejes, para que un selector salga de acá y no de una lista escrita a mano. */
+/** Todos los ejes, para que un selector salga de aquí y no de una lista escrita a mano. */
 export const PENDING_STATES: readonly PendingState[] =
   ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo'];
 
@@ -1680,7 +1680,7 @@ export const PENDING_STATES: readonly PendingState[] =
  *
  * La bandeja de Calibración se montaba sin alcance, y sin alcance el server devolvía los SEIS ejes:
  * lo retenido (que es de Retenidas) y el circuito de arreglos (que es de Arreglos) salían también
- * acá, con el mismo botón de aprobar. Ésos son los ejes que SÓLO le tocan a Calibración: lo que
+ * aquí, con el mismo botón de aprobar. Ésos son los ejes que SÓLO le tocan a Calibración: lo que
  * espera un primer juicio, lo que hay que volver a juzgar y lo que el sistema apartó.
  */
 export const CALIBRATION_TAB_STATES: readonly PendingState[] = ['esperando', 'recalibrar', 'aplazada', 'retenida'];
@@ -1719,7 +1719,7 @@ export function pendingStateOf(
   // específico: toda pieza retada por Sam tiene fila en `approval_calibration` —el fixable es un
   // veredicto—, así que preguntar primero por el corpus se las tragaría a todas.
   if (retada) return 'corregida';
-  // `awaiting_approval` y cualquier otro estado vivo que llegue acá: lo que decide es si YA se
+  // `awaiting_approval` y cualquier otro estado vivo que llegue aquí: lo que decide es si YA se
   // juzgó una vez. Un estado nuevo en el CHECK cae en 'esperando', que es el caso menos
   // sorprendente y el que no esconde nada — nunca en un silencio.
   return yaCalibrada ? 'recalibrar' : 'esperando';
@@ -1792,12 +1792,12 @@ export function latestPerQueue(pieces: ContentPiece[]): ContentPiece[] {
  * `CHALLENGED_CAP`, `ATTEMPTS_CAP`, `CHANNELS_CAP`) avisan cuando se llenan. No se inventa
  * un patrón nuevo: se copia el que ya funciona.
  *
- * El número exacto que había NO se cita acá a propósito: hay un barrido que comprueba que
+ * El número exacto que había NO se cita aquí a propósito: hay un barrido que comprueba que
  * ya no existe en el archivo, y citarlo lo haría fallar por su propia explicación — que es
  * cómo se termina borrando la explicación en vez del defecto.
  *
- * Y acá cortar el lote miente al revés que en los otros. En una lista de piezas, un lote
- * corto hace que falte una pieza. Acá el lote es el conjunto de las YA JUZGADAS, que sirve
+ * Y aquí cortar el lote miente al revés que en los otros. En una lista de piezas, un lote
+ * corto hace que falte una pieza. Aquí el lote es el conjunto de las YA JUZGADAS, que sirve
  * para EXCLUIR: si se corta, una pieza ya juzgada reaparece en calibración como si nadie
  * la hubiera mirado, y se la vuelve a juzgar. Por eso el aviso importa más, no menos.
  */
@@ -2133,7 +2133,7 @@ export async function upsertVerdict(row: {
 //
 // APROBAR = HABILITAR, no publicar. Sella `approved_at`, que es lo que el modo `placement` de
 // content-scheduler exige para ver la pieza; la franja la calcula él. Es exactamente el contrato que
-// `approve-piece` (el otro repo) ya implementaba para el carril del email — acá se aplica el MISMO
+// `approve-piece` (el otro repo) ya implementaba para el carril del email — aquí se aplica el MISMO
 // efecto, con el gate de rol de este repo, en vez de llamar a la EF: el token de aprobación del email
 // es de un solo uso y esta bandeja no lo tiene.
 //

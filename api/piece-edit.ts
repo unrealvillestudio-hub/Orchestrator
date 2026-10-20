@@ -16,13 +16,13 @@
  * Delega en la Edge Function `piece-edit` (CALIB-01 corte D), donde ya viven el orden
  * diff→texto→guarda (si el diff no se registra, la edición NO se aplica), la escritura en
  * las dos caras del copy, la poda del no-cambio, y la GUARDA DETERMINISTA con el espejo del
- * corrector que un test compara byte a byte. Reescribir eso acá sería exactamente el
+ * corrector que un test compara byte a byte. Reescribir eso aquí sería exactamente el
  * defecto que CALIB-01 combatió con ese espejo.
  *
  * ── LA GUARDA AVISA Y NO BLOQUEA ─────────────────────────────────────────────────
  * La EF corre los `verify_pattern` de las reglas de la marca contra el texto nuevo y
  * devuelve `guard.blocking:false` con los avisos. Este endpoint los propaga SIN convertir
- * ninguno en error: si acá se devolviera 4xx por un aviso, la guarda pasaría a bloquear por
+ * ninguno en error: si aquí se devolviera 4xx por un aviso, la guarda pasaría a bloquear por
  * la puerta de atrás. Un sistema que le impide a Sam publicar lo que quiere publicar en su
  * propia marca está roto.
  *
@@ -30,7 +30,7 @@
  * una regla contra la que se insiste es una regla en discusión.
  *
  * ── UN CAMPO POR LLAMADA ─────────────────────────────────────────────────────────
- * El contrato de la EF acepta una LISTA de campos; acá se expone uno solo porque la UI
+ * El contrato de la EF acepta una LISTA de campos; aquí se expone uno solo porque la UI
  * edita un campo a la vez y un `piece_edits` por campo tocado es el grano que hace legible
  * el ratio de ediciones POR CAMPO — que es lo que dice dónde falla el generador. La lista
  * queda disponible del lado de la EF para cuando entren las alternativas generadas.
@@ -90,7 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     // Los avisos de la guarda viajan DENTRO de una respuesta 200. No se convierten en 4xx
-    // ni acá ni en la UI: la EF ya guardó cuando emite el aviso.
+    // ni aquí ni en la UI: la EF ya guardó cuando emite el aviso.
     return res.status(out.status).json(out.body);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
  *
  * Es el mismo defecto que U-9 retiró del catálogo de marcas, en pequeño: **un valor escrito
  * a mano sólo se actualiza cuando alguien se acuerda.** Subir el número no lo arregla —lo
- * aplaza—, así que lo que se fija acá no es QUÉ versión dice, sino que **no la diga a mano**.
+ * aplaza—, así que lo que se fija aquí no es QUÉ versión dice, sino que **no la diga a mano**.
  */
 
 const APP = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');

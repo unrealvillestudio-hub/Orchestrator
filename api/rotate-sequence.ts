@@ -66,7 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const sequence_type = String(body.sequence_type ?? '');
   const language = String(body.language ?? '');
 
-  // Los tres son obligatorios y se comprueban ACÁ, no sólo en la función: un argumento vacío
+  // Los tres son obligatorios y se comprueban AQUÍ, no sólo en la función: un argumento vacío
   // llegaría a Postgres y rotaría algo que nadie quiso rotar.
   const faltan = [
     !brand_id && 'brand_id', !sequence_type && 'sequence_type', !language && 'language',
@@ -79,7 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // lo que hace lento a PostgREST es PostgREST, lo llame quien lo llame. Declarar un
   // `AbortController` propio en este archivo sería el mismo número repetido en el sitio 39,
   // divergiendo desde el primer ajuste — y `api/_fetchWithTimeout.test.ts` lo pone rojo, que es
-  // exactamente lo que hizo cuando escribí este archivo con su propio temporizador.
+  // exactamente lo que hizo cuando se escribió este archivo con su propio temporizador.
   try {
     const r = await fetchWithTimeout('db', `${url}/rest/v1/rpc/rotate_sequence_current`, {
       method: 'POST',

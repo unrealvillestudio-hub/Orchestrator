@@ -18,7 +18,7 @@ estructura tiene una condición de uso y una contraindicación:
 | Problema-Reencuadre-Solución | el lector ya tiene el encuadre correcto |
 | Diagnóstico | la pieza es de impulso: el diagnóstico enfría |
 | Historia-Lección-Aplicación | la historia no es propia ni verificable |
-| Objeción-Primero | la audiencia no tiene objeción: se la instalás |
+| Objeción-Primero | la audiencia no tiene objeción: se la instalas |
 
 La agitación apunta al patrón, nunca a la inadecuación del lector. "Sos
 desordenada" está prohibido; "el sistema que te vendieron te obliga a revisarlo

@@ -9,7 +9,7 @@
  * pueden poner en ellos son DATO de la marca (`brand_persons`, `brand_locations`). Cero marcas en este archivo.
  *
  * Y: «deshacer el error de una regeneración incorrecta me toca venir aquí contigo». El motor guarda las últimas
- * imágenes de la pieza en `assets.image.history` (content-run-stage `withImageHistory`); acá se leen para mostrarlas.
+ * imágenes de la pieza en `assets.image.history` (content-run-stage `withImageHistory`); aquí se leen para mostrarlas.
  */
 
 /** Los lugares de la escena, en el orden en que se muestran. `kind` dice qué se puede poner en cada uno. */

@@ -6,7 +6,7 @@
  * Sin DB, sin red, sin reloj — se prueba en `_manualShared.test.ts`.
  *
  * QUÉ CANAL ES MANUAL LO DICE EL DATO. `intel.brand_publish_channels.publication_path = 'manual'`.
- * Acá no hay ninguna plataforma, proveedor ni marca nombrados: un canal que mañana pase a manual
+ * Aquí no hay ninguna plataforma, proveedor ni marca nombrados: un canal que mañana pase a manual
  * aparece en la pestaña sin tocar este archivo, y uno que pase a drenaje desaparece igual.
  *
  * EL TEXTO ES EL QUE PUBLICARÍA EL DRENAJE, no otro. Se arma con la MISMA regla que
@@ -21,7 +21,7 @@
 
 // ── SIGNCANON ── COPIA del bloque SIGNCANON de `unrlvl-iid-functions`
 // (`content-run-stage` y `content-scheduler`, SIGN-02, 2026-09-15). Se copia porque el Orchestrator
-// no comparte módulos con las Edge Functions. Si la regla cambia allá, cambia acá: dos firmas
+// no comparte módulos con las Edge Functions. Si la regla cambia allá, cambia aquí: dos firmas
 // canónicas distintas harían que la pestaña muestre un texto y el drenaje publique otro.
 
 /** Escapa un literal para incrustarlo en una expresión regular. */

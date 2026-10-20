@@ -12,7 +12,7 @@ para el ojo es el fallo más caro del canal.
 
 **Redundancia**
 
-En escrito repetir es defecto; acá es arquitectura. El dato duro, el nombre
+En escrito repetir es defecto; aquí es arquitectura. El dato duro, el nombre
 propio y la cifra se dicen dos veces, la segunda de otra forma. "Setenta y cuatro
 por ciento de humedad. Casi tres cuartas partes del aire, agua."
 
@@ -39,7 +39,7 @@ versión retenible.
 - Nada de referencias implícitas hacia atrás. "Como decíamos" solo funciona si
   fue hace poco y fue memorable.
 - En estructuras largas, marcadores verbales de posición: "eso es lo primero",
-  "hasta acá el diagnóstico; ahora lo que se hace con él". Sin ellos el oyente
+  "hasta aquí el diagnóstico; ahora lo que se hace con él". Sin ellos el oyente
   sabe que escuchó cosas pero no cómo se ordenaban.
 - El gancho funciona en los primeros dos o tres segundos. El oyente no ve el
   largo total: no tiene motivo para dar crédito.

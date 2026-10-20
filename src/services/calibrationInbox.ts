@@ -76,7 +76,7 @@ export type FlowGeneration = 'current' | 'previous' | 'unknown';
 /**
  * FIX-CARD-06 — LO QUE LA CABECERA DE UNA PIEZA DICE SIN ABRIR NADA.
  *
- * Los topes NO viven acá: salen de `public.platform_configs` por canal (`char_limit`,
+ * Los topes NO viven aquí: salen de `public.platform_configs` por canal (`char_limit`,
  * `char_target`, `hashtag_limit`) y la firma esperada de `brand_voice_genome`, resueltos
  * en el server (`api/_pieceMetrics.ts`). Este archivo declara la FORMA del contrato; ni
  * un número de tope, ni un nombre de canal, ni un nombre de marca.
@@ -300,7 +300,7 @@ export interface CalibrationPiece {
    */
   forecast_slot: ForecastSlot | null;
   /**
-   * EN QUÉ ESTADO DE PENDIENTE ESTÁ. El eje lo resuelve el server (`pendingStateOf`); acá sólo
+   * EN QUÉ ESTADO DE PENDIENTE ESTÁ. El eje lo resuelve el server (`pendingStateOf`); aquí sólo
    * se transporta para que la tarjeta lo pinte. Seis situaciones que exigen cosas distintas de
    * Sam y que hasta el 2026-09-18 se leían iguales — o directamente no se leían.
    */
@@ -398,7 +398,7 @@ export type PendingState =
   'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida' | 'sin_imagen'
   | 'autofix_residuo';
 
-/** Los seis, en orden. Un selector sale de acá y nunca de una lista escrita a mano. */
+/** Los seis, en orden. Un selector sale de aquí y nunca de una lista escrita a mano. */
 /**
  * Los ejes de la pestaña Calibración (2026-09-30, «una pieza, una pestaña»). Espejo de
  * `CALIBRATION_TAB_STATES` en `api/_calibrationShared.ts`: lo retenido CON arbitraje es de Retenidas y el
@@ -614,7 +614,7 @@ export function renderArtifact(token: string, piece_id: string): Promise<{ ok: t
  * BRIEF-N05 — REGENERAR LA IMAGEN DE UNA PIEZA, SIN EMITIR VEREDICTO.
  *
  * No es un cuarto veredicto y por eso no vive junto a `saveVerdict`: la pieza NO se sella, no
- * entra al corpus y no sale de la bandeja. Se corrige la imagen, se mira, y recién después se
+ * entra al corpus y no sale de la bandeja. Se corrige la imagen, se mira, y sólo después se
  * vota — que es la única forma de que un `fixable` de imagen se arregle sin salir de la
  * herramienta, porque `fixable` sella la pieza igual que un rechazo.
  *
@@ -675,7 +675,7 @@ export function restorePreviousImage(token: string, pieceId: string, index: numb
 
 /**
  * Guarda un veredicto en el corpus. `criterion` es OPCIONAL en los tres veredictos: el
- * criterio se dicta en el chat con Claude, no acá. Obligarlo en la interfaz empuja a
+ * criterio se dicta en el chat con Claude, no aquí. Obligarlo en la interfaz empuja a
  * escribir relleno para avanzar, y eso envenena el corpus.
  *
  * `fix_proposal` es la excepción y va al revés: OBLIGATORIA con `fixable` —el endpoint

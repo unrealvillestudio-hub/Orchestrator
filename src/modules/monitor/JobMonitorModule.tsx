@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { CheckCircle2, XCircle, Clock, ChevronRight, Inbox } from 'lucide-react';
 import { useFlowStore } from '../../store/useFlowStore';
-// U-9 — las marcas salen del dato. Acá sólo se resuelve una por su id.
+// U-9 — las marcas salen del dato. Aquí sólo se resuelve una por su id.
 import { useBrands } from '../../services/useBrands';
 import { getBrandById } from '../../services/brandsLoader';
 import { getLabById } from '../../config/labs';

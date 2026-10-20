@@ -125,7 +125,7 @@ export default function IidSeedsUnified({
     if (!isVideo && !isImage) {
       resetFlow();
       setFileName(null);
-      setFlowError('Eso no parece un post. Arrastrá o elegí una imagen o un video.');
+      setFlowError('Eso no parece un post. Arrastra o elige una imagen o un video.');
       setPhase('idle');
       return;
     }
@@ -141,7 +141,7 @@ export default function IidSeedsUnified({
         setMeta({ duration: null, frameCount: 1 });
         setPhase('ready');
       } catch {
-        setFlowError('No se pudo leer la imagen. Reintentá.');
+        setFlowError('No se pudo leer la imagen. Reintenta.');
         setPhase('idle');
       } finally {
         if (fileRef.current) fileRef.current.value = '';
@@ -165,7 +165,7 @@ export default function IidSeedsUnified({
       setMeta({ duration: ext.duration_sec, frameCount: ext.frame_count });
       setPhase('ready');
     } catch (err) {
-      const msg = err instanceof IidError ? err.message : 'No se pudo procesar el post. Reintentá.';
+      const msg = err instanceof IidError ? err.message : 'No se pudo procesar el post. Reintenta.';
       setFlowError(msg);
       setPhase('idle');
     } finally {
@@ -253,7 +253,7 @@ export default function IidSeedsUnified({
     } catch (err) {
       let msg = err instanceof IidError ? err.message : 'No se pudo enviar la captura.';
       if (err instanceof IidError && (err.status === 413 || /too large|payload|body/i.test(err.message))) {
-        msg = 'El envío es demasiado grande para el lector de texto. Probá con un post más liviano.';
+        msg = 'El envío es demasiado grande para el lector de texto. Prueba con un post más ligero.';
       }
       setSubmitError(msg);
     } finally {
@@ -278,8 +278,8 @@ export default function IidSeedsUnified({
           <Sprout size={22} className="text-accent" /> Capturar de un post
         </h2>
         <p className="text-sm text-zinc-500 mt-1">
-          Arrastrá el post (imagen o video): el servidor lo lee por OCR. De ahí sale el tema y el método —
-          vos aportás por qué importa. El original nunca se republica.
+          Arrastra el post (imagen o video): el servidor lo lee por OCR. De ahí sale el tema y el método —
+          tú aportas por qué importa. El original nunca se republica.
         </p>
       </div>
 
@@ -327,7 +327,7 @@ export default function IidSeedsUnified({
               <span className="font-mono text-xs truncate max-w-[80%]">{fileName}</span>
             ) : (
               <>
-                <span>{isDragOver ? 'Soltá el post acá' : 'Arrastrá el post o hacé click para elegirlo'}</span>
+                <span>{isDragOver ? 'Suelta el post aquí' : 'Arrastra el post o haz clic para elegirlo'}</span>
                 <span className="text-[10px] text-zinc-600 font-mono">JPG · PNG · MP4 · MOV · imagen o video</span>
               </>
             )}
@@ -375,7 +375,7 @@ export default function IidSeedsUnified({
               </button>
             </div>
             <p className="text-[11px] text-zinc-600 font-body">
-              Confirmá que el texto se lee bien en estas miniaturas antes de capturar.
+              Confirma que el texto se lee bien en estas miniaturas antes de capturar.
             </p>
             <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
               {frames.map((f, i) => (
@@ -394,9 +394,9 @@ export default function IidSeedsUnified({
       {/* 2–5 · Intención + marca + por qué importa + destino (solo con frames listos) */}
       {frames.length > 0 && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-5">
-          {/* 2 · ¿Qué querés capturar? */}
+          {/* 2 · ¿Qué quieres capturar? */}
           <Field
-            label="¿Qué querés capturar de este post?"
+            label="¿Qué quieres capturar de este post?"
             required
             hint="Al menos uno. Define qué aprende el IID del post."
           >
@@ -422,7 +422,7 @@ export default function IidSeedsUnified({
                   selectedBrand ? 'border-zinc-800' : 'border-amber-500/40'
                 )}
               >
-                <option value="">— elegí una marca —</option>
+                <option value="">— elige una marca —</option>
                 {brands.map((b) => <option key={b.id} value={b.id}>{b.name || b.id}</option>)}
               </select>
             </div>
@@ -478,7 +478,7 @@ export default function IidSeedsUnified({
             disabled={!onGoCalibrate}
             className="w-full flex items-center justify-center gap-1.5 text-[11px] font-body text-amber-300/80 hover:text-amber-300 disabled:cursor-not-allowed transition-colors pt-1"
           >
-            ¿No tenés un post de modelo? Entrá directo a calibrar la voz <ArrowRight size={13} />
+            ¿No tienes un post de modelo? Entra directo a calibrar la voz <ArrowRight size={13} />
           </button>
         </div>
       )}

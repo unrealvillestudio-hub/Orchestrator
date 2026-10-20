@@ -32,11 +32,11 @@
  * afirmación sin medir, y de las peores: la que parece un dato.
  *
  * ── CERO MARCAS ─────────────────────────────────────────────────────────────────
- * Acá no hay una sola marca, ni un dominio, ni una plataforma. El eje es «pieza retada que volvió»,
+ * Aquí no hay una sola marca, ni un dominio, ni una plataforma. El eje es «pieza retada que volvió»,
  * que es del SISTEMA: la marca N+1 de otro rubro y otro país entra en este circuito sin que nadie
  * edite este archivo. Los campos editables (`field`) llegan como DATO desde la tabla y se muestran
- * tal cual; no hay lista cerrada acá — medido el 2026-09-22, la tabla ya trae diez valores
- * distintos, entre ellos rutas dentro de `assets`, y una lista escrita acá los escondería.
+ * tal cual; no hay lista cerrada aquí — medido el 2026-09-22, la tabla ya trae diez valores
+ * distintos, entre ellos rutas dentro de `assets`, y una lista escrita aquí los escondería.
  */
 
 import { SB_URL, SB_KEY } from './_calibrationShared.js';
@@ -125,7 +125,7 @@ export interface FixPieceInput {
 /**
  * Arma el estado del circuito para UNA pieza. PURA: la testea `_fixFlow.test.ts`.
  *
- * `edits` son las filas de esa pieza, en cualquier orden; acá se ordenan. Pasar un array vacío es
+ * `edits` son las filas de esa pieza, en cualquier orden; aquí se ordenan. Pasar un array vacío es
  * legítimo y significa «sin rastro», no «no se tocó»: esas dos cosas las separa `edited_at`.
  */
 export function fixFlowOf(piece: FixPieceInput, edits: PieceEditRow[] = []): FixFlow {

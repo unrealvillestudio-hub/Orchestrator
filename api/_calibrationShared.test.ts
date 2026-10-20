@@ -114,7 +114,7 @@ describe('pieza sin imagen · puede pedir una', () => {
   });
 
   it('el motor sigue siendo quien decide si la plataforma lleva imagen', () => {
-    // Una copia de `CANAL_BY_PLATFORM` acá se quedaría vieja, y al quedarse vieja fallaría EN LA
+    // Una copia de `CANAL_BY_PLATFORM` aquí se quedaría vieja, y al quedarse vieja fallaría EN LA
     // MISMA DIRECCIÓN que el defecto que este corte arregla: negándole la imagen a una plataforma
     // nueva que sí la lleva. Este test fija que no hay ninguna lista de plataformas en el módulo.
     const src = readFileSync(new URL('./_calibrationShared.ts', import.meta.url), 'utf8')

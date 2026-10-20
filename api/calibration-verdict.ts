@@ -25,13 +25,13 @@
  * Reglas:
  *  · Criterio en prosa, NO categorías, y SIEMPRE opcional (CALIB-UI-01 §2/§4.4). El
  *    criterio se razona en el chat con Claude, no en la interfaz: obligar a escribirlo
- *    acá empuja a poner cualquier cosa para avanzar, y eso envenena el corpus con ruido
+ *    aquí empuja a poner cualquier cosa para avanzar, y eso envenena el corpus con ruido
  *    que parece señal. Un rechazo sin criterio es una fila honesta que Claude completa
  *    después; un rechazo con criterio de relleno es una fila que miente.
  *  · UPSERT por piece_id (una pieza = una fila; re-evaluar sobrescribe).
  *  · Garantiza el artefacto (render idempotente) antes del UPSERT → artifact_url del
  *    corpus SIEMPRE apunta a un artefacto real, aunque nadie lo haya visto en la bandeja.
- *  · SIGN-01 corte A2 — LA DECISIÓN SE EJECUTA. Hasta acá este endpoint escribía el corpus y NADA
+ *  · SIGN-01 corte A2 — LA DECISIÓN SE EJECUTA. Hasta aquí este endpoint escribía el corpus y NADA
  *    más: las 6 decisiones de Sam del 2026-08-25 dejaron las 6 piezas exactamente como estaban. No
  *    había flujo, había opiniones registradas.
  *      approved → status='scheduled' + approved_at + approved_by (desde la SESIÓN)
@@ -105,7 +105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // La propuesta de corrección: obligatoria con `fixable`, descartada en los otros dos. Se valida
-  // acá y no en la DB por el mismo criterio que el resto del endpoint — la regla es de negocio, no
+  // aquí y no en la DB por el mismo criterio que el resto del endpoint — la regla es de negocio, no
   // de esquema — y se rechaza con 400 ANTES de tocar nada: un `fixable` sin propuesta no debe
   // llegar ni al corpus ni a la pieza.
   const proposal = typeof body.fix_proposal === 'string' ? body.fix_proposal.trim() : '';

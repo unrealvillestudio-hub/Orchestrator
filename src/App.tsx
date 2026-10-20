@@ -45,7 +45,7 @@ type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" |
  * mismos botones, mismo contrato — ver `CalibrationScope`.
  */
 const FIX_SCOPE: CalibrationScope = {
-  // 2026-10-01 — `sin_imagen` entra acá por decisión de Sam: no espera un veredicto, espera
+  // 2026-10-01 — `sin_imagen` entra aquí por decisión de Sam: no espera un veredicto, espera
   // «Generar imagen», que es un arreglo. Al tener imagen pasa a Calibración como `retenida`.
   // 2026-10-01 — y lo que el carril auto-fix no pudo resolver: es trabajo de arreglo (decisión de Sam).
   states: ['por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo'],
@@ -104,7 +104,7 @@ function initialView(): View {
   try {
     const v = new URLSearchParams(window.location.search).get('view');
     if (v === 'calibration') return 'calibration';
-    // LO-CORREGIDO-01 — enlace directo al circuito de arreglos. Entra acá y no como un caso más
+    // LO-CORREGIDO-01 — enlace directo al circuito de arreglos. Entra aquí y no como un caso más
     // abajo porque es hermano de `calibration`: el mismo módulo con otro alcance.
     if (v === 'fixes') return 'fixes';
     // Deep-link del email de RETENIDA y del digest → la bandeja de arbitraje.
@@ -384,7 +384,7 @@ function SessionControl({ session, onLogout }: { session: IidSession; onLogout: 
 // flujo de captura (IidSeedsUnified), común y bifurcado al final en Seed / Genoma.
 // E5b (Sprint #47 Fase 2): añade una SEGUNDA vista —Calibrar voz (bucle Boids)—
 // dentro del mismo shell vía toggle de estado (no router). El enlace gold de
-// IidSeedsUnified salta directo acá (onGoCalibrate). Header "IID SEEDS / Sembrador"
+// IidSeedsUnified salta directo aquí (onGoCalibrate). Header "IID SEEDS / Sembrador"
 // se mantiene.
 //
 // REVISIÓN POR MARCA (2026-10-01): si el sembrador tiene marcas asignadas para revisar

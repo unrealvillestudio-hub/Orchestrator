@@ -274,7 +274,7 @@ describe('fixable · RETA la pieza, no la descarta (cambio de diseño del 2026-0
     // Es la corrección de Sam del 2026-09-20: «podría decir otra cosa y entonces fallaría».
     // MEDIDO ese mismo día: de las 41 piezas con veredicto `fixable` en el corpus, 3 NO llevaban
     // el prefijo en su motivo. Un criterio de prefijo habría callado 3 sin que nadie lo notara.
-    // Por eso lo que se exige acá es que el ESTADO no dependa del texto en ningún caso.
+    // Por eso lo que se exige aquí es que el ESTADO no dependa del texto en ningún caso.
     for (const propuesta of ['se rescata el gancho', 'otra cosa entera', '   ']) {
       const e = verdictEffect('fixable', '2026-08-31T22:00:00Z', 'sam', 'motivo:x', propuesta);
       expect(e.status).toBe('challenged');

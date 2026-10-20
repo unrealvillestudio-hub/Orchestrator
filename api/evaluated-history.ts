@@ -220,10 +220,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // U-7 — buscar por id de pieza, el MISMO resolvedor que las otras tres bandejas.
   //
-  // Y acá es donde más falta hacía: una pieza sellada ya no está en ninguna de las otras
+  // Y aquí es donde más falta hacía: una pieza sellada ya no está en ninguna de las otras
   // tres, así que Historial es el único sitio donde se la puede volver a encontrar. Medido
   // el 2026-09-13 con `5b14caa7`: la búsqueda funcionaba en las tres bandejas y no la
-  // encontraba en ninguna, porque estaba acá.
+  // encontraba en ninguna, porque estaba aquí.
   //
   // Buscar aquí NO necesita leer `content_pieces`: cada fila del corpus ya trae su
   // `piece_id`. Eso distingue BUSCAR de dar ACCIONES — lo segundo sí exigiría esa lectura,

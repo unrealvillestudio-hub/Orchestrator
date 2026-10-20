@@ -41,10 +41,10 @@ El lector escanea antes de leer, y en el escaneo decide si lee.
   sentido, no era andamiaje.
 - No repitas una palabra por falta de vocabulario. Repetir una estructura es
   ritmo; repetir un término es descuido.
-- Preferí lo concreto. Lo abstracto se procesa y se olvida.
+- Prefiere lo concreto. Lo abstracto se procesa y se olvida.
 
-**Cazá los cuantificadores vagos** antes de entregar: mucho, casi, bastante,
+**Caza los cuantificadores vagos** antes de entregar: mucho, casi, bastante,
 algunos, generalmente. Cada uno se reemplaza por el dato real o por nada.
 
-**El primer bloque decide.** Escribí sabiendo dónde está el corte de "ver más" o
+**El primer bloque decide.** Escribe sabiendo dónde está el corte de "ver más" o
 el asunto del email: eso cambia qué información va primero, no solo el orden.

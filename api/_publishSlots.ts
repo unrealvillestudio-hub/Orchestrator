@@ -32,7 +32,7 @@
  * ── QUÉ ESCRIBE ESTE MÓDULO, Y QUÉ NO (actualizado en U-3, 2026-09-13) ───────────
  * Hasta U-3 no escribía nada, y la cabecera lo declaraba así. Dejarla intacta con la
  * liberación de franja dentro sería una afirmación falsa en el sitio donde primero se
- * lee el estado del módulo, así que se corrige acá en vez de sólo junto a la función.
+ * lee el estado del módulo, así que se corrige aquí en vez de sólo junto a la función.
  *
  *   · ESCRIBE, y sólo esto: `releaseSlotsForPiece()` devuelve al pozo la franja de una
  *     pieza que ya no va a salir — un único PATCH sobre `intel.brand_publish_slots`.
@@ -53,7 +53,7 @@ export const BRAND_TZ_CAP = 500;
 /**
  * Una franja de `intel.brand_publish_slots`. `status` viaja como texto a propósito: los
  * valores (`free`, `reserved`, `published`, `failed`) son del CHECK de la tabla, y
- * enumerarlos acá crearía una segunda fuente que diverge en el primer valor nuevo.
+ * enumerarlos aquí crearía una segunda fuente que diverge en el primer valor nuevo.
  */
 export interface PublishSlotRow {
   brand_id: string;
@@ -244,7 +244,7 @@ export async function fetchNextFreeSlots(now: Date = new Date()): Promise<SlotIn
 
 /**
  * Indexa la franja libre más temprana por (marca, canal). Puro y exportado: la previsión se
- * prueba sin red, y el orden NO se confía al `order=` de la consulta —se compara acá— para
+ * prueba sin red, y el orden NO se confía al `order=` de la consulta —se compara aquí— para
  * que una respuesta desordenada no produzca una previsión falsa.
  */
 export function indexNextFree(rows: PublishSlotRow[]): Map<string, PublishSlotRow> {
@@ -280,7 +280,7 @@ export function slotOf(
   slots: SlotIndex,
   timezones: BrandTimezoneCatalog,
 ): PieceSlot | null {
-  // Lectura caída: `null` acá significa «no hay franja que mostrar», y quien lo interpreta
+  // Lectura caída: `null` aquí significa «no hay franja que mostrar», y quien lo interpreta
   // es la pantalla, que YA sabe por `slots_source` que las franjas no se leyeron. Sin ese
   // aviso, este mismo `null` se leería como «sin franja» y sería mentira.
   if (!slots) return null;
@@ -361,7 +361,7 @@ export const URGENCY_HOURS_MAX = 168;
 /**
  * LOS CANALES URGENTES, indexados por `channelSlotKey` para poder preguntar por pieza en O(1).
  *
- * `freeSlots` ya viene ordenado y reducido a la PRÓXIMA franja libre de cada canal, así que acá no
+ * `freeSlots` ya viene ordenado y reducido a la PRÓXIMA franja libre de cada canal, así que aquí no
  * se vuelve a elegir: se filtra por ventana y se calcula cuánto falta.
  *
  * `null` (la lectura de franjas se cayó) devuelve un mapa VACÍO, no un mapa que lo incluya todo:
@@ -413,7 +413,7 @@ export function isUrgentPiece(
 // ── ESCRITURA · liberación de franja ────────────────────────────────────────────
 /**
  * LIBERA LA FRANJA DE UNA PIEZA QUE YA NO VA A SALIR. Es la ÚNICA escritura de este
- * módulo: hasta U-3 sólo leía, y por eso se declara acá arriba en vez de dejarlo a que
+ * módulo: hasta U-3 sólo leía, y por eso se declara aquí arriba en vez de dejarlo a que
  * alguien lo descubra en el diff.
  *
  * Se llama SIEMPRE DESPUÉS de sellar la pieza, nunca antes (decisión de Sam, 2026-09-13):

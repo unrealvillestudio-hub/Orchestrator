@@ -94,7 +94,7 @@ export default function IidSeedsCapture({ session }: { session: IidSession }) {
           <Sprout size={22} className="text-accent" /> Capturar semilla
         </h2>
         <p className="text-sm text-zinc-500 mt-1">
-          Marcá un post relevante y por qué importa. El IID investiga el tema desde cero —
+          Marca un post relevante y por qué importa. El IID investiga el tema desde cero —
           nunca copia el contenido original.
         </p>
       </div>
@@ -145,7 +145,7 @@ export default function IidSeedsCapture({ session }: { session: IidSession }) {
                 form.seeder_brand_suggestion ? 'border-zinc-800' : 'border-amber-500/40'
               )}
             >
-              <option value="">— elegí una marca —</option>
+              <option value="">— elige una marca —</option>
               {brands.map((b) => <option key={b.id} value={b.id}>{b.name || b.id}</option>)}
             </select>
           </div>

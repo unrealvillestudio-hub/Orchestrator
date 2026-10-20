@@ -66,7 +66,7 @@ export default function IidSeedsApprove({ session }: { session: IidSession }) {
         <div>
           <h3 className="font-display text-lg font-bold text-white">Cola de revisión</h3>
           <p className="text-sm text-zinc-500 mt-0.5">
-            Aprobás → el IID investiga el tema desde cero. Rechazás → no se despacha.
+            Si apruebas → el IID investiga el tema desde cero. Si rechazas → no se despacha.
           </p>
         </div>
         <button
@@ -141,7 +141,7 @@ function SeedReviewCard({ seed, session, opts, onResolved }: {
   const domainOpts = Array.from(new Set([...(opts.domains ?? []), ...(seed.mapped_domain ? [seed.mapped_domain] : [])]));
 
   const doApprove = async () => {
-    if (!domain) { setError('Asigná un domain antes de aprobar.'); return; }
+    if (!domain) { setError('Asigna un domain antes de aprobar.'); return; }
     if (!topic.trim()) { setError('El tema neutro no puede quedar vacío.'); return; }
     setBusy('approve'); setError(null);
     try {
@@ -173,7 +173,7 @@ function SeedReviewCard({ seed, session, opts, onResolved }: {
   };
 
   // Aviso de scope: la marca mapeada está fuera del scope del capturador.
-  const capturerOutOfScope = !!brand && !!seed.mapped_brand_id; // señal definitiva la da la EF; acá solo preparamos UI
+  const capturerOutOfScope = !!brand && !!seed.mapped_brand_id; // señal definitiva la da la EF; aquí solo preparamos UI
 
   // Estado resuelto (aprobado) → tarjeta de éxito.
   if (result) {

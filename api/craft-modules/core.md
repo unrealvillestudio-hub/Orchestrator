@@ -45,5 +45,5 @@ storytelling: es su anuncio. No anuncies la estructura, no numeres los
 movimientos, no expliques el mecanismo dentro de la pieza. Si un lector puede
 identificar el manual, la técnica falló.
 
-Elegí la técnica por lo que necesita esta pieza, no por variar. Y no repitas la
+Elige la técnica por lo que necesita esta pieza, no por variar. Y no repitas la
 técnica de la pieza anterior.

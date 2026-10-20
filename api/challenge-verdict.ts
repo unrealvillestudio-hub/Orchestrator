@@ -16,16 +16,16 @@
  * Delega en la Edge Function `judge-arbitration` (CALIB-01 corte C), donde ya viven la
  * idempotencia por id, el anclaje a `verdict IS NULL` (dos árbitros simultáneos no se
  * pisan) y la regla de que si el arbitraje no se registra la pieza NO se mueve. Duplicar
- * eso acá sería una segunda fuente de verdad que divergiría en el primer cambio.
+ * eso aquí sería una segunda fuente de verdad que divergiría en el primer cambio.
  *
  * Lo que este endpoint aporta es lo que la EF no puede: el gate de rol admin. La EF corre
- * con service_role y no ve quién es Sam; acá se verifica el JWT y `decided_by` sale de la
+ * con service_role y no ve quién es Sam; aquí se verifica el JWT y `decided_by` sale de la
  * SESIÓN, no del body — un arbitraje que se pudiera firmar con el nombre de otro no sería
  * auditable, y la calibración vale por ser trazable hasta quien la firmó.
  *
  * ── IDEMPOTENTE, que es lo que hace barato el `undo` ─────────────────────────────
  * Un segundo POST sobre un arbitraje ya decidido NO lo pisa: la EF responde 409 con el
- * veredicto vigente y acá se propaga tal cual, con `already_decided:true` para que la
+ * veredicto vigente y aquí se propaga tal cual, con `already_decided:true` para que la
  * bandeja lo muestre sin tratarlo como un fallo.
  */
 

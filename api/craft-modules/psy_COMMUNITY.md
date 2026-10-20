@@ -5,7 +5,7 @@
 
 La pieza construye pertenencia, identidad compartida o reciprocidad.
 
-**Restricción principal: la pertenencia se muestra, no se convoca.** "Sumate a
+**Restricción principal: la pertenencia se muestra, no se convoca.** "Súmate a
 nuestra comunidad" es una declaración de que la comunidad necesita miembros.
 
 - No uses "somos una familia", "nuestra tribu", "el club de". Nombrar el grupo lo
@@ -13,7 +13,7 @@ nuestra comunidad" es una declaración de que la comunidad necesita miembros.
 - No abras la puerta a que el lector se sienta afuera. Ninguna construcción que
   divida entre los que ya están y los que no.
 - Prohibida la falsa participación: la pregunta de cierre que nadie responde
-  ("¿y vos qué opinás?") deja la pieza floja y expone que no había conversación.
+  ("¿y tú qué opinas?") deja la pieza floja y expone que no había conversación.
 - La identidad se activa por reconocimiento, no por etiqueta. El lector se ve
   retratado en una situación concreta; no se le dice qué tipo de persona es.
 - La reciprocidad se ejerce dando algo que vale por sí solo. Si lo que se entrega

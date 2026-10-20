@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 // PR-C — el formateador con huso SÍ se ejercita, no sólo se lee: es cálculo, no presentación.
 import { fmtInZone, zoneLabel } from './pieceUi';
+import { formasVoseantes } from '../../idioma/voseo';
 
 /**
  * FIX-CARD-06 — lo que la CABECERA de una pieza tiene que decir sin que nadie pase el cursor.
@@ -10,11 +11,11 @@ import { fmtInZone, zoneLabel } from './pieceUi';
  * se fijan sobre la fuente que se compila (mismo patrón que `ChallengedInboxModule.test.ts`):
  *
  *   1. Ningún tope escrito en la UI. Los topes son dato (`public.platform_configs`); una
- *      constante acá los duplicaría, y la copia diverge en el primer cambio de la tabla.
+ *      constante aquí los duplicaría, y la copia diverge en el primer cambio de la tabla.
  *   2. El nombre del corte se ve en la etiqueta, no sólo en el `title`. Un dato que sólo
  *      existe en el tooltip obliga a recorrer la bandeja tarjeta por tarjeta.
- *   3. Cero voseo. El imperativo voseante y el pretérito son homógrafos («sembrá» / «sembró»),
- *      así que en una interfaz que da instrucciones la ambigüedad es operativa, no estética.
+ *   3. Cero voseo. El imperativo voseante y el pretérito son homógrafos, así que en una
+ *      interfaz que da instrucciones la ambigüedad es operativa, no estética.
  *      Fuente: `unrlvl-context/protocols/DELIVERY_AND_VERIFICATION_RULE.md` §2-BIS.
  */
 
@@ -99,7 +100,7 @@ describe('GenerationBadge', () => {
 
 // ── 5 · PR-C · La fecha se sitúa en el huso de la MARCA ─────────────────────────
 //
-// Lo que se fija acá no es el formato: es que la hora salga del huso que llega como dato.
+// Lo que se fija aquí no es el formato: es que la hora salga del huso que llega como dato.
 // Que la fecha «aparezca» no prueba nada — un desfase cableado también la haría aparecer, y
 // acertaría hasta el cambio de horario.
 describe('fmtInZone — el único formateador con huso', () => {
@@ -178,8 +179,9 @@ describe('compromiso y previsión se nombran distinto', () => {
 // ── 7 · Idioma: ES neutro internacional, sin voseo ───────────────────────────────
 describe('la interfaz habla ES neutro internacional', () => {
   it('no queda ni una forma voseante en el texto de pantalla', () => {
-    const VOSEO = /\b(sembrá|creés|tenés|podés|querés|sabés|mirá|hacé|poné|elegí|escribí|revisá|verificá|aprobala|rechazala|fijate|andá|dejá|mandá|probá|agregá|cargá)\b/i;
-    expect(SRC).not.toMatch(VOSEO);
+    // Detector morfológico compartido (`src/idioma/voseo.ts`): la lista cerrada de antes usaba `\b`,
+    // que no casa con una vocal acentuada final, y la mitad de sus formas no vigilaba nada.
+    expect(formasVoseantes(SRC)).toEqual([]);
   });
 
   it('el aviso de cortes usa el infinitivo, que no es homógrafo del pretérito', () => {

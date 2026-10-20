@@ -81,7 +81,7 @@ export async function initSequenceRun(
   language: string,
 ): Promise<string | null> {
   try {
-    // ── LA ROTACIÓN YA NO SE INVOCA DESDE ACÁ · 2026-09-25 ────────────────────
+    // ── LA ROTACIÓN YA NO SE INVOCA DESDE AQUÍ · 2026-09-25 ────────────────────
     // `rotate_sequence_current` es SECURITY DEFINER —escribe en `content_sequences`— y se
     // llamaba con `VITE_SUPABASE_ANON_KEY`, que viaja INCRUSTADA en el bundle. Cualquiera con
     // el bundle podía rotar secuencias de cualquier marca sin pasar por esta aplicación.
