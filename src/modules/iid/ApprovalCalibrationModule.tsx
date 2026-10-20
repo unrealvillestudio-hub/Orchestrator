@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { RefreshCw, Inbox, CheckCircle2, XCircle, AlertTriangle, Archive, Wrench } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
@@ -358,14 +358,14 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
   // del CDN (link durable). NO se usa src={cdn_url}: Supabase sirve el objeto como
   // text/plain + nosniff, así que embeber por src mostraría el código, no la pieza.
   const [artHtml, setArtHtml] = useState<string | null>(null);
-  const [artUrl, setArtUrl]   = useState<string | null>(null);
+  const [artUrl, setArtUrl]   = useState<string | null>(null); const rehecha = useRef(false); // 2026-10-20 — corregida mientras la lectura inicial viajaba: esa lectura ya es vieja y no pisa la vista.
   const [artErr, setArtErr]   = useState<string | null>(null);
   const [done, setDone]       = useState<null | ActionOutcome>(null);
 
   useEffect(() => {
-    let alive = true;
+    let alive = true; rehecha.current = false;
     renderArtifact(token, piece.piece_id)
-      .then((r) => { if (alive) { setArtHtml(r.html); setArtUrl(r.artifact_url); } })
+      .then((r) => { if (alive && !rehecha.current) { setArtHtml(r.html); setArtUrl(r.artifact_url); } })
       .catch((err) => { if (alive) setArtErr(err instanceof CalibrationError ? err.message : 'No se pudo renderizar el artefacto.'); });
     return () => { alive = false; };
   }, [piece.piece_id, token]);
@@ -484,7 +484,7 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
           token={token}
           onResolved={(id) => onResolved(id)}
           onRegenerated={(r) => {
-            if (r.html) { setArtHtml(r.html); setArtErr(null); }
+            if (r.html) { rehecha.current = true; setArtHtml(r.html); setArtErr(null); }
             if (r.artifact_url) setArtUrl(r.artifact_url);
           }}
         />

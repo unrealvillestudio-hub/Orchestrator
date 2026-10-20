@@ -12,7 +12,7 @@
  *   mode?: 'edit_from_current' | 'same_scene' | 'regenerate_full'   // BRIEF-IMG-01 fase 4 (2026-09-27); same_scene 2026-10-20
  *   restore_index?: number         // 2026-10-20 — volver a una imagen anterior (sin generar): ver `volverALaAnterior`
  * }
- * GET /api/recompose-image?piece_id= → { options (colores del resaltado), cast (En la escena), history (anteriores) }
+ * GET /api/recompose-image?piece_id= → { options (colores del resaltado), cast (En la escena), history (anteriores), overlay (texto vigente) }
  *
  * ─── LOS DOS MODOS (BRIEF-IMG-01 fase 4) ─────────────────────────────────────────────
  * `edit_from_current` CORRIGE SOBRE LA IMAGEN ACTUAL: el generador recibe la imagen limpia vigente
@@ -47,7 +47,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   applyCors, extractToken, ensureArtifact, fetchPiece, PieceNotFound, SB_URL, SB_KEY,
 } from './_calibrationShared.js';
-import { emphasisColorOptions } from './_overlayText.js';
+import { emphasisColorOptions, imageOverlayOf } from './_overlayText.js';
 import { sceneCastOf, imageHistoryOf } from './_sceneCast.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
@@ -293,6 +293,8 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       ok: true, brand_id: brandId, options: emphasisColorOptions(tokens, palette, brandId),
       cast: sceneCastOf(persons, places, image), history: imageHistoryOf(image),
+      // 2026-10-20 — el texto que la imagen lleva AHORA: el editor se siembra con esto, no con lo que la tarjeta trajo al cargar.
+      overlay: imageOverlayOf(piece.assets),
     });
   } catch (err) {
     console.error(`[recompose-image] GET colores ${pieceId}: ${String(err)}`);

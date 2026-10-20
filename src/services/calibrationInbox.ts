@@ -661,6 +661,8 @@ export function recomposeImage(
 export function fetchEmphasisColors(token: string, pieceId: string): Promise<{
   ok: true; brand_id: string; options: EmphasisColorOption[];
   cast?: SceneCast; history?: ImageHistoryEntry[];
+  /** 2026-10-20 — el texto que la imagen lleva ahora, leído de la pieza. */
+  overlay?: ImageOverlayView | null;
 }> {
   return req(`/api/recompose-image?piece_id=${encodeURIComponent(pieceId)}`, token);
 }

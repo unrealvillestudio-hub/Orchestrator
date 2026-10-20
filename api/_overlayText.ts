@@ -61,6 +61,36 @@ export function overlayMarkupOf(headline: string | null, emphasis: readonly stri
   return out;
 }
 
+// ── EL EDITOR ABRE CON EL TEXTO QUE LA IMAGEN LLEVA AHORA (2026-10-20) ──────────────────────────────
+// Sam, 2026-10-20: «por momentos vuelve a la forma anterior y me tocó refrescar». Medido en `intel.piece_edits`
+// (pieza 5b842958, 10:12–10:17): dos correcciones seguidas volvieron a escribir el texto de la PRIMERA. El editor se
+// sembraba con el texto que la tarjeta trajo al cargar la bandeja, que no cambia al corregir; al volver a abrirlo,
+// mandaba ese texto viejo con el cambio nuevo encima. Ahora se siembra con lo último aplicado y, en cuanto llega,
+// con lo que la pieza tiene en la base (GET de `recompose-image`).
+
+/** Los tres campos del editor a partir del texto vigente de la imagen. PURO. */
+export function overlayEditorSeed(view: ImageOverlayView | null | undefined): { markup: string; sub: string; role: string | null } {
+  return {
+    markup: overlayMarkupOf(view?.headline ?? null, view?.emphasis ?? []),
+    sub: view?.subheadline ?? '',
+    role: view?.emphasis_role ?? null,
+  };
+}
+
+/**
+ * El texto vigente después de aplicar una corrección. Con `override` es exactamente lo que se mandó (escrito a mano);
+ * sin él —«Volver al texto del copy»— el texto vuelve a salir del copy y no se conoce hasta releer la pieza: null. PURO.
+ */
+export function overlayViewAfterApply(
+  override: { headline: string; subheadline: string | null; emphasis: string[]; emphasis_role?: string } | null,
+): ImageOverlayView | null {
+  if (!override) return null;
+  return {
+    headline: override.headline, subheadline: override.subheadline, emphasis: [...override.emphasis],
+    written: true, emphasis_role: override.emphasis_role ?? null,
+  };
+}
+
 /**
  * Del marcado a lo que el motor espera. Un asterisco sin pareja, un resaltado vacío o que cruza una línea,
  * más de 3 resaltados o un titular demasiado largo son errores que se dicen antes de mandar nada.

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { imageOverlayOf, overlayMarkupOf, parseOverlayMarkup, emphasisColorOptions } from './_overlayText.js';
+import { imageOverlayOf, overlayMarkupOf, parseOverlayMarkup, emphasisColorOptions, overlayEditorSeed, overlayViewAfterApply } from './_overlayText.js';
 
 /**
  * EL TEXTO DE LA IMAGEN SE ESCRIBE EN LA BANDEJA (2026-10-19). Sam: ajustar «en sitio» dónde se corta cada
@@ -119,5 +119,39 @@ describe('el cableado del editor', () => {
   it('la tarjeta dice cuándo el carril repintó en lugar de editar', () => {
     // 2026-10-20 — diferencia declarada: el carril ya no repinta desde cero, pinta la misma escena con el cambio.
     expect(MOD).toContain('Se pintó la misma escena con el cambio: {regenNote.cambioDeModo}.');
+  });
+});
+
+describe('el editor abre con el texto que la imagen lleva ahora (2026-10-20)', () => {
+  // Medido en intel.piece_edits, pieza 5b842958: dos correcciones seguidas volvieron a escribir el texto de la primera.
+  const sin = (s: string) => s.split('\n').filter((l) => { const t = l.trim(); return !t.startsWith('*') && !t.startsWith('//') && !t.startsWith('{/*'); }).join('\n');
+  const MOD = sin(readFileSync(new URL('../src/modules/iid/pieceActions.tsx', import.meta.url), 'utf8'));
+  const API = sin(readFileSync(new URL('./recompose-image.ts', import.meta.url), 'utf8'));
+  it('la semilla del editor sale del texto vigente, con su resaltado y su color', () => {
+    expect(overlayEditorSeed({ headline: 'Uno dos\ntres', subheadline: 'b', emphasis: ['dos'], written: true, emphasis_role: 'accent_x' }))
+      .toEqual({ markup: 'Uno *dos*\ntres', sub: 'b', role: 'accent_x' });
+    expect(overlayEditorSeed(null)).toEqual({ markup: '', sub: '', role: null });
+  });
+  it('después de aplicar, lo vigente es exactamente lo que se mandó; volver al copy no se conoce hasta releer', () => {
+    const v = overlayViewAfterApply({ headline: 'A\nB', subheadline: null, emphasis: ['B'], emphasis_role: 'r' });
+    expect(v).toEqual({ headline: 'A\nB', subheadline: null, emphasis: ['B'], written: true, emphasis_role: 'r' });
+    expect(overlayEditorSeed(v).markup).toBe('A\n*B*');
+    expect(overlayViewAfterApply(null)).toBeNull();
+  });
+  it('el editor ya no se siembra con lo que la tarjeta trajo al cargar', () => {
+    expect(MOD).not.toContain('overlayMarkupOf(piece.image_overlay');
+    expect(MOD).toContain('sembrarEditor(overlayVigente);');
+    expect(MOD).toContain('setOverlayVigente(overlayViewAfterApply(override));');
+    expect(MOD).toContain('if (r.overlay !== undefined) { setOverlayVigente(r.overlay); if (!overlayTocado.current) sembrarEditor(r.overlay); }');
+  });
+  it('el GET devuelve el texto vigente leído de la pieza', () => {
+    expect(API).toContain('overlay: imageOverlayOf(piece.assets),');
+  });
+  it('una vista previa vieja que llega tarde no pisa la corregida, en las dos bandejas', () => {
+    for (const f of ['ApprovalCalibrationModule.tsx', 'PublishQueueModule.tsx']) {
+      const src = sin(readFileSync(new URL(`../src/modules/iid/${f}`, import.meta.url), 'utf8'));
+      expect(src).toContain('if (alive && !rehecha.current) { setArtHtml(r.html); setArtUrl(r.artifact_url); }');
+      expect(src).toContain('if (r.html) { rehecha.current = true; setArtHtml(r.html); setArtErr(null); }');
+    }
   });
 });
