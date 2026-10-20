@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { highlightPayload, resolveHighlights, HIGHLIGHT_NOTE_MAX } from './_highlights.js';
 import { ACTION_SPECS, PANEL_COPY, HIGHLIGHT_SECTIONS, HIGHLIGHT_FOOT } from '../src/modules/iid/pieceActions';
+import { formasVoseantes } from '../src/idioma/voseo';
 
 /**
  * LA CALIFICACIÓN «DESTACADA» AL APROBAR (PR 6, 2026-10-19).
@@ -96,9 +97,10 @@ describe('marca N+1 y voseo', () => {
       expect(SRC.split('\n').filter((l) => !l.trim().startsWith('*')).join('\n')).not.toContain(m);
   });
   it('los textos del panel sin voseo', () => {
-    const voseo = /\b(vos|querés|tenés|podés|marcá|calificá|escribí|aprobá|usá)\b/i;
-    expect(voseo.test(HIGHLIGHT_FOOT)).toBe(false);
-    for (const s of HIGHLIGHT_SECTIONS) expect(voseo.test(`${s.title} ${s.thumb} ${s.placeholder}`)).toBe(false);
-    expect(voseo.test(ACTION_SPECS.find((a) => a.key === 'approve')!.hint)).toBe(false);
+    // Detector morfológico compartido: la lista cerrada de antes usaba `\b`, que no casa con una vocal
+    // acentuada final, así que la mitad de sus formas no vigilaba nada.
+    expect(formasVoseantes(HIGHLIGHT_FOOT)).toEqual([]);
+    for (const s of HIGHLIGHT_SECTIONS) expect(formasVoseantes(`${s.title} ${s.thumb} ${s.placeholder}`)).toEqual([]);
+    expect(formasVoseantes(ACTION_SPECS.find((a) => a.key === 'approve')!.hint)).toEqual([]);
   });
 });

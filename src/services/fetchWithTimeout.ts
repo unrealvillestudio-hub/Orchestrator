@@ -3,7 +3,7 @@
  *
  * ── POR QUÉ ESTO ES UN CORTE APARTE, Y NO LA SEGUNDA MITAD DE U-8 ────────────────
  * U-8 cerró las 38 llamadas de `api/` porque allí un `fetch` sin aborto **cuelga una
- * función serverless** hasta que la plataforma la mata, y deja un 504 sin mensaje. Acá el
+ * función serverless** hasta que la plataforma la mata, y deja un 504 sin mensaje. Aquí el
  * daño es otro y menor: un `fetch` colgado en el navegador **deja un spinner girando**. No
  * consume una función, no cuesta dinero y no rompe nada aguas abajo.
  *
@@ -15,7 +15,7 @@
  * En el servidor el plazo va POR DEBAJO del `maxDuration`, para que la función alcance a
  * responder antes de que la maten.
  *
- * **Acá va POR ENCIMA.** Si el navegador abortara a los diez segundos una llamada a un
+ * **Aquí va POR ENCIMA.** Si el navegador abortara a los diez segundos una llamada a un
  * endpoint que tiene sesenta para contestar, mataría una petición que el servidor estaba a
  * punto de responder — y el operador vería «se agotó el tiempo» sobre un trabajo que sí se
  * hizo. Es peor que el spinner: el spinner confunde, esto miente.
@@ -26,7 +26,7 @@
  */
 
 /**
- * A quién se está llamando. Enumerar acá es enumerar CLASES DE DESTINO, no marcas ni
+ * A quién se está llamando. Enumerar aquí es enumerar CLASES DE DESTINO, no marcas ni
  * pantallas: lo que hace lento a un destino es el destino, no quién lo llama.
  */
 export type FetchTarget = 'db' | 'edge' | 'own-api' | 'lab';
@@ -108,7 +108,7 @@ export async function fetchWithTimeout(
 /**
  * LA FRASE QUE VE EL OPERADOR CUANDO ALGO NO LLEGÓ.
  *
- * Vive acá y no en cada servicio para que todas las pantallas digan lo mismo ante lo mismo
+ * Vive aquí y no en cada servicio para que todas las pantallas digan lo mismo ante lo mismo
  * — y, sobre todo, para que **no vuelvan a decir «red» cuando fue «tiempo»**. Un plazo
  * vencido y un cable caído se arreglan mirando sitios distintos.
  *

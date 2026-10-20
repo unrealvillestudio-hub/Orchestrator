@@ -13,7 +13,7 @@ import type { ContentPiece } from './_calibrationShared.js';
  * está configurado, y las piezas de canales sin configurar están en `status='rejected'`
  * (Sam las rechazó), así que la bandeja no las lista. Que el caso no ocurra hoy es un hecho
  * del estado del sistema, no algo que se arregle ensuciando la fuente con material que no
- * corresponde publicar. Por eso el bloqueo se cubre acá y no con un dato inventado.
+ * corresponde publicar. Por eso el bloqueo se cubre aquí y no con un dato inventado.
  *
  * Los identificadores de las fixtures son ficticios a propósito: si la lógica dependiera del
  * nombre de una marca o de un canal reales, estas pruebas fallarían.

@@ -116,7 +116,7 @@ export function fetchEvaluatedHistory(
     verdict?: string; source?: HistorySourceFilter;
     /**
      * U-7 — uno o varios ids de pieza (o prefijos de 8+), separados por coma, espacio o salto de
-     * línea. Acá es donde vive una pieza ya sellada.
+     * línea. Aquí es donde vive una pieza ya sellada.
      */
     q?: string;
     /** 2026-10-06 — sólo carruseles, de cualquier canal. Se combina con `channel`. */

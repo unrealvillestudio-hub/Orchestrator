@@ -50,7 +50,7 @@ import { CAROUSEL_FORMAT } from './_manualShared.js';
 // Quién puede ver esta bandeja y de qué marcas: admin todo; un revisor, sólo las suyas.
 import { requireReviewer, filterByReviewScope } from './_reviewScope.js';
 // UNA PIEZA, UNA PESTAÑA — la retenida CON arbitraje abierto es de Retenidas; la que no lo tiene
-// (p. ej. sin imagen) se queda acá, porque no hay otra pestaña que la muestre.
+// (p. ej. sin imagen) se queda aquí, porque no hay otra pestaña que la muestre.
 import { fetchPendingChallenges, fetchRuleTexts } from './_challengedShared.js';
 // CHIP DE REGLA (2026-10-05) — el enunciado de cada código que aparece en la tarjeta, por marca.
 import { codesInValue, ruleTextsFor, type RuleTexts } from './_ruleCodes.js';
@@ -68,7 +68,7 @@ function platformsOf(pieces: ContentPiece[]): string[] {
   for (const p of pieces) { const v = (p.platform ?? '').trim(); if (v) set.add(v); }
   return [...set].sort();
 }
-// FIX-CARD-06 — los topes del canal y la firma esperada son DATO: se leen acá, una vez
+// FIX-CARD-06 — los topes del canal y la firma esperada son DATO: se leen aquí, una vez
 // por request, y viajan resueltos en cada pieza. La UI no conoce ni un tope.
 import { fetchPlatformLimits, fetchSignatureClosers, metricsOf } from './_pieceMetrics.js';
 import { fetchBrandLanguages, readingLanguageOf } from './_brandLanguage.js';
@@ -121,7 +121,7 @@ type GenerationFilter = (typeof GENERATION_FILTERS)[number];
 
 // U-9 — LO URGENTE ES DEL CANAL, NO DE LA PIEZA. Ver el bloque de urgencia en `_publishSlots.ts`
 // para por qué: filtrar por la PREVISIÓN de cada pieza habría marcado como urgentes las doce
-// candidatas de un canal que sólo puede publicar una. Acá el eje es el mismo que el de `platform`
+// candidatas de un canal que sólo puede publicar una. Aquí el eje es el mismo que el de `platform`
 // y `verdict`: un filtro transversal que se aplica ANTES de `by_brand`.
 const URGENCY_FILTERS = ['all', 'urgent'] as const;
 type UrgencyFilter = (typeof URGENCY_FILTERS)[number];
@@ -130,13 +130,13 @@ type UrgencyFilter = (typeof URGENCY_FILTERS)[number];
  * LO-CORREGIDO-01 — FILTRAR POR EL EJE DE PENDIENTE, que es lo que convierte «otro tab» en algo
  * que no duplica una línea de la bandeja.
  *
- * Sam pidió una pestaña para las corregidas. Una pestaña es un CONJUNTO, y acá ya había un eje que
+ * Sam pidió una pestaña para las corregidas. Una pestaña es un CONJUNTO, y aquí ya había un eje que
  * define conjuntos: `pending_state`. Construir un módulo aparte habría significado una segunda
  * tarjeta, una segunda barra de acciones y una segunda forma de leer una pieza — tres cosas que
  * divergen en el primer cambio. Con el filtro, la pestaña es esta misma bandeja con su alcance
- * puesto, y todo lo que se arregle acá se arregla allá.
+ * puesto, y todo lo que se arregle aquí se arregla allá.
  *
- * Los valores salen de `PENDING_STATES`, no de una lista escrita acá: un eje nuevo entra en el
+ * Los valores salen de `PENDING_STATES`, no de una lista escrita aquí: un eje nuevo entra en el
  * filtro solo, y TypeScript falla si alguien lo añade en un sitio y lo olvida en el otro.
  *
  * ── ES UN CONJUNTO, NO UN VALOR ─────────────────────────────────────────────────
@@ -282,7 +282,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // tabla de piezas, así que se traen enteras una vez y se indexan por (marca, canal).
       fetchNextFreeSlots(),
       // Sólo hace falta si la pestaña pide `retenida`. Una lectura fallida no esconde nada: sin
-      // saber qué está en arbitraje, la retenida se muestra acá antes que en ningún sitio.
+      // saber qué está en arbitraje, la retenida se muestra aquí antes que en ningún sitio.
       states.some((e) => e === 'retenida' || e === 'sin_imagen') ? fetchPendingChallenges().catch(() => null) : Promise.resolve(null),
       // 2026-10-08 — las series recurrentes de los temas, UNA lectura. Falla en blando: ver la función.
       fetchRecurringFormats(),
@@ -311,7 +311,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // LO-CORREGIDO-01 — EL EJE SE RESUELVE SOBRE TODO LO PENDIENTE, no sobre la página.
     //
-    // Hasta acá se calculaba dentro del `.map()` final, es decir DESPUÉS de filtrar, ordenar y
+    // Hasta aquí se calculaba dentro del `.map()` final, es decir DESPUÉS de filtrar, ordenar y
     // paginar. Servía mientras sólo pintaba un color. En el momento en que el eje FILTRA, hacerlo
     // ahí significaría filtrar por un valor que todavía no existe — y contar `by_state` sobre
     // veinte tarjetas en vez de sobre las ciento y pico que hay.
@@ -333,7 +333,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let scoped = perPiece;
     if (verdict !== 'all') scoped = scoped.filter((p) => watcherOf(p).result === verdict);
     if (generation === 'current') scoped = scoped.filter((p) => genById.get(p.id)?.generation === 'current');
-    // U-7 — buscar y filtrar por plataforma van ACÁ, antes de `by_brand` y antes de paginar.
+    // U-7 — buscar y filtrar por plataforma van AQUÍ, antes de `by_brand` y antes de paginar.
     // El orden importa: buscar después de paginar haría que el resultado dependiera de en qué
     // página estabas, que es la forma más silenciosa de que una búsqueda mienta.
     if (search) scoped = scoped.filter((p) => idMatchesSearch(p.id, search));
@@ -476,7 +476,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       /**
        * LO-CORREGIDO-01 — el alcance pedido, DEVUELTO. Va como lista y no como la cadena cruda
        * para que la interfaz lea lo que de verdad se aplicó: si alguien pide `state=inventado`,
-       * acá vuelve `[]` —es decir, `all`— y la pantalla puede decirlo en vez de enseñar la bandeja
+       * aquí vuelve `[]` —es decir, `all`— y la pantalla puede decirlo en vez de enseñar la bandeja
        * entera bajo el título de una pestaña vacía.
        */
       state: states,
@@ -520,7 +520,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
        * que existe pudo quedarse fuera, y entonces una lista vacía NO es «no existe».
        * Un uuid completo nunca se trunca: va como filtro directo.
        *
-       * U-8 — acá va `piezasTruncadas`, NO el `truncated` de arriba. El corte del corpus
+       * U-8 — aquí va `piezasTruncadas`, NO el `truncated` de arriba. El corte del corpus
        * hace que SOBRE una pieza, no que falte: decir «pudo quedarse fuera» por esa causa
        * sería una afirmación falsa sobre la búsqueda, en el único campo que existe para no
        * mentir sobre ella.

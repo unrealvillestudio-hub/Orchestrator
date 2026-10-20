@@ -13,7 +13,7 @@
  * enumeración por módulos de runtime reales, pequeños, seleccionados por el contexto que el
  * operador DECLARA (canal/formato, objetivo psicológico, perfil de voz). Ver brief CRAFT-01.
  *
- * TÉCNICA DE CARGA (decisión de §4.1, documentada acá):
+ * TÉCNICA DE CARGA (decisión de §4.1, documentada aquí):
  *   Los módulos son archivos `.md` estáticos en `api/craft-modules/`. Se leen con
  *   `fs.readFileSync(path.join(process.cwd(), 'api/craft-modules', <archivo>))` — NO por
  *   `import` (los `.md` no son módulos ESM en este setup nodenext) ni por red (una copia
@@ -36,7 +36,7 @@
  *   - `errors`: fallo de LECTURA (el archivo no se pudo leer, no existe, está corrupto). Es
  *     ANÓMALO. Un módulo ilegible va SIEMPRE a `errors`, nunca a `skipped`, nunca a silencio.
  *   No mezclar los dos fue lo que escondió el bug de `order=is_primary` en el GenomeBuilder
- *   por días: un fallo de lectura enmascarado como "no hay dato". Acá jamás se enmascara.
+ *   por días: un fallo de lectura enmascarado como "no hay dato". Aquí jamás se enmascara.
  *
  * ÁMBITO: SOLO LEE archivos locales. No toca la DB, no abre clientes, no lanza (los fallos
  * de lectura viajan en `errors`; el caller sigue). Si NINGÚN módulo se pudo leer → craftBlock
@@ -185,7 +185,7 @@ export function buildCraftModules(selectors: CraftSelectors): CraftModules {
   // Si no se leyó NINGÚN módulo, craftBlock queda vacío → buildSystemPrompt usa el
   // paréntesis enumerativo como fallback (§5.3). No es un error propagable.
   const craftBlock = sections.length
-    ? `ARSENAL DE COMUNICACIÓN (módulos operativos — OPERALOS con intención, no los\n` +
+    ? `ARSENAL DE COMUNICACIÓN (módulos operativos — OPÉRALOS con intención, no los\n` +
       `enumeres ni los nombres; el operador juzga el resultado, no la etiqueta):\n\n` +
       sections.join('\n\n')
     : '';

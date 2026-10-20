@@ -9,7 +9,7 @@ import { CALIBRATION_TAB_STATES, statesForQuery,
   type GenerationFilter, type UrgencyFilter, type UrgentChannelInfo, type PendingState,
 } from '../../services/calibrationInbox';
 // U-5 — el ÚNICO componente de acciones del sistema. Las llamadas, los paneles de texto y
-// los motivos de rechazo viven ahí, no acá: dos implementaciones divergen en el primer cambio.
+// los motivos de rechazo viven ahí, no aquí: dos implementaciones divergen en el primer cambio.
 import { PieceActionsBar, type ActionOutcome } from './pieceActions';
 // Presentación compartida con la bandeja de publicación: la procedencia se cuenta igual
 // en las dos vistas o no sirve para compararlas.
@@ -31,7 +31,7 @@ const PAGE = 20;
  * Una tarjeta por PIEZA (no por intento): la consulta lista `content_pieces` sin
  * descartar, sin fila en el corpus, quedándose con la última versión de cada `queue_id`.
  *
- * El reparto de trabajo que gobierna el diseño: acá se VE y se DECIDE (un clic); el
+ * El reparto de trabajo que gobierna el diseño: aquí se VE y se DECIDE (un clic); el
  * criterio se dicta en el chat con Claude, que lo escribe en `approval_calibration`. Por
  * eso ningún campo de texto es obligatorio — obligar a escribir empuja a poner cualquier
  * cosa para avanzar, y eso envenena el corpus con ruido que parece señal.
@@ -169,7 +169,7 @@ export default function ApprovalCalibrationModule(
             {scope?.subtitle ?? (
               <>
                 Una tarjeta por pieza. Aprobar, rechazar, marcar como fixable o descartar — un clic.
-                El criterio se dicta en el chat, no acá; <span className="text-zinc-400">nada se publica</span>.
+                El criterio se dicta en el chat, no aquí; <span className="text-zinc-400">nada se publica</span>.
               </>
             )}
           </p>
@@ -188,7 +188,7 @@ export default function ApprovalCalibrationModule(
         </div>
       </div>
 
-      {/* Filtro por marca — las marcas se descubren del dato, nunca se enumeran acá. */}
+      {/* Filtro por marca — las marcas se descubren del dato, nunca se enumeran aquí. */}
       {brands.length > 0 && (
         <div className="flex items-center gap-1 overflow-x-auto md:flex-wrap bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-3 [&>*]:shrink-0">
           <CountPill label="Todas" count={Object.values(byBrand).reduce((a, b) => a + b, 0)} active={brand === ''} onClick={() => apply({ brand: '' })} />
@@ -255,7 +255,7 @@ export default function ApprovalCalibrationModule(
           options={[['all', 'Todas'], ['current', 'Solo corregido']]}
         />
         {/* U-7 — LA PLATAFORMA DE LA PIEZA. Sus opciones salen del LOTE (`data.platforms`),
-            nunca de una lista escrita acá: una marca nueva con una plataforma nueva aparece
+            nunca de una lista escrita aquí: una marca nueva con una plataforma nueva aparece
             sola. Ojo con el nombre: la bandeja de publicación llama `channel` a lo suyo y
             filtra el CANAL OPERATIVO de la marca — son dos ejes distintos. */}
         {/* U-9 — LO QUE EL CARRIL NECESITA YA. No dice «piezas urgentes»: dice que hay un canal
@@ -467,7 +467,7 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
         <div className="hidden md:block space-y-4">{lectura}</div>
 
         {/* U-5 — LAS ACCIONES. El MISMO componente que monta la bandeja de publicación: si
-            dos pantallas pueden divergir, divergirán, y acá no pueden. Esta bandeja no
+            dos pantallas pueden divergir, divergirán, y aquí no pueden. Esta bandeja no
             entrega `slot` porque lo suyo es una PREVISIÓN, no un compromiso — y una
             previsión no se puede prometer liberar. */}
         {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}

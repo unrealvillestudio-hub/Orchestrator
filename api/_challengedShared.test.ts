@@ -10,7 +10,7 @@ import {
  *
  * POR QUÉ EXISTEN. Cuando se escribieron, `intel.judge_calibration` todavía no estaba
  * migrada (CALIB-01 cortes A–D se despliegan por separado), así que NO hay una retenida en
- * vivo contra la que probar. Eso no es motivo para no probar: lo que se fija acá es la
+ * vivo contra la que probar. Eso no es motivo para no probar: lo que se fija aquí es la
  * transformación PURA de la fila —qué ve Sam y de dónde sale cada campo—, que es
  * exactamente lo que rompería en silencio si el contrato cambiara.
  *
@@ -109,7 +109,7 @@ describe('pieceBody', () => {
   });
 
   it('una cara filtrada VACÍA sigue siendo la cara que se publica', () => {
-    // '' es un texto, no una ausencia: caer a `raw` acá mostraría un cuerpo que ya no existe.
+    // '' es un texto, no una ausencia: caer a `raw` aquí mostraría un cuerpo que ya no existe.
     expect(pieceBody(piece({ assets: { copy: { raw: 'viejo', aife_filtered: '' } } }))).toBe('');
   });
 
@@ -201,7 +201,7 @@ describe('toChallengedRow', () => {
 describe('multimarca', () => {
   it('ninguna marca, plataforma ni código de regla vive en el módulo', () => {
     // Se mide sobre el CÓDIGO del módulo, no sobre estas fixtures. Una marca real cableada
-    // acá haría que NSCF, UnrealvilleStudio o LucienSael necesitaran tocar este archivo.
+    // aquí haría que NSCF, UnrealvilleStudio o LucienSael necesitaran tocar este archivo.
     const src = readSource();
     for (const marca of ['ForumPHs', 'LucienSael', 'UnrealvilleStudio', 'NeuroneSCF'])
       expect(src).not.toContain(marca);

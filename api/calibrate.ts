@@ -369,7 +369,7 @@ detecta cualquier dato inventado al instante.`;
   // vacío por columnas NULL o módulos ilegibles), se conserva el paréntesis enumerativo
   // actual como fallback (§5.3, §6.5a). La lógica anti-repetición (usedBlock) no se toca.
   const techniqueLine = craftBlock.trim()
-    ? `Elegí una técnica DISTINTA y OPERALA desde el ARSENAL DE COMUNICACIÓN declarado
+    ? `Elige una técnica DISTINTA y OPÉRALA desde el ARSENAL DE COMUNICACIÓN declarado
 arriba: no la nombres ni la etiquetes — encarnala en la pieza.`
     : `Elige una técnica DISTINTA (escena, contraste, analogía, dato-ancla, reencuadre,
 objeción anticipada, testimonio, diagnóstico, principio invertido, etc.).`;
@@ -384,7 +384,7 @@ ${techniqueLine}`;
 no traduzcas ni cambies de idioma sin motivo.`;
 
   const salida =
-`SALIDA — respondé ÚNICAMENTE con el objeto JSON, empezando por { y terminando por },
+`SALIDA — responde ÚNICAMENTE con el objeto JSON, empezando por { y terminando por },
 sin texto antes ni después y sin markdown:
 { "proposed_text": "la pieza, breve, lista para juzgar", "technique_used": "nombre corto de la técnica que usaste" }`;
 
@@ -609,7 +609,7 @@ async function handleStart(body: Record<string, any>): Promise<Reply> {
     return json(502, {
       error: 'generation_failed',
       session_id: session.id,
-      retry_hint: 'Reintentá la acción start enviando este session_id para regenerar el turno 1.',
+      retry_hint: 'Reintenta la acción start enviando este session_id para regenerar el turno 1.',
     });
   }
 
@@ -703,7 +703,7 @@ async function handleVerdict(body: Record<string, any>): Promise<Reply> {
     return json(502, {
       error: 'generation_failed',
       session_id,
-      retry_hint: 'Reintentá la acción verdict con el mismo turn_number; el veredicto ya quedó guardado.',
+      retry_hint: 'Reintenta la acción verdict con el mismo turn_number; el veredicto ya quedó guardado.',
     });
   }
 

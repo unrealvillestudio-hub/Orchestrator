@@ -71,13 +71,13 @@ describe('la decisión binaria es la acción primaria', () => {
  * U-6 · PARIDAD EN LAS BANDEJAS — y la forma exacta de hacerla mal.
  *
  * Paridad de CAPACIDADES no es paridad de JERARQUÍA: que una acción esté disponible en las
- * cuatro bandejas no significa que pese lo mismo en todas. Acá el arbitraje manda, y las
+ * cuatro bandejas no significa que pese lo mismo en todas. Aquí el arbitraje manda, y las
  * acciones de pieza entran al nivel del enlace terciario.
  */
 describe('las acciones de pieza entran al nivel de «Editar», no al de los veredictos', () => {
   it('monta el componente compartido en vez de reimplementar los botones', () => {
     expect(CODE).toContain('PieceActionsBar');
-    // Si estas llamadas aparecieran acá, habría una segunda implementación que divergiría.
+    // Si estas llamadas aparecieran aquí, habría una segunda implementación que divergiría.
     expect(CODE).not.toContain('saveVerdict');
     expect(CODE).not.toContain('discardPiece');
     expect(CODE).not.toContain('recomposeImage');
@@ -103,7 +103,7 @@ describe('las acciones de pieza entran al nivel de «Editar», no al de los vere
 
   it('una fila SIN pieza no pinta acciones, y no inventa un contrato vacío', () => {
     // El arbitraje se puede decidir igual —es sobre la regla—, pero no hay pieza sobre la
-    // que actuar. Un `?? {}` acá encendería seis botones que fallarían al pulsarse.
+    // que actuar. Un `?? {}` aquí encendería seis botones que fallarían al pulsarse.
     const barra = CODE.indexOf('<PieceActionsBar');
     expect(barra).toBeGreaterThan(-1);
     expect(CODE.slice(0, barra)).toMatch(/\{piece && \(showActions \|\| resolved\) && \(/);

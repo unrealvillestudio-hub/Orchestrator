@@ -6,7 +6,7 @@
  *
  *     marca · canal · formato · 300/2200 car · 3/30 hashtags · firma ✓
  *
- * ── POR QUÉ VIVE ACÁ Y NO EN LA UI ────────────────────────────────────────────────
+ * ── POR QUÉ VIVE AQUÍ Y NO EN LA UI ────────────────────────────────────────────────
  * Los topes NO son constantes: salen de `public.platform_configs`, una fila por canal
  * (`char_limit`, `char_target`, `hashtag_limit`). La firma esperada tampoco: sale de
  * `public.brand_voice_genome.application_constraints -> signature_closer`, resuelta por
@@ -346,7 +346,7 @@ export function signatureOf(
 
 /**
  * Todo lo que la cabecera muestra, resuelto contra el dato. Los dos catálogos entran
- * como parámetro (nunca se leen acá dentro): así la evaluación se prueba sin red y el
+ * como parámetro (nunca se leen aquí dentro): así la evaluación se prueba sin red y el
  * endpoint los lee UNA vez por request, no una por pieza.
  */
 export function metricsOf(

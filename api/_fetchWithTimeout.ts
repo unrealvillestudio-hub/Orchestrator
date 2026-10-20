@@ -35,7 +35,7 @@
  */
 
 /**
- * Los destinos. Enumerar acá es deliberado y es lo contrario de hardcodear un caso: lo
+ * Los destinos. Enumerar aquí es deliberado y es lo contrario de hardcodear un caso: lo
  * enumerado son clases de red, no marcas ni endpoints, y un destino nuevo (una cola, un
  * proveedor de imagen) entra como entrada nueva con su plazo y su razón.
  */
@@ -65,7 +65,7 @@ export const TIMEOUT_MS: Record<FetchTarget, number> = {
 /**
  * Las rutas que llaman al modelo, con su `maxDuration` declarado en `vercel.json`.
  *
- * Vive acá y no sólo en el JSON porque es la mitad de una invariante: el otro lado es
+ * Vive aquí y no sólo en el JSON porque es la mitad de una invariante: el otro lado es
  * `TIMEOUT_MS.model`, y una invariante cuyas dos mitades viven en archivos que nadie
  * compara se rompe sin ruido. La prueba lee ESTA lista, busca cada ruta en `vercel.json`
  * y exige que el `maxDuration` real supere al plazo.

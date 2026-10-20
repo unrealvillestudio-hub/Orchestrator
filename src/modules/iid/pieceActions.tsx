@@ -75,7 +75,7 @@ export interface ActionablePiece {
   /** El texto efectivo que el panel de edición carga. `null` = la pieza no tiene texto. */
   body: string | null;
   title: string | null;
-  /** El COMPROMISO de fecha, cuando la bandeja lo entrega. Nunca se recalcula acá. */
+  /** El COMPROMISO de fecha, cuando la bandeja lo entrega. Nunca se recalcula aquí. */
   slot?: { slot_at: string; status: string; timezone: string | null } | null;
   /**
    * SIN-IMAGEN-01 — si la pieza YA tiene imagen. Lo resuelve el server (`toContext`).
@@ -260,7 +260,7 @@ export function slotReleaseNotice(
  * decir qué pasó es ésta — y tiene que existir en las DOS bandejas por igual.
  *
  * Cada línea dice el efecto REAL, no el clic: aprobar habilita pero no publica, y fixable
- * sella igual que un rechazo. Nombrarlo mal acá enseñaría el sistema al revés.
+ * sella igual que un rechazo. Nombrarlo mal aquí enseñaría el sistema al revés.
  */
 export const OUTCOME_COPY: Record<ActionOutcome, { tone: 'ok' | 'sealed'; text: string }> = {
   approved: { tone: 'ok', text: 'Aprobada y guardada en el corpus. Habilitada para salir: la franja la calcula content-scheduler, no este clic.' },
@@ -439,7 +439,7 @@ export function panelCopyFor(panel: PanelKey, hasImage: boolean | undefined) {
     foot: 'Esta pieza NO tiene imagen: el carril lo intentó y no la consiguió. Esto la pide por '
       + 'primera vez. NO es un veredicto: la pieza sigue en la bandeja y no entra al corpus. Cuesta '
       + 'una generación y actualiza los posts que sigan pendientes de publicar. La directriz es '
-      + 'OPCIONAL acá — en blanco, la escena se arma con la del dominio, que es lo que el carril '
+      + 'OPCIONAL aquí — en blanco, la escena se arma con la del dominio, que es lo que el carril '
       + 'habría usado.',
     required: false,
   };
@@ -627,7 +627,7 @@ export function PieceActionsBar({
    * EL ACUSE LO DA EL COMPONENTE, NO CADA BANDEJA. Toda acción que resuelve una pieza dice
    * qué pasó ANTES de que la tarjeta desaparezca, y lo dice igual en las dos pantallas.
    *
-   * POR QUÉ ESTÁ ACÁ Y NO EN CADA BANDEJA, medido el 2026-09-13: en la primera versión de
+   * POR QUÉ ESTÁ AQUÍ Y NO EN CADA BANDEJA, medido el 2026-09-13: en la primera versión de
    * U-5, `approve` llamaba a `onResolved` directo. Calibración mostraba su tarjeta de
    * confirmación y Publicación quitaba la pieza EN SECO — aprobar desde ahí no decía nada,
    * y un acuse ausente no se distingue de una acción que no ocurrió. Es la misma divergencia

@@ -21,7 +21,7 @@ import {
  * pinta `progress` tal cual (nunca recomputa ni bloquea por umbral).
  *
  * Scope-gating: el <select> de marca se limita a listOptions(session_token) (que la EF
- * iid-inbound ya filtra por brand_scope). calibrate.ts no valida JWT — el gate vive acá.
+ * iid-inbound ya filtra por brand_scope). calibrate.ts no valida JWT — el gate vive aquí.
  *
  * from_genome = stub honesto (no hay flujo: depende de piezas que no existen). Solo
  * from_scratch se construye.
@@ -300,7 +300,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
       setRetry(null);
       return;
     }
-    setLoopError(err instanceof IidError ? err.message : 'Error inesperado. Reintentá.');
+    setLoopError(err instanceof IidError ? err.message : 'Error inesperado. Reintenta.');
     setRetry(null);
   };
 
@@ -394,7 +394,7 @@ export default function CalibrationConsole({ session }: { session: IidSession })
           <Dna size={22} className="text-accent" /> Calibrar la voz de la marca
         </h2>
         <p className="text-sm text-zinc-500 mt-1">
-          El generador propone textos; vos juzgás si suenan a la marca. Cuando converge, la voz queda
+          El generador propone textos; tú juzgas si suenan a la marca. Cuando converge, la voz queda
           calibrada. El original nunca se republica.
         </p>
       </div>
@@ -484,7 +484,7 @@ function SelectorView({
             Marca <span className="text-accent ml-1">*</span>
           </span>
           <span className="block text-[10px] text-zinc-600 mt-0.5 mb-2 font-body normal-case tracking-normal">
-            Solo tus marcas en alcance. Elegí una para ver sus sesiones de calibración.
+            Solo tus marcas en alcance. Elige una para ver sus sesiones de calibración.
           </span>
           <div className="relative mt-1">
             <Store size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
@@ -496,7 +496,7 @@ function SelectorView({
                 selectedBrand ? 'border-zinc-800' : 'border-amber-500/40'
               )}
             >
-              <option value="">— elegí una marca —</option>
+              <option value="">— elige una marca —</option>
               {brands.map((b) => <option key={b.id} value={b.id}>{b.name || b.id}</option>)}
             </select>
           </div>
@@ -642,7 +642,7 @@ function NewSessionView({
       {/* Intención */}
       <label className="block">
         <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">
-          ¿Qué voz buscás? <span className="text-accent ml-1">*</span>
+          ¿Qué voz buscas? <span className="text-accent ml-1">*</span>
         </span>
         <span className="block text-[10px] text-zinc-600 mt-0.5 mb-1.5 font-body normal-case tracking-normal">
           La intención de la voz — ej. "conversión directa", "editorial reflexivo".
@@ -771,8 +771,8 @@ function NewSessionView({
           <div className="flex items-start gap-2.5 bg-amber-500/[0.06] border border-amber-500/25 rounded-xl px-4 py-3">
             <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
             <p className="text-[12px] text-amber-200/90 leading-snug">
-              Podés arrancar igual. Lo que dejes sin declarar, el generador lo trabaja con menos
-              información — funciona, pero afina menos. Podés completarlo ahora o más adelante.
+              Puedes empezar igual. Lo que dejes sin declarar, el generador lo trabaja con menos
+              información — funciona, pero afina menos. Puedes completarlo ahora o más adelante.
             </p>
           </div>
         )}
@@ -891,7 +891,7 @@ function LoopView({
         </div>
       )}
 
-      {/* E5c · Aviso suave "¿cerrás o seguís?" + cierre explícito. Informativo, NO bloquea:
+      {/* E5c · Aviso suave "¿cierras o sigues?" + cierre explícito. Informativo, NO bloquea:
           el operador puede seguir votando SÍ/NO tranquilamente. El botón es la única vía
           que cierra la sesión (el umbral ya no auto-cierra). */}
       {canConverge && !retry && (
@@ -903,7 +903,7 @@ function LoopView({
           <div className="flex items-start gap-2.5">
             <CheckCircle2 size={18} className="text-emerald-400 shrink-0 mt-0.5" />
             <p className="text-sm text-emerald-100/90 leading-snug">
-              Ya podés cerrar la voz cuando quieras. ¿Cerramos, o seguís puliendo unos textos más?
+              Ya puedes cerrar la voz cuando quieras. ¿Cerramos, o sigues puliendo unos textos más?
               <span className="block text-[12px] text-emerald-300/60 mt-0.5">
                 Seguir es simplemente juzgar otro turno abajo. Cerrar es una decisión tuya.
               </span>

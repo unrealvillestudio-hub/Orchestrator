@@ -192,7 +192,7 @@ describe('ni un huso, ni un desfase, ni una marca en el código', () => {
 
 // ── U-3 · LA LIBERACIÓN DE FRANJA ────────────────────────────────────────────────
 /**
- * Sin red y sin base: `fetch` va doblado. Lo que se fija acá no es que PostgREST responda
+ * Sin red y sin base: `fetch` va doblado. Lo que se fija aquí no es que PostgREST responda
  * —eso sólo se sabe contra la base real, y su verificación es la del brief—, sino que la
  * petición que sale es la correcta y que NINGÚN fallo escapa hacia el llamador.
  *
@@ -305,7 +305,7 @@ describe('releaseSlotsForPiece — devolver la franja al pozo', () => {
   });
 
   it('fetch que lanza → ok false, y la excepción NO escapa hacia el llamador', async () => {
-    // Importa que no escape: el llamador ya selló la pieza, y una excepción acá convertiría
+    // Importa que no escape: el llamador ya selló la pieza, y una excepción aquí convertiría
     // un veredicto aplicado en un 500 que afirma que no se hizo nada.
     const d = doblarFetch(() => { throw new Error('socket colgado'); });
     try {
@@ -341,7 +341,7 @@ describe('urgentChannels · la urgencia es del canal', () => {
   });
 
   it('EL DEFECTO QUE EVITA: un canal con muchas candidatas aparece UNA vez', () => {
-    // `indexNextFree` ya deja una fila por canal; lo que se fija acá es que la urgencia no
+    // `indexNextFree` ya deja una fila por canal; lo que se fija aquí es que la urgencia no
     // multiplique por pieza. El canal es uno, la franja es una, la decisión es una.
     const idx = indexNextFree([
       fila('Alfa', 'meta_ig', '2026-09-22T23:00:00Z'),

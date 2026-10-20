@@ -13,7 +13,7 @@ import {
 } from '../../services/challengedInbox';
 import { CountPill, Pager, CopyableId, fmtDate, PieceSearchBox, SearchNotice } from './pieceUi';
 // U-6 — las acciones de pieza son el MISMO componente que montan Calibración y Publicación.
-// Una segunda implementación acá divergiría en el primer arreglo que tocara sólo una.
+// Una segunda implementación aquí divergiría en el primer arreglo que tocara sólo una.
 import { PieceActionsBar } from './pieceActions';
 // Lectura en voz alta. Aquí el texto YA llega plano: el adaptador sólo normaliza la forma.
 import { SpeechReader } from '../../ui/SpeechReader';
@@ -43,7 +43,7 @@ const PAGE = 20;
  * terciario deja de abrir sólo el título y pasa a desplegar las seis acciones.
  *
  * Que una acción esté disponible en las cuatro bandejas no significa que pese lo mismo en
- * todas. Si el arbitraje deja de ser lo primero que se ve acá, el corte falló aunque las
+ * todas. Si el arbitraje deja de ser lo primero que se ve aquí, el corte falló aunque las
  * seis funcionen — y por eso las acciones llegan PLEGADAS: hasta que alguien las pide, la
  * fila de acción sigue siendo exactamente la de antes.
  *
@@ -146,7 +146,7 @@ export default function ChallengedInboxModule({ session }: { session: IidSession
    */
   const undo = (row: ChallengedRow) => {
     setDecided((d) => { const n = { ...d }; delete n[row.id]; return n; });
-    setRowError((e) => ({ ...e, [row.id]: 'El arbitraje ya quedó registrado: deshacer sólo lo saca de la vista. Para cambiarlo, decidí de nuevo desde el chat con Claude.' }));
+    setRowError((e) => ({ ...e, [row.id]: 'El arbitraje ya quedó registrado: deshacer sólo lo saca de la vista. Para cambiarlo, decide de nuevo desde el chat con Claude.' }));
   };
 
   return (
@@ -208,7 +208,7 @@ export default function ChallengedInboxModule({ session }: { session: IidSession
         </div>
       )}
 
-      {/* U-7 — el mismo campo de las otras dos bandejas. Acá busca por el id de la PIEZA
+      {/* U-7 — el mismo campo de las otras dos bandejas. Aquí busca por el id de la PIEZA
           retenida: una fila de arbitraje sin pieza nunca cae en una búsqueda por id, porque
           no hay id contra el que comparar. */}
       {available && (
@@ -286,7 +286,7 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
   });
   /** U-6 — las acciones de pieza llegan plegadas: se piden, no se imponen. */
   const [showActions, setShowActions] = useState(false);
-  /** La pieza salió de circulación por una acción tomada acá. El acuse se queda a la vista. */
+  /** La pieza salió de circulación por una acción tomada aquí. El acuse se queda a la vista. */
   const [resolved, setResolved] = useState(false);
 
   const piece = row.piece;
@@ -433,7 +433,7 @@ function ChallengeCard({ row, token, decided, busy, error, onDecide, onUndo }: {
                 }}
                 token={token}
                 // La pieza se resolvió: el propio componente pinta el acuse y retira sus
-                // botones. Acá sólo se impide volver a plegarlo, porque plegar el acuse
+                // botones. Aquí sólo se impide volver a plegarlo, porque plegar el acuse
                 // sería tragarse la única señal de que la acción ocurrió.
                 onResolved={() => setResolved(true)}
                 onEdited={(after) => setLocal((l) => ({ ...l, body: after }))}

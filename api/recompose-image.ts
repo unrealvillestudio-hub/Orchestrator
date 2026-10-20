@@ -56,7 +56,7 @@ import { callEdgeFunction } from './_challengedShared.js';
 
 /**
  * Mismo techo que declara el motor (`SCENE_DIRECTIVE_MAX_CHARS` en content-run-stage). Se valida
- * acá TAMBIÉN para que quien escribe lo sepa antes de pagar el viaje, no para sustituir al motor:
+ * aquí TAMBIÉN para que quien escribe lo sepa antes de pagar el viaje, no para sustituir al motor:
  * el rechazo de verdad lo hace él, que es donde la regla vive.
  */
 export const DIRECTIVE_MAX_CHARS = 600;
@@ -109,7 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   //
   // Exigirla ahí convertía una regla de ahorro en una puerta cerrada. Se comprueba DESPUÉS de leer
   // la pieza, porque hasta leerla no se sabe cuál de los dos casos es. El techo de caracteres sí se
-  // valida acá: vale para las dos, y quien escribe de más tiene que saberlo antes de pagar el viaje.
+  // valida aquí: vale para las dos, y quien escribe de más tiene que saberlo antes de pagar el viaje.
   const directive = typeof body.visual_directive === 'string' ? body.visual_directive.trim() : '';
   if (directive.length > DIRECTIVE_MAX_CHARS) {
     return res.status(400).json({
@@ -152,7 +152,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 2026-10-19 — EL TEXTO DE LA IMAGEN, SIN TOCAR LA ESCENA. Con `overlay_override` en el cuerpo no hay
     // directriz ni generación: se recompone sobre la escena limpia que ya existe (0 USD). El motor valida el
-    // texto antes de componer; acá sólo se exige que haya una imagen sobre la que escribir.
+    // texto antes de componer; aquí sólo se exige que haya una imagen sobre la que escribir.
     if (conTexto) {
       if (!tieneImagen) {
         return res.status(409).json({ error: 'no_image', detail: 'la pieza no tiene imagen: primero hay que generarla, después se escribe su texto' });
@@ -212,7 +212,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // El status de la EF se propaga sin traducir, igual que en `callEdgeFunction`: el motor ya
     // distingue la directriz demasiado larga, la contradicción con `regenerate_image` y el fallo de
-    // generación, y re-mapearlos acá obligaría a la interfaz a adivinar cuál de los tres pasó.
+    // generación, y re-mapearlos aquí obligaría a la interfaz a adivinar cuál de los tres pasó.
     if (!ef.body?.ok) {
       return res.status(ef.status >= 400 ? ef.status : 422).json({
         error: 'recompose_failed',

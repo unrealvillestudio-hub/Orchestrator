@@ -13,7 +13,7 @@ import { CountPill, fmtInZone } from './pieceUi';
  *
  * Lo que hay que publicar a mano, con todo lo necesario para hacerlo y nada más: las fotos con su
  * URL y UN bloque de texto —título, cuerpo, hashtags y firma juntos— listo para copiar y pegar.
- * Filtrable por marca y por canal; los dos filtros salen del dato, ninguna lista vive acá.
+ * Filtrable por marca y por canal; los dos filtros salen del dato, ninguna lista vive aquí.
  *
  * «Publicada» (Sam, 2026-10-01): con el link del post como prueba, marca la franja y la pieza
  * publicadas, deja la fila en la bitácora del drenaje y cierra el aviso. La tarjeta sale de la lista.

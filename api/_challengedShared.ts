@@ -23,13 +23,13 @@
  * decidir en bloque sobre reglas distintas, que es justo lo que el arbitraje no debe hacer.
  *
  * ── AUTH Y MUTACIÓN ──────────────────────────────────────────────────────────────
- * La auth es la de siempre: JWT admin verificado acá (`requireAdmin` de
+ * La auth es la de siempre: JWT admin verificado aquí (`requireAdmin` de
  * `_calibrationShared`), service_role server-side, y el cliente NUNCA toca la DB.
  *
  * Pero las MUTACIONES no se reimplementan: se delegan a las Edge Functions que CALIB-01
  * cortes C y D ya exponen (`judge-arbitration`, `piece-edit`). Ahí viven la idempotencia
  * del arbitraje, el orden diff→texto→guarda de la edición y la guarda determinista con su
- * espejo del corrector. Reescribir esa lógica acá crearía una segunda fuente de verdad que
+ * espejo del corrector. Reescribir esa lógica aquí crearía una segunda fuente de verdad que
  * divergiría en el primer cambio — el mismo defecto que CALIB-01 combatió con el espejo.
  * Este repo aporta lo que la EF no puede: el gate de rol.
  */
@@ -99,7 +99,7 @@ export interface ChallengedRow {
      */
     actions: PieceActions;
     /**
-     * SIN-IMAGEN-01 — si la pieza ya tiene imagen. Va acá por la misma razón que `actions`: lo
+     * SIN-IMAGEN-01 — si la pieza ya tiene imagen. Va aquí por la misma razón que `actions`: lo
      * que se puede hacer con la pieza lo decide su ESTADO, no la pantalla que la abre, y el verbo
      * con que se ofrece tampoco puede cambiar según desde dónde se mire.
      */
@@ -121,7 +121,7 @@ export interface ChallengedRow {
 }
 
 /**
- * La razón de la retención, en una línea legible. Vive acá y no en la UI para que el
+ * La razón de la retención, en una línea legible. Vive aquí y no en la UI para que el
  * server sea la única fuente de la explicación: si mañana hay un segundo motivo de
  * retención, cambia una función y no cinco componentes.
  *
@@ -208,7 +208,7 @@ export async function fetchRuleTexts(codes: string[]): Promise<RuleTextRow[]> {
 }
 
 /** Las columnas de pieza que la bandeja necesita. `assets` trae el texto y el título. */
-// U-4 — `discarded_at` entra acá porque `actionsFor` lo necesita: sin él, una pieza ya
+// U-4 — `discarded_at` entra aquí porque `actionsFor` lo necesita: sin él, una pieza ya
 // sellada llegaría a la tarjeta con sus seis acciones disponibles. Una columna que falta
 // no da error, da un permiso.
 const PIECE_SELECT = 'id,brand_id,domain,platform,status,discarded_at,created_at,assets,pass_type,challenged_at,edited_at,edited_by';
@@ -341,7 +341,7 @@ export function toChallengedRow(
  * Llama a una EF de Supabase con service_role y devuelve su status y su cuerpo TAL CUAL.
  *
  * Se propaga el status sin traducir a propósito: la EF ya distingue 400 (entrada inválida),
- * 404 (no existe), 409 (ya decidido) y 500, y re-mapearlos acá haría que la UI tuviera que
+ * 404 (no existe), 409 (ya decidido) y 500, y re-mapearlos aquí haría que la UI tuviera que
  * adivinar qué pasó. Este proxy aporta el gate de rol, no una segunda opinión.
  *
  * `unavailable` (503) cuando la EF todavía no está desplegada — el estado esperado mientras

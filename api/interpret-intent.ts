@@ -253,7 +253,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
      * QUÉ ENRIQUECIMIENTO FALTÓ, EN LA RESPUESTA Y NO SÓLO EN EL LOG.
      *
      * Un aviso que sólo vive en los logs de Vercel no lo lee nadie hasta que algo ya salió
-     * mal. Acá llega a quien puede hacer algo con él. Vacío = se cargó todo, que es lo
+     * mal. Aquí llega a quien puede hacer algo con él. Vacío = se cargó todo, que es lo
      * normal y por eso se declara siempre en vez de omitirse cuando está vacío: un campo
      * ausente no se distingue de una versión vieja que no lo mandaba.
      */

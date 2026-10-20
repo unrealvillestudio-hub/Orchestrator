@@ -35,7 +35,7 @@ export interface ChallengedPiece {
   edited_by: string | null;
   created_at: string | null;
   /**
-   * U-4 lo puso en la respuesta; U-6 lo declara acá y la bandeja lo usa. QUÉ SE PUEDE HACER
+   * U-4 lo puso en la respuesta; U-6 lo declara aquí y la bandeja lo usa. QUÉ SE PUEDE HACER
    * CON ESTA PIEZA LO DICE EL SERVER, igual que en las otras dos bandejas: el front no
    * vuelve a mirar `status` para decidirlo. Si el contrato no lo trae, `actionButtons` apaga
    * las seis con su motivo — fail-loud, nunca un botón activo que fallaría al pulsarse.

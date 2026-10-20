@@ -61,7 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const brand  = strParam(req.query.brand);
   const rule   = strParam(req.query.rule);
 
-  // U-7 — buscar por id. Acá el id que se busca es el de la PIEZA retenida (`piece_id`), no
+  // U-7 — buscar por id. Aquí el id que se busca es el de la PIEZA retenida (`piece_id`), no
   // el de la fila de arbitraje: lo que Sam tiene delante y copia es el de la pieza.
   let search: PieceSearch | null;
   try {

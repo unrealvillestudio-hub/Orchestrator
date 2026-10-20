@@ -55,7 +55,7 @@ const SB_KEY = () => env('VITE_SUPABASE_ANON_KEY');
  * es instancia viviendo en el código — el mismo defecto que el resto del corte retira, en
  * pequeño. Una marca nueva salía gris porque nadie se acordaba de añadirla.
  *
- * La REGLA de derivar un tono estable a partir del identificador sí es eje y sí va acá. El
+ * La REGLA de derivar un tono estable a partir del identificador sí es eje y sí va aquí. El
  * mismo id da siempre el mismo color, y una marca nueva tiene el suyo sin tocar una línea.
  * Si algún día `public.brands` gana una columna de color, esa columna manda y esta función
  * pasa a ser el respaldo — no al revés.
