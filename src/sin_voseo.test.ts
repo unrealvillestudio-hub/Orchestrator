@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formasVoseantes } from './idioma/voseo';
@@ -26,8 +26,10 @@ import { formasVoseantes } from './idioma/voseo';
  */
 const RAIZ = fileURLToPath(new URL('..', import.meta.url));
 // `supabase/functions` entra el 2026-10-21: el correo de `iid-approval-digest` abría con una forma
-// voseante y el barrido de #82 no la vio porque esta lista no incluía la carpeta.
-const CARPETAS = ['src', 'api', 'supabase/functions'];
+// voseante y el barrido de #82 no la vio porque esta lista no incluía la carpeta. Ese mismo día la
+// copia vieja de la EF salió del repo (la viva se versiona en `unrlvl-iid-functions`), así que la
+// carpeta puede no existir: se recorre si existe, para que una EF que vuelva a entrar quede vigilada.
+const CARPETAS = ['src', 'api', 'supabase/functions'].filter((c) => existsSync(join(RAIZ, c)));
 const EXTENSIONES = /\.(tsx?|mjs|md|html|css|json)$/;
 
 function archivos(dir: string): string[] {
