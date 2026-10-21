@@ -325,6 +325,47 @@ export function Selector({ label, value, onChange, options }: {
 }
 
 /**
+ * FILTRO POR DÍA DE SALIDA (Sam, 2026-10-21: «no me permite filtrar por fecha ni hoy o mañana»).
+ *
+ * El valor viaja tal cual al server: '' (todos), 'today', 'tomorrow' o 'AAAA-MM-DD'. «Hoy» y
+ * «Mañana» los resuelve el server EN EL RELOJ DE CADA MARCA, el mismo en que la tarjeta pinta
+ * «Publica:»; esta pantalla no calcula fechas. La fecha inicial del calendario es la de hoy en el
+ * reloj de quien mira, sólo como punto de partida.
+ */
+export function DayPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const isDate = /^\d{4}-\d{2}-\d{2}$/.test(value);
+  const mode = isDate ? 'date' : value;
+  const hoyLocal = () => new Date().toLocaleDateString('en-CA');
+  const cls = 'bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1 text-zinc-300 outline-none focus:border-accent/50 transition-colors';
+  return (
+    <label className="flex items-center gap-2" title="Hoy y mañana se miden en el reloj de cada marca">
+      <span className="text-zinc-600">Día</span>
+      <select
+        value={mode}
+        onChange={(e) => {
+          const v = e.target.value;
+          onChange(v === 'date' ? (isDate ? value : hoyLocal()) : v);
+        }}
+        className={cls}
+      >
+        <option value="">Todos</option>
+        <option value="today">Hoy</option>
+        <option value="tomorrow">Mañana</option>
+        <option value="date">Fecha…</option>
+      </select>
+      {isDate && (
+        <input
+          type="date"
+          value={value}
+          onChange={(e) => { if (e.target.value) onChange(e.target.value); }}
+          className={cls}
+        />
+      )}
+    </label>
+  );
+}
+
+/**
  * LOS GRUPOS DE UNA PESTAÑA CON ALCANCE (Sam, 2026-10-07: filtrar Arreglos por «reparadas»,
  * «auto-fixed» y «por reparar»). Es el mismo patrón que el selector «Estado» de Calibración —el
  * de las aplazadas—: «Todas» por defecto y el número de cada grupo al lado, contado por el server

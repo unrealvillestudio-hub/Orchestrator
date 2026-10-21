@@ -11,7 +11,7 @@ import {
 } from '../../services/publishInbox';
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader,
-  SlotLine, SlotsNotice, SearchNotice, PieceSummary, MobileDetails, FilterBar, CarouselToggle,
+  SlotLine, SlotsNotice, SearchNotice, PieceSummary, MobileDetails, FilterBar, CarouselToggle, DayPicker,
 } from './pieceUi';
 // U-5 — el ÚNICO componente de acciones del sistema, el mismo que monta calibración.
 import { PieceActionsBar } from './pieceActions';
@@ -90,13 +90,15 @@ function ScheduledQueue({ session }: { session: IidSession }) {
   const [q, setQ]             = useState('');
   // 2026-10-06 — sólo carruseles, de cualquier canal; se combina con `channel`.
   const [carousel, setCarousel] = useState(false);
+  // 2026-10-21 — día de salida: '' | 'today' | 'tomorrow' | 'AAAA-MM-DD'.
+  const [day, setDay]         = useState('');
   const [offset, setOffset]   = useState(0);
 
   type Query = {
     offset: number; brand: string; channel: string; chStatus: ChannelStatusFilter;
-    gen: GenerationFilter; status: string; q: string; carousel: boolean;
+    gen: GenerationFilter; status: string; q: string; carousel: boolean; day: string;
   };
-  const current = (): Query => ({ offset, brand, channel, chStatus, gen, status, q, carousel });
+  const current = (): Query => ({ offset, brand, channel, chStatus, gen, status, q, carousel, day });
 
   const load = async (q: Query) => {
     setLoading(true); setError(null);
@@ -111,6 +113,7 @@ function ScheduledQueue({ session }: { session: IidSession }) {
         status: q.status || undefined,
         q: q.q || undefined,
         carousel: q.carousel,
+        day: q.day || undefined,
       });
       setData(r);
     } catch (err) {
@@ -128,7 +131,7 @@ function ScheduledQueue({ session }: { session: IidSession }) {
   const apply = (patch: Partial<Query>) => {
     const q = { ...current(), offset: 0, ...patch };
     setOffset(q.offset); setBrand(q.brand); setChannel(q.channel); setChStatus(q.chStatus); setGen(q.gen);
-    setStatus(q.status); setQ(q.q); setCarousel(q.carousel);
+    setStatus(q.status); setQ(q.q); setCarousel(q.carousel); setDay(q.day);
     load(q);
   };
   const goPage = (o: number) => { setOffset(o); load({ ...current(), offset: o }); };
@@ -210,9 +213,11 @@ function ScheduledQueue({ session }: { session: IidSession }) {
 
       <FilterBar
         q={q} onSearch={(v) => apply({ q: v })}
-        active={[chStatus !== 'all', gen !== 'all', status !== ''].filter(Boolean).length}
+        active={[chStatus !== 'all', gen !== 'all', status !== '', day !== ''].filter(Boolean).length}
         className="flex-col md:flex-row items-stretch md:items-center gap-3 md:gap-4 md:flex-wrap md:mb-5 text-[11px] font-mono text-zinc-600"
       >
+        {/* 2026-10-21 — el día de salida, en el reloj de cada marca. */}
+        <DayPicker value={day} onChange={(v) => apply({ day: v })} />
         <Selector
           label="Estado del canal"
           value={chStatus}

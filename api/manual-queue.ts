@@ -8,9 +8,11 @@
  * Entran las franjas `manual_pending` (la hora ya pasó y el drenaje la dejó para Sam) y las
  * `reserved` de esos mismos canales (la que viene, para prepararla). Ver `_manualShared.ts`.
  *
- * GET /api/manual-queue?brand=&channel=
+ * GET /api/manual-queue?brand=&channel=&day=
  *   Auth: admin JWT vía `Authorization: Bearer <session_token>`.
- *   `by_brand` y `by_channel` se cuentan ANTES de filtrar: las pastillas dicen siempre el total.
+ *   `by_brand` y `by_channel` se cuentan ANTES de filtrar por marca y canal: las pastillas dicen
+ *   siempre el total. `day` (2026-10-21: '' | today | tomorrow | AAAA-MM-DD, en el reloj de la
+ *   marca) se aplica ANTES de contar: con un día puesto, las pastillas cuentan lo de ese día.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -18,7 +20,7 @@ import { applyCors, extractToken, SB_URL, SB_KEY } from './_calibrationShared.js
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
 import { requireReviewer, filterByReviewScope } from './_reviewScope.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
-import { fetchBrandTimezones } from './_publishSlots.js';
+import { fetchBrandTimezones, dayFilterParam, dayFilterLabel, slotMatchesDay } from './_publishSlots.js';
 import {
   buildManualItems, manualChannelKey,
   type ManualPieceInput, type ManualSlotRow,
@@ -53,6 +55,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const brand = strParam(req.query.brand);
   const channel = strParam(req.query.channel);
+  const day = dayFilterParam(req.query.day);
+  if (!day) {
+    return res.status(400).json({
+      error: 'invalid_day',
+      detail: 'El día debe ser «today», «tomorrow» o una fecha real AAAA-MM-DD.',
+    });
+  }
 
   try {
     const [channels, slots, timezones] = await Promise.all([
@@ -83,7 +92,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       for (const p of rows) pieces.set(p.id, p);
     }
 
-    const all = buildManualItems(enManual, manual, pieces, timezones, new Date());
+    const now = new Date();
+    const all = buildManualItems(enManual, manual, pieces, timezones, now)
+      .filter((it) => slotMatchesDay(it.slot_at, day, now, it.timezone));
 
     const by_brand: Record<string, number> = {};
     const by_channel: Record<string, number> = {};
@@ -95,7 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const items = all.filter((it) =>
       (!brand || it.brand_id === brand) && (!channel || it.platform_key === channel));
 
-    return res.status(200).json({ total: items.length, by_brand, by_channel, items });
+    return res.status(200).json({ total: items.length, by_brand, by_channel, day: dayFilterLabel(day), items });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[manual-queue]', message);

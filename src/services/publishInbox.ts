@@ -185,6 +185,10 @@ export interface PublishQueueResult {
    */
   slots_source: 'ok' | 'unavailable';
   truncated?: boolean;
+  /** 2026-10-21 — el día pedido (`all`, `today`, `tomorrow` o `AAAA-MM-DD`). */
+  day?: string;
+  /** Cuántas de las que entran se juzgaron en UTC porque su marca no tiene huso sembrado. */
+  day_without_zone?: number;
 }
 
 // ── Fetch ────────────────────────────────────────────────────────────────────
@@ -222,6 +226,8 @@ export function fetchPublishQueue(
     q?: string;
     /** 2026-10-06 — sólo carruseles, de cualquier canal. Se combina con `channel`. */
     carousel?: boolean;
+    /** 2026-10-21 — día de salida: `today`, `tomorrow` o `AAAA-MM-DD`, en el reloj de cada marca. */
+    day?: string;
   } = {},
 ): Promise<PublishQueueResult> {
   const q = new URLSearchParams();
@@ -234,6 +240,7 @@ export function fetchPublishQueue(
   if (opts.status) q.set('status', opts.status);
   if (opts.q) q.set('q', opts.q);
   if (opts.carousel) q.set('carousel', '1');
+  if (opts.day) q.set('day', opts.day);
   const qs = q.toString();
   return req<PublishQueueResult>(`/api/publish-queue${qs ? `?${qs}` : ''}`, token);
 }
@@ -265,10 +272,14 @@ export interface ManualQueueResult {
 }
 
 /** Lo que hay que publicar a mano. Marca y canal son filtros opcionales. */
-export function fetchManualQueue(token: string, opts: { brand?: string; channel?: string } = {}): Promise<ManualQueueResult> {
+export function fetchManualQueue(
+  token: string,
+  opts: { brand?: string; channel?: string; day?: string } = {},
+): Promise<ManualQueueResult> {
   const q = new URLSearchParams();
   if (opts.brand) q.set('brand', opts.brand);
   if (opts.channel) q.set('channel', opts.channel);
+  if (opts.day) q.set('day', opts.day);
   const qs = q.toString();
   return req<ManualQueueResult>(`/api/manual-queue${qs ? `?${qs}` : ''}`, token);
 }
