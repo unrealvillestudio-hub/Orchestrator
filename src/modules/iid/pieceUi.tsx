@@ -1110,6 +1110,10 @@ export const PENDING_STATE_UI: Record<PendingState, { color: string; label: stri
   // fixable tuyo (celeste) ni un desacuerdo del juez (violeta); es lo que el sistema no supo arreglar.
   autofix_residuo: { color: '#F472B6', label: 'auto-fix: residuo',
                 hint: 'El carril auto-fix la corrigió antes de que naciera y no pudo con todo. Lo que quedó está en la tarjeta. Si la regla pedía material que el brief no traía, no se inventó.' },
+  // 2026-10-21 — la aprobaste y después cambió sin ti. Rojo anaranjado: no es un defecto de la pieza,
+  // es que lo que va a salir ya no es lo que aprobaste.
+  cambiada_tras_aprobar: { color: '#FB7185', label: 'cambió tras tu aprobación',
+                hint: 'La aprobaste y después cambió algo (imagen, texto o láminas) sin ti. El motivo dice qué, quién y si fue una actividad declarada. Apruébala otra vez o usa Deshacer.' },
 };
 
 /** La píldora que nombra el estado. El color lo pone la misma tabla que pinta el borde. */

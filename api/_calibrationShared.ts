@@ -410,7 +410,7 @@ export function generationOf(piece: ContentPiece, cutoffs: PipelineCutoff[]): Ge
  * obliga a adivinar, y quien adivina termina pidiéndoselo a alguien por chat.
  */
 export type PieceActionKey =
-  | 'approve' | 'reject' | 'fixable' | 'research' | 'discard' | 'edit_text' | 'recompose_image';
+  | 'approve' | 'reject' | 'fixable' | 'research' | 'discard' | 'edit_text' | 'recompose_image' | 'undo';
 
 export interface PieceAction {
   available: boolean;
@@ -421,7 +421,7 @@ export interface PieceAction {
 export type PieceActions = Record<PieceActionKey, PieceAction>;
 
 export const ACTION_KEYS: readonly PieceActionKey[] =
-  ['approve', 'reject', 'fixable', 'research', 'discard', 'edit_text', 'recompose_image'];
+  ['approve', 'reject', 'fixable', 'research', 'discard', 'edit_text', 'recompose_image', 'undo'];
 
 const SI: PieceAction = { available: true, reason: null };
 const NO = (reason: string): PieceAction => ({ available: false, reason });
@@ -430,11 +430,23 @@ const NO = (reason: string): PieceAction => ({ available: false, reason });
 const YA_PUBLICADA = 'La pieza ya salió. Revertir una publicación no es una acción de bandeja.';
 const YA_DESCARTADA = 'La pieza ya está sellada: tiene `discarded_at`. Un veredicto no se pisa.';
 const YA_APROBADA = 'Ya está aprobada y con franja. Para cambiar de opinión, rechazar o descartar.';
+const SIN_VERSION_ANTERIOR = 'No hay una versión anterior guardada: la pieza no se ha corregido ni regenerado.';
+
+/**
+ * ¿HAY ALGO QUE DESHACER? (2026-10-21) Una imagen anterior en `image.history` o una edición de texto
+ * (`edited_at`). Es una señal de la FILA, como todo `actionsFor`: cuál de los dos cambios fue el último
+ * lo decide `api/undo-change.ts`, que lee además `intel.piece_edits`.
+ */
+export function hayVersionAnterior(piece: { edited_at?: string | null; assets?: unknown } | null | undefined): boolean {
+  const h = (piece?.assets as { image?: { history?: unknown } } | null | undefined)?.image?.history;
+  return (Array.isArray(h) && h.length > 0) || (typeof piece?.edited_at === 'string' && !!piece.edited_at);
+}
 
 export function actionsFor(piece: {
   status?: string | null;
   discarded_at?: string | null;
-  assets?: { image?: { url?: string | null } } | null;
+  edited_at?: string | null;
+  assets?: { image?: { url?: string | null; history?: unknown } } | null;
 }): PieceActions {
   const todas = (a: PieceAction): PieceActions =>
     Object.fromEntries(ACTION_KEYS.map((k) => [k, a])) as PieceActions;
@@ -494,6 +506,12 @@ export function actionsFor(piece: {
      * Ante la duda, ofrecer y que hable quien tiene la regla.
      */
     recompose_image: SI,
+    /**
+     * DESHACER (Sam, 2026-10-21: «agregar un botón de undo en todas las pestañas y que vuelva la
+     * versión anterior»). Vale en cualquier estado vivo, también `scheduled`: es una corrección de
+     * último momento. Sin versión anterior guardada no hay nada que deshacer, y se dice.
+     */
+    undo: hayVersionAnterior(piece) ? SI : NO(SIN_VERSION_ANTERIOR),
   };
 }
 
@@ -721,6 +739,20 @@ export function autofixOf(piece: { assets?: unknown } | null | undefined): Autof
 /** La señal del eje `autofix_residuo`, con el mismo criterio que la tarjeta: un único lector. */
 export function autofixResiduo(piece: { assets?: unknown } | null | undefined): boolean {
   return autofixOf(piece)?.outcome === 'residual';
+}
+
+/**
+ * LA SEÑAL DEL EJE `cambiada_tras_aprobar` (2026-10-21). La escribe el trigger `vigila_lo_aprobado` en
+ * el mismo UPDATE que pone `challenged_at`, así que es VIGENTE cuando las dos marcas coinciden. Si la
+ * pieza se retó otra vez después (un fixable, por ejemplo), `challenged_at` avanza y la señal deja de
+ * ser la causa de que esté retada. Un minuto de margen cubre el reloj de la base frente al del trigger.
+ */
+export function cambioTrasAprobacion(piece: { assets?: unknown; challenged_at?: string | null } | null | undefined): boolean {
+  const at = (piece?.assets as { approval_change?: { at?: unknown } } | null | undefined)?.approval_change?.at;
+  const ch = piece?.challenged_at;
+  if (typeof at !== 'string' || typeof ch !== 'string') return false;
+  const a = Date.parse(at), c = Date.parse(ch);
+  return Number.isFinite(a) && Number.isFinite(c) && Math.abs(a - c) <= 60_000;
 }
 
 export function tieneImagen(piece: { assets?: unknown } | null | undefined): boolean {
@@ -1668,11 +1700,15 @@ export type PendingState =
   'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida' | 'sin_imagen'
   // CARRIL AUTO-FIX (2026-10-01) — el carril corrió y no pudo resolverlo todo: la pieza nació
   // `challenged` con el residuo escrito. Es trabajo de Arreglos (decisión de Sam), no de Calibración.
-  | 'autofix_residuo';
+  | 'autofix_residuo'
+  // 2026-10-21 — algo que Sam YA había aprobado cambió después, sin él: el trigger `vigila_lo_aprobado`
+  // (unrlvl-iid-functions, migración 20261022010000) la devolvió a `challenged` y le dejó
+  // `assets.approval_change`. Es de Arreglos (Sam: «el carril la coloque en arreglos»).
+  | 'cambiada_tras_aprobar';
 
 /** Todos los ejes, para que un selector salga de aquí y no de una lista escrita a mano. */
 export const PENDING_STATES: readonly PendingState[] =
-  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo'];
+  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo', 'cambiada_tras_aprobar'];
 
 /**
  * UNA PIEZA, UNA PESTAÑA (Sam, 2026-09-30: «las mismas piezas —awaiting_approval, arreglos, retadas,
@@ -1707,10 +1743,15 @@ export function pendingStateOf(
   // Sólo distingue entre las `challenged` sin juicio de Sam y CON imagen: sin imagen manda la imagen
   // (`sin_imagen`, el arreglo que hay que hacer primero), y con juicio de Sam manda su `fixable`.
   autofixResiduoSenal: boolean,
+  // 2026-10-21 — OBLIGATORIO por lo mismo. Se lee con `cambioTrasAprobacion()`. Va PRIMERO dentro de
+  // `challenged`: una pieza aprobada tiene fila en el corpus (su aprobación), y preguntar antes por el
+  // corpus la mandaría a «por arreglar» como si fuera un fixable de Sam.
+  cambioTrasAprobar: boolean,
 ): PendingState {
   const s = String(status ?? '').trim().toLowerCase();
   if (s === 'deferred') return 'aplazada';
   if (s === 'challenged') {
+    if (cambioTrasAprobar) return 'cambiada_tras_aprobar';
     if (yaCalibrada) return 'por_arreglar';
     if (!conImagen) return 'sin_imagen';
     return autofixResiduoSenal ? 'autofix_residuo' : 'retenida';

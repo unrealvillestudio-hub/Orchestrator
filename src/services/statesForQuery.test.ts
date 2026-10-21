@@ -34,10 +34,11 @@ describe('statesForQuery', () => {
 });
 
 describe('los grupos de Arreglos', () => {
-  it('nombran los tres ejes que Sam pidió, en su orden', () => {
+  it('nombran los tres ejes que Sam pidió, en su orden, y el cuarto del 2026-10-21', () => {
     const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
+    // 2026-10-21 — Sam: «el carril la coloque en arreglos». El cuarto grupo va al final.
     expect(app).toMatch(
-      /groups: \[\['corregida', 'Reparadas'\], \['autofix_residuo', 'Auto-fixed'\], \['por_arreglar', 'Por reparar'\]\]/,
+      /groups: \[\['corregida', 'Reparadas'\], \['autofix_residuo', 'Auto-fixed'\], \['por_arreglar', 'Por reparar'\],\s*\['cambiada_tras_aprobar', 'Cambiada tras tu aprobación'\]\]/,
     );
   });
 });
