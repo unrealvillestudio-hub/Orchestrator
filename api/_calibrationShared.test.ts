@@ -23,10 +23,17 @@ const disponibles = (a: PieceActions) =>
 
 // ── Una pieza viva ofrece todo ───────────────────────────────────────────────────
 describe('pieza en la bandeja, sin sellar', () => {
-  it('con imagen → las siete disponibles, y ninguna lleva motivo', () => {
-    const a = actionsFor({ status: 'awaiting_approval', assets: CON_IMAGEN });
+  it('con imagen y una versión anterior → las ocho disponibles, y ninguna lleva motivo', () => {
+    // 2026-10-21 — `undo` sólo vale con algo que deshacer: aquí, una imagen anterior en el historial.
+    const conVersion = { image: { ...CON_IMAGEN.image, history: [{ url: 'https://ejemplo.invalid/antes.png', replaced_at: '2026-10-21T10:00:00Z' }] } };
+    const a = actionsFor({ status: 'awaiting_approval', assets: conVersion });
     expect(disponibles(a)).toEqual([...ACTION_KEYS].sort());
     for (const k of ACTION_KEYS) expect(a[k].reason).toBeNull();
+  });
+
+  it('sin versión anterior, todo menos deshacer', () => {
+    const a = actionsFor({ status: 'awaiting_approval', assets: CON_IMAGEN });
+    expect(disponibles(a)).toEqual(ACTION_KEYS.filter((k) => k !== 'undo').sort());
   });
 });
 

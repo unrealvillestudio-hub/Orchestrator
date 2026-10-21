@@ -41,7 +41,7 @@ describe('el eje del residuo', () => {
     expect(PENDING_STATES).toContain('autofix_residuo');
     expect(CALIBRATION_TAB_STATES).not.toContain('autofix_residuo');
     const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-    expect(app).toMatch(/states: \['por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo'\]/);
+    expect(app).toMatch(/states: \['por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo', 'cambiada_tras_aprobar'\]/);
   });
 });
 

@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle2, XCircle, Archive, Wrench, ImagePlay, PenLine, Search } from 'lucide-react';
+import { CheckCircle2, XCircle, Archive, Wrench, ImagePlay, PenLine, Search, Undo2 } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import {
   saveVerdict, discardPiece, recomposeImage, renderArtifact, CalibrationError,
-  REJECT_REASONS, buildCriterion, fetchResearchCases, openResearchCase, fetchFixCatalog, fetchEmphasisColors, restorePreviousImage,
+  REJECT_REASONS, buildCriterion, fetchResearchCases, openResearchCase, fetchFixCatalog, fetchEmphasisColors, restorePreviousImage, undoLastChange,
   type PieceActionKey, type PieceActions, type SlotRelease, type Verdict, type ResearchCase,
 } from '../../services/calibrationInbox';
 import { savePieceEdit } from '../../services/challengedInbox';
@@ -153,6 +153,10 @@ export const ACTION_SPECS: ReadonlyArray<{
     hint: 'Corrige el texto de la pieza. No es un veredicto: la pieza sigue donde está.' },
   { key: 'recompose_image', label: 'Regenerar imagen', panel: 'regen', seals: false, weight: 'tertiary',
     hint: 'Regenera la escena con una corrección, sin votar.' },
+  // 2026-10-21 — Sam: «un botón de undo en todas las pestañas y que vuelva la versión anterior». Sin
+  // panel: se confirma y se hace. Vuelve LO ÚLTIMO que cambió (imagen o texto) y se puede deshacer otra vez.
+  { key: 'undo', label: 'Deshacer', panel: null, seals: false, weight: 'tertiary',
+    hint: 'Vuelve la versión anterior de lo último que cambió (la imagen o el texto). Una pieza agendada sigue agendada.' },
 ];
 
 /**
@@ -486,6 +490,7 @@ const BUTTON_STYLE: Record<PieceActionKey, string> = {
   // no abulte MÁS que el disponible: `DISABLED_STYLE` trae borde punteado.
   edit_text: 'border border-transparent text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60',
   recompose_image: 'border border-transparent text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60',
+  undo: 'border border-transparent text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60',
 };
 
 /**
@@ -506,6 +511,7 @@ const ICON: Record<PieceActionKey, React.ReactNode> = {
   research: <Search size={14} />,
   edit_text: <PenLine size={14} />,
   recompose_image: <ImagePlay size={14} />,
+  undo: <Undo2 size={14} />,
   discard: <Archive size={14} />,
 };
 
@@ -549,6 +555,8 @@ export function PieceActionsBar({
   const [editTitle, setEditTitle] = useState('');
   const [editNote, setEditNote] = useState<null | { avisos: string[]; refrescado: boolean }>(null);
   const [regenNote, setRegenNote] = useState<null | { compuesta: boolean; refrescado: boolean; posts: number; cambioDeModo?: string | null; restaurada?: boolean }>(null);
+  // 2026-10-21 — qué deshizo el último Deshacer.
+  const [undoNote, setUndoNote] = useState<null | { que: 'image' | 'title' | 'body'; refrescado: boolean }>(null);
   // BRIEF-IMG-01 fase 4 — por defecto se CORRIGE sobre la imagen actual: da continuidad a lo pedido.
   const [regenMode, setRegenMode] = useState<RegenMode>('edit_from_current');
   // 2026-10-20 — EN LA ESCENA (Ref1, Ref2, Host, Fondo) y las imágenes anteriores. Se leen al abrir el panel.
@@ -810,6 +818,29 @@ export function PieceActionsBar({
     }
   };
 
+  /** 2026-10-21 — DESHACER. Se confirma con una pregunta y se hace: no hay nada que escribir. */
+  const submitUndo = async () => {
+    if (!window.confirm('¿Volver a la versión anterior de lo último que cambió en esta pieza? Se puede deshacer otra vez.')) return;
+    setBusy('undo'); setError(null); setUndoNote(null); setRegenNote(null); setEditNote(null);
+    try {
+      const r = await undoLastChange(token, piece.piece_id);
+      if (r.undone === 'image') {
+        // El texto de la imagen pudo cambiar con ella: el editor se vuelve a sembrar desde la pieza al abrirse.
+        setOverlayVigente(null);
+      } else {
+        const nuevo = { ...vigente, [r.undone]: r.after_text ?? '' };
+        setVigente(nuevo);
+        if (r.undone === 'body') onEdited?.(r.after_text ?? '');
+      }
+      onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: true, refreshed: r.artifact_refreshed, posts: 0 });
+      setUndoNote({ que: r.undone, refrescado: r.artifact_refreshed });
+      setBusy(null);
+    } catch (err) {
+      setError(cardError(err, 'No se pudo deshacer.'));
+      setBusy(null);
+    }
+  };
+
   const confirm = () => {
     if (panel === 'approve') return submitVerdict('approved', 'approve');
     if (panel === 'reject') return submitVerdict('rejected', 'reject');
@@ -832,6 +863,7 @@ export function PieceActionsBar({
       onClick={() => {
         if (!b.available) return;
         if (b.panel) return open(b.panel);
+        if (b.key === 'undo') return submitUndo();
         return submitVerdict('approved', 'approve');
       }}
       disabled={!!busy || !b.available}
@@ -906,6 +938,15 @@ export function PieceActionsBar({
           {!regenNote.refrescado && <p className="text-amber-300/80">La imagen cambió, pero el artefacto no se pudo rehacer: la vista de arriba puede estar mostrando la anterior.</p>}
           {regenNote.posts > 0 && <p className="text-violet-300/60">{regenNote.posts} post pendiente de publicar actualizado con la imagen nueva.</p>}
           <p className="text-violet-300/50">Sigue sin veredicto: la pieza no se ha movido de la bandeja.</p>
+        </div>
+      )}
+
+      {undoNote && (
+        <div className="text-[11px] font-mono leading-snug text-emerald-300/85 bg-emerald-500/[0.06] border border-emerald-500/25 rounded-xl px-3 py-2 space-y-0.5">
+          <p>{undoNote.que === 'image'
+            ? 'Volvió la imagen anterior. La que estaba quedó en «Imágenes anteriores»: Deshacer otra vez la devuelve.'
+            : `Volvió el ${undoNote.que === 'title' ? 'título' : 'texto'} anterior. Deshacer otra vez devuelve el que estaba.`}</p>
+          {!undoNote.refrescado && <p className="text-amber-300/80">Se deshizo, pero la vista previa no se pudo rehacer: puede seguir mostrando la versión de antes.</p>}
         </div>
       )}
 

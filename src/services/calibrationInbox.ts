@@ -189,7 +189,7 @@ export interface ForecastSlot {
  * es `false` el motivo está en `actions[k].reason`.
  */
 export type PieceActionKey =
-  | 'approve' | 'reject' | 'fixable' | 'research' | 'discard' | 'edit_text' | 'recompose_image';
+  | 'approve' | 'reject' | 'fixable' | 'research' | 'discard' | 'edit_text' | 'recompose_image' | 'undo';
 
 export interface PieceAction {
   available: boolean;
@@ -396,7 +396,7 @@ export interface FixFlow {
  */
 export type PendingState =
   'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida' | 'sin_imagen'
-  | 'autofix_residuo';
+  | 'autofix_residuo' | 'cambiada_tras_aprobar';
 
 /** Los seis, en orden. Un selector sale de aquí y nunca de una lista escrita a mano. */
 /**
@@ -407,7 +407,7 @@ export type PendingState =
 export const CALIBRATION_TAB_STATES: readonly PendingState[] = ['esperando', 'recalibrar', 'aplazada', 'retenida'];
 
 export const PENDING_STATES: readonly PendingState[] =
-  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo'];
+  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo', 'cambiada_tras_aprobar'];
 
 /**
  * LOS EJES QUE PIDE UNA PETICIÓN DE LA BANDEJA. Sin alcance (Calibración), el selector «Estado»
@@ -675,6 +675,18 @@ export function restorePreviousImage(token: string, pieceId: string, index: numb
   artifact_url: string | null; html: string | null; artifact_refreshed: boolean;
 }> {
   return req('/api/recompose-image', token, { method: 'POST', body: { piece_id: pieceId, restore_index: index } });
+}
+
+/**
+ * 2026-10-21 — DESHACER: vuelve la versión anterior de LO ÚLTIMO QUE CAMBIÓ (la imagen o el texto). Qué
+ * se deshace lo decide el server (`api/_undo.ts`); la pantalla no lo adivina.
+ */
+export function undoLastChange(token: string, pieceId: string): Promise<{
+  ok: true; piece_id: string; undone: 'image' | 'title' | 'body'; changed_at: string;
+  after_text?: string; image_url?: string | null;
+  artifact_url: string | null; html: string | null; artifact_refreshed: boolean;
+}> {
+  return req('/api/undo-change', token, { method: 'POST', body: { piece_id: pieceId } });
 }
 
 /**

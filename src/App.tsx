@@ -48,7 +48,8 @@ const FIX_SCOPE: CalibrationScope = {
   // 2026-10-01 — `sin_imagen` entra aquí por decisión de Sam: no espera un veredicto, espera
   // «Generar imagen», que es un arreglo. Al tener imagen pasa a Calibración como `retenida`.
   // 2026-10-01 — y lo que el carril auto-fix no pudo resolver: es trabajo de arreglo (decisión de Sam).
-  states: ['por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo'],
+  // 2026-10-21 — y lo que aprobaste y cambió después sin ti (Sam: «el carril la coloque en arreglos»).
+  states: ['por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo', 'cambiada_tras_aprobar'],
   title: 'Arreglos',
   subtitle: (
     <>
@@ -65,7 +66,8 @@ const FIX_SCOPE: CalibrationScope = {
   //   · Auto-fixed  = `autofix_residuo`: retada, con imagen, sin juicio de Sam y con residuo del carril.
   //   · Por reparar = `por_arreglar`: retada con veredicto de Sam en el corpus, es decir, su fixable.
   // `sin_imagen` no es grupo de los tres: sigue visible con «Todas».
-  groups: [['corregida', 'Reparadas'], ['autofix_residuo', 'Auto-fixed'], ['por_arreglar', 'Por reparar']],
+  groups: [['corregida', 'Reparadas'], ['autofix_residuo', 'Auto-fixed'], ['por_arreglar', 'Por reparar'],
+    ['cambiada_tras_aprobar', 'Cambiada tras tu aprobación']],
 };
 
 const NAV_ITEMS = [

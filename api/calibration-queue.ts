@@ -40,7 +40,7 @@ import { CALIBRATION_TAB_STATES,
   fetchWatcherTraces, fetchAttemptsByQueue,
   latestPerQueue, generationOf, watcherOf, toContext, PIECES_CAP,
   parsePieceSearch, idMatchesSearch, searchErrorBody, searchSummary,
-  pendingStateOf, PENDING_STATES, tieneImagen, autofixResiduo, type PendingState,
+  pendingStateOf, PENDING_STATES, tieneImagen, autofixResiduo, cambioTrasAprobacion, type PendingState,
   fetchRecurringFormats, pieceTypeOf, typeParam,
   type ContentPiece, type PieceContext, type PipelineCutoff, type GenerationInfo,
   type PieceSearch,
@@ -326,6 +326,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         tieneImagen(p),
         // CARRIL AUTO-FIX — lo que el carril no pudo resolver es de Arreglos, no de Calibración.
         autofixResiduo(p),
+        // 2026-10-21 — lo aprobado que cambió sin Sam también es de Arreglos.
+        cambioTrasAprobacion(p),
       ));
     }
 

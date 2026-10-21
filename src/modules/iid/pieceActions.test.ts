@@ -20,9 +20,9 @@ import type { PieceActions, PieceActionKey } from '../../services/calibrationInb
  */
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────────
-// INVESTIGAR (2026-10-05) — entra `research`: son siete.
+// INVESTIGAR (2026-10-05) — entra `research`: son siete. DESHACER (2026-10-21) — entra `undo`: son ocho.
 const KEYS: PieceActionKey[] =
-  ['approve', 'reject', 'fixable', 'research', 'discard', 'edit_text', 'recompose_image'];
+  ['approve', 'reject', 'fixable', 'research', 'discard', 'edit_text', 'recompose_image', 'undo'];
 
 const SI = { available: true, reason: null };
 const NO = (reason: string) => ({ available: false, reason });
@@ -40,10 +40,10 @@ const activos = (bs: ReturnType<typeof actionButtons>) =>
 const FRANJA = { slot_at: '2026-09-20T15:30:00+00:00', status: 'reserved', timezone: 'UTC' };
 
 // ── 1 · Todo disponible ──────────────────────────────────────────────────────────
-describe('pieza con las siete disponibles', () => {
-  it('siete botones activos, ninguno con motivo', () => {
+describe('pieza con las ocho disponibles', () => {
+  it('ocho botones activos, ninguno con motivo', () => {
     const bs = actionButtons(conTodo);
-    expect(bs).toHaveLength(7);
+    expect(bs).toHaveLength(8);
     expect(activos(bs)).toEqual([...KEYS].sort());
     for (const b of bs) expect(b.reason).toBeNull();
   });
@@ -60,11 +60,11 @@ describe('pieza ya aprobada (scheduled)', () => {
     expect(approve.reason).toBe(MOTIVO);
     // Sigue estando en la lista: apagar no es ocultar. Un botón que desaparece obliga a
     // preguntarse si existe.
-    expect(bs).toHaveLength(7);
+    expect(bs).toHaveLength(8);
   });
 
-  it('los otros seis siguen activos', () => {
-    expect(activos(bs)).toEqual(['discard', 'edit_text', 'fixable', 'recompose_image', 'reject', 'research']);
+  it('los otros siete siguen activos', () => {
+    expect(activos(bs)).toEqual(['discard', 'edit_text', 'fixable', 'recompose_image', 'reject', 'research', 'undo']);
   });
 });
 
@@ -75,20 +75,20 @@ describe('pieza sin imagen', () => {
       ...conTodo,
       recompose_image: NO('Esta pieza no tiene imagen: no hay nada que recomponer.'),
     });
-    expect(activos(bs)).toEqual(['approve', 'discard', 'edit_text', 'fixable', 'reject', 'research']);
+    expect(activos(bs)).toEqual(['approve', 'discard', 'edit_text', 'fixable', 'reject', 'research', 'undo']);
     expect(bs.find((b) => b.key === 'recompose_image')!.reason).toContain('no tiene imagen');
   });
 });
 
 // ── 3 bis · Pieza sellada — U-6 §5.3 ─────────────────────────────────────────────
 describe('pieza ya sellada', () => {
-  it('las siete apagadas CON su motivo, ninguna oculta', () => {
+  it('las ocho apagadas CON su motivo, ninguna oculta', () => {
     // Es el caso que más se ve en Retenidas: una pieza descartada o ya juzgada sigue
     // listada por su arbitraje pendiente. Seis botones apagados y explicados dicen qué
     // pasa; seis botones ausentes obligan a preguntarse si la pantalla se rompió.
     const SELLADA = 'Esta pieza ya está sellada: no admite más acciones.';
     const bs = actionButtons(Object.fromEntries(KEYS.map((k) => [k, NO(SELLADA)])) as PieceActions);
-    expect(bs).toHaveLength(7);
+    expect(bs).toHaveLength(8);
     expect(activos(bs)).toEqual([]);
     for (const b of bs) expect(b.reason).toBe(SELLADA);
   });
@@ -105,9 +105,9 @@ describe('contrato que no declara una acción', () => {
     expect(fixable.reason).toContain('no declaró');
   });
 
-  it('sin contrato ninguno, las siete apagadas y todas con motivo', () => {
+  it('sin contrato ninguno, las ocho apagadas y todas con motivo', () => {
     const bs = actionButtons(null);
-    expect(bs).toHaveLength(7);
+    expect(bs).toHaveLength(8);
     expect(activos(bs)).toEqual([]);
     for (const b of bs) expect((b.reason ?? '').length).toBeGreaterThan(0);
   });
