@@ -6,14 +6,15 @@ import {
   fetchManualQueue, markManualPublished, CalibrationError,
   type ManualItem, type ManualQueueResult,
 } from '../../services/publishInbox';
-import { CountPill, fmtInZone } from './pieceUi';
+import { CountPill, fmtInZone, DayPicker } from './pieceUi';
 
 /**
  * ManualPublishModule — pestaña «Manual» dentro de Publicación (Sam, 2026-10-01).
  *
  * Lo que hay que publicar a mano, con todo lo necesario para hacerlo y nada más: las fotos con su
  * URL y UN bloque de texto —título, cuerpo, hashtags y firma juntos— listo para copiar y pegar.
- * Filtrable por marca y por canal; los dos filtros salen del dato, ninguna lista vive aquí.
+ * Filtrable por marca y por canal; los dos filtros salen del dato, ninguna lista vive aquí. Y por
+ * día de salida (2026-10-21), en el reloj de cada marca.
  *
  * «Publicada» (Sam, 2026-10-01): con el link del post como prueba, marca la franja y la pieza
  * publicadas, deja la fila en la bitácora del drenaje y cierra el aviso. La tarjeta sale de la lista.
@@ -25,11 +26,12 @@ export default function ManualPublishModule({ session }: { session: IidSession }
   const [error, setError] = useState<string | null>(null);
   const [brand, setBrand] = useState('');
   const [channel, setChannel] = useState('');
+  const [day, setDay] = useState('');
 
-  const load = async (b: string, c: string) => {
+  const load = async (b: string, c: string, d: string = day) => {
     setLoading(true); setError(null);
     try {
-      setData(await fetchManualQueue(token, { brand: b || undefined, channel: c || undefined }));
+      setData(await fetchManualQueue(token, { brand: b || undefined, channel: c || undefined, day: d || undefined }));
     } catch (err) {
       setError(err instanceof CalibrationError ? err.message : 'No se pudo cargar la lista.');
       setData(null);
@@ -40,7 +42,7 @@ export default function ManualPublishModule({ session }: { session: IidSession }
 
   useEffect(() => { load(brand, channel); /* eslint-disable-next-line */ }, []);
 
-  const apply = (b: string, c: string) => { setBrand(b); setChannel(c); load(b, c); };
+  const apply = (b: string, c: string, d: string = day) => { setBrand(b); setChannel(c); setDay(d); load(b, c, d); };
 
   // La pieza publicada sale de la lista y de los conteos, sin recargar todo.
   const onPublished = (it: ManualItem) => {
@@ -70,6 +72,7 @@ export default function ManualPublishModule({ session }: { session: IidSession }
     <div>
       <div className="flex items-center justify-between gap-3 mb-3">
         <p className="text-sm text-zinc-500">Piezas de canales que se publican a mano. Copiar, pegar, publicar.</p>
+        <div className="text-[11px] font-mono shrink-0"><DayPicker value={day} onChange={(v) => apply(brand, channel, v)} /></div>
         <button
           onClick={() => load(brand, channel)}
           className="p-2 hover:bg-zinc-800 rounded-xl transition-colors text-zinc-600 hover:text-zinc-400 shrink-0"

@@ -42,9 +42,13 @@
  *   channel         '' (todos) | <platform_key>       — descubierto del dato, nunca enumerado
  *   channel_status  all (default) | operational | blocked
  *   generation      all (default) | current
+ *   day             '' (todos) | today | tomorrow | YYYY-MM-DD   (Sam, 2026-10-21)
  *
- * Orden: más reciente primero, fijo. La bandeja de publicación no pide los cuatro órdenes
- * de la de calibración.
+ * Orden: más reciente primero. Con `day` puesto, por hora de salida (la franja más temprana
+ * primero): quien pide «lo de mañana» quiere leerlo en el orden en que va a salir.
+ *
+ * `day` se juzga en el reloj de cada marca (`publish_timezone`), el mismo en que la tarjeta
+ * pinta «Publica:». Ver «FILTRO POR DÍA» en `_publishSlots.ts`.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -68,7 +72,11 @@ import { fetchPlatformLimits, fetchSignatureClosers, metricsOf } from './_pieceM
 import { fetchBrandLanguages, readingLanguageOf } from './_brandLanguage.js';
 // PR-C — la franja RESERVADA de cada pieza y el huso de su marca, resueltos EN EL SERVER
 // junto al resto de la fila. Nunca una llamada extra desde el navegador por cada tarjeta.
-import { fetchBrandTimezones, fetchSlotsByPiece, slotOf } from './_publishSlots.js';
+import {
+  fetchBrandTimezones, fetchSlotsByPiece, slotOf,
+  // 2026-10-21 — filtro por día (hoy / mañana / fecha), en el reloj de la marca.
+  dayFilterParam, dayFilterLabel, dayWindowOf, fetchSlotsInWindow, slotMatchesDay, timezoneOf,
+} from './_publishSlots.js';
 
 /**
  * U-7 — LOS ESTADOS PRESENTES EN UN LOTE, ordenados. Sale del dato, nunca de una lista en el
@@ -135,6 +143,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 2026-10-06 — sólo carruseles, de cualquier canal. Se combina con `channel`: un carrusel es un
   // FORMATO, no un canal (ver `isCarouselContentPiece`).
   const carousel      = carouselParam(req.query.carousel);
+  // 2026-10-21 — el día de salida. Un valor que no se entiende es 400, no una lista vacía.
+  const day           = dayFilterParam(req.query.day);
+  if (!day) {
+    return res.status(400).json({
+      error: 'invalid_day',
+      detail: 'El día debe ser «today», «tomorrow» o una fecha real AAAA-MM-DD.',
+    });
+  }
+  const now           = new Date();
+  const dayWindow     = dayWindowOf(day, now);
 
   // U-7 — buscar por id. Un `q` inválido es 400, no una lista vacía: «no existe» y «no supe
   // buscar eso» no se pueden leer igual.
@@ -152,7 +170,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Sin filtro de marca en la lectura: by_brand tiene que ser global y estable aunque
     // venga filtro. Los cortes se leen en runtime (cero fechas de corte en el código).
-    const [allPieces, cutoffsRaw, channels, limits, closers, brandLangs, brandZones] = await Promise.all([
+    const [allPieces, cutoffsRaw, channels, limits, closers, brandLangs, brandZones, daySlots] = await Promise.all([
       fetchLivePieces({ onlyStatuses: PUBLISH_STATUSES }),
       fetchPipelineCutoffs(),
       fetchPublishChannels(),
@@ -160,7 +178,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       fetchSignatureClosers(),
       fetchBrandLanguages(),
       fetchBrandTimezones(),
+      // Con `day` puesto, las franjas de la ventana se leen para TODAS las candidatas, antes de
+      // paginar: filtrar sólo la página visible haría depender el resultado de la página.
+      dayWindow ? fetchSlotsInWindow(dayWindow.from, dayWindow.to) : Promise.resolve(new Map()),
     ]);
+    // Sin franjas no se puede saber qué sale ese día. Se dice con un error, no con una lista
+    // vacía que se leería como «ese día no sale nada».
+    if (dayWindow && daySlots === null) {
+      return res.status(503).json({
+        error: 'day_filter_unavailable',
+        detail: 'No se pudieron leer las franjas: el filtro por día no está disponible ahora. Quítalo o vuelve a intentarlo.',
+      });
+    }
     const cutoffs: PipelineCutoff[] = cutoffsRaw ?? [];
 
     // ALCANCE DE REVISIÓN — lo que no es de sus marcas no existe para esta sesión. Admin: el mismo array.
@@ -200,6 +229,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // lo que daría encenderlo con los demás filtros puestos.
     const carousels = scoped.filter((p) => isCarouselContentPiece(p)).length;
     if (carousel) scoped = scoped.filter((p) => isCarouselContentPiece(p));
+    // 2026-10-21 — EL DÍA DE SALIDA, en el reloj de la marca de cada pieza. Antes de `by_brand`,
+    // para que las pastillas cuenten lo de ese día.
+    let dayWithoutZone = 0;
+    if (dayWindow && daySlots) {
+      scoped = scoped.filter((p) => {
+        const row = daySlots.get(p.id);
+        const tz = timezoneOf(p.brand_id, brandZones);
+        const hit = slotMatchesDay(row?.slot_at, day, now, tz);
+        if (hit && !tz) dayWithoutZone++;
+        return hit;
+      });
+    }
 
     const by_brand: Record<string, number> = {};
     const by_channel: Record<string, number> = {};
@@ -210,7 +251,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const inBrand: ContentPiece[] = brand ? scoped.filter((p) => p.brand_id === brand) : scoped;
-    const ordered = inBrand.slice().sort((a, b) => ms(b.created_at) - ms(a.created_at));
+    const slotMs = (p: ContentPiece) => ms(daySlots?.get(p.id)?.slot_at);
+    const ordered = dayWindow
+      ? inBrand.slice().sort((a, b) => slotMs(a) - slotMs(b) || ms(b.created_at) - ms(a.created_at))
+      : inBrand.slice().sort((a, b) => ms(b.created_at) - ms(a.created_at));
     const page    = ordered.slice(offset, offset + limit);
 
     // Procedencia y franja: sólo para la página visible (el `in.()` de PostgREST crece con
@@ -253,6 +297,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       status: status ?? '',
       carousel,
       carousels,
+      // 2026-10-21 — el día pedido, tal cual, y cuántas de las que entran se juzgaron en UTC
+      // porque su marca no tiene huso sembrado.
+      day: dayFilterLabel(day),
+      ...(dayWithoutZone ? { day_without_zone: dayWithoutZone } : {}),
       // U-7 — los estados PRESENTES EN EL LOTE. Sale del dato, como `by_brand`: si el carril
       // empieza a producir un estado nuevo, aparece en el selector solo. Se calcula sobre el
       // lote COMPLETO, no sobre el filtrado — si no, elegir un estado dejaría el selector con

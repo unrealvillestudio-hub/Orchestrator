@@ -514,3 +514,126 @@ async function clearScheduledFor(id: string): Promise<boolean> {
     return false;
   }
 }
+
+// ── FILTRO POR DÍA (Sam, 2026-10-21) ─────────────────────────────────────────────
+//
+// «En el tab de Publish no me permite filtrar por fecha ni hoy o mañana.» El día se juzga
+// EN EL RELOJ DE LA MARCA —`public.brands.publish_timezone`—, el mismo en que la tarjeta
+// pinta «Publica:». Juzgarlo en UTC haría que una franja de las 20:00 en un huso UTC-5 apareciera
+// en «mañana» porque en UTC ya es el día siguiente, y la tarjeta diría otra cosa que el filtro.
+// Una marca sin huso sembrado se juzga en UTC y la respuesta lo cuenta aparte
+// (`day_without_zone`): la ausencia se declara, no se disimula.
+//
+// El filtro se aplica ANTES de paginar y de contar las pastillas. Filtrar sólo la página
+// visible haría que el resultado dependiera de en qué página estabas.
+
+/** `all` = sin filtro. `date` lleva el día pedido como `YYYY-MM-DD` del calendario de la marca. */
+export type DayFilter =
+  | { kind: 'all' }
+  | { kind: 'today' }
+  | { kind: 'tomorrow' }
+  | { kind: 'date'; date: string };
+
+const YMD = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Un `YYYY-MM-DD` que existe en el calendario (rechaza `2026-02-30`). */
+export function isCalendarDate(s: string): boolean {
+  const m = YMD.exec(s);
+  if (!m) return false;
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
+}
+
+/**
+ * Lee el parámetro `day`. Vacío o ausente = sin filtro. Un valor que no es `today`, `tomorrow`
+ * ni una fecha real devuelve `null`, y el endpoint responde 400: «no hay piezas ese día» y
+ * «no entendí qué día» no pueden leerse igual.
+ */
+export function dayFilterParam(v: unknown): DayFilter | null {
+  const raw = Array.isArray(v) ? v[0] : v;
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  if (!s || s === 'all') return { kind: 'all' };
+  if (s === 'today') return { kind: 'today' };
+  if (s === 'tomorrow') return { kind: 'tomorrow' };
+  return isCalendarDate(s) ? { kind: 'date', date: s } : null;
+}
+
+/** Cómo se devuelve el filtro en la respuesta: el mismo texto que se pidió. */
+export function dayFilterLabel(f: DayFilter): string {
+  return f.kind === 'date' ? f.date : f.kind;
+}
+
+/**
+ * El día de calendario (`YYYY-MM-DD`) de un instante en un huso IANA. `tz` nulo, o un huso
+ * que el motor no reconoce, se juzga en UTC. Puro: se prueba sin red.
+ */
+export function localDayOf(iso: string | Date, tz: string | null): string | null {
+  const t = iso instanceof Date ? iso.getTime() : millis(iso);
+  if (t === null || !Number.isFinite(t)) return null;
+  const fmt = (zone: string) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' })
+      .format(new Date(t));
+  try { return fmt(tz || 'UTC'); } catch { return fmt('UTC'); }
+}
+
+/** El día siguiente de un `YYYY-MM-DD`, por calendario (no sumando 24 h: un cambio de hora no lo mueve). */
+export function nextCalendarDay(ymd: string): string {
+  const m = YMD.exec(ymd);
+  if (!m) return ymd;
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + 1));
+  return d.toISOString().slice(0, 10);
+}
+
+/** El día que el filtro pide, en el reloj de la marca. `null` para `all`. */
+export function targetDayOf(f: DayFilter, now: Date, tz: string | null): string | null {
+  if (f.kind === 'all') return null;
+  if (f.kind === 'date') return f.date;
+  const today = localDayOf(now, tz);
+  if (!today) return null;
+  return f.kind === 'today' ? today : nextCalendarDay(today);
+}
+
+/** ¿Cae este instante en el día que pide el filtro, en el reloj de la marca? */
+export function slotMatchesDay(slotAt: string | null | undefined, f: DayFilter, now: Date, tz: string | null): boolean {
+  if (f.kind === 'all') return true;
+  if (!slotAt) return false;
+  const want = targetDayOf(f, now, tz);
+  return want !== null && localDayOf(slotAt, tz) === want;
+}
+
+/**
+ * La ventana UTC que hay que leer para responder el filtro, con dos días de margen a cada
+ * lado: ningún huso del planeta se separa de UTC más de 14 h, así que el margen cubre a
+ * cualquier marca futura sin que nadie revise este número. El recorte fino lo hace
+ * `slotMatchesDay`, en el reloj de cada marca.
+ */
+export function dayWindowOf(f: DayFilter, now: Date): { from: Date; to: Date } | null {
+  if (f.kind === 'all') return null;
+  const DAY = 24 * 60 * 60 * 1000;
+  const base = f.kind === 'date' ? Date.parse(`${f.date}T00:00:00.000Z`) : now.getTime();
+  return { from: new Date(base - 2 * DAY), to: new Date(base + 3 * DAY) };
+}
+
+/**
+ * Las franjas CON PIEZA de una ventana, indexadas por `piece_id`. `null` = la lectura falló,
+ * y entonces el endpoint no puede filtrar por día y lo dice (no devuelve una lista vacía que
+ * se leería como «no sale nada ese día»).
+ */
+export async function fetchSlotsInWindow(from: Date, to: Date): Promise<SlotIndex> {
+  const url = `${SB_URL()}/rest/v1/brand_publish_slots`
+    + `?select=${SLOT_SELECT}&piece_id=not.is.null`
+    + `&slot_at=gte.${encodeURIComponent(from.toISOString())}&slot_at=lt.${encodeURIComponent(to.toISOString())}`
+    + `&order=slot_at.asc&limit=${SLOTS_CAP}`;
+  let res: Response;
+  try {
+    res = await fetchWithTimeout('db', url, { headers: intelHeaders() });
+  } catch {
+    console.warn('[publish-slots] franjas de la ventana no disponibles (red) — filtro por día SIN LEER');
+    return null;
+  }
+  if (!res.ok) {
+    console.warn(`[publish-slots] franjas de la ventana no disponibles (${res.status}) — filtro por día SIN LEER`);
+    return null;
+  }
+  return indexByPiece((await res.json().catch(() => [])) as PublishSlotRow[]);
+}
