@@ -236,7 +236,7 @@ function digestHtml(total: number, by_brand: Record<string, number>, challenged:
     <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.14em;color:#555;margin-bottom:8px;">UNRLVL · Calibración</div>
     <h2 style="margin:0 0 6px;font-size:1.25rem;color:#f8fafb;font-weight:800;">☕ Bandeja de calibración</h2>
     <p style="margin:0 0 20px;color:#9aa0ab;font-size:0.9rem;line-height:1.6;">
-      Tenés <strong style="color:#FFAB00;">${total}</strong> pieza${total === 1 ? "" : "s"} esperando tu criterio.
+      Hay <strong style="color:#FFAB00;">${total}</strong> pieza${total === 1 ? "" : "s"} esperando tu criterio.
     </p>
     <table style="width:100%;border-collapse:collapse;margin-bottom:22px;">
       <thead><tr>
