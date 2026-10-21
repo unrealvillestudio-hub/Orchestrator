@@ -33,6 +33,12 @@ andamio; lo que persiste es el corpus `intel.approval_calibration`.
 | 4 | EF `iid-approval-digest` — despertador 7am ET (Resend) | `supabase/functions/iid-approval-digest/` |
 | 5 | cron `iid-approval-digest-daily` (`0 11,12 * * *`) | migración `20260725120500_approval_digest_cron.sql` |
 
+> **2026-10-21 — el código de la pieza 4 ya no vive en este repo.** La copia de
+> `supabase/functions/iid-approval-digest/` salió del Orchestrator por decisión de Sam: la EF
+> desplegada se versiona y se despliega desde `unrlvl-iid-functions`
+> (`supabase/functions/iid-approval-digest/`, `CC_PROTOCOL.md` §16). La fila de arriba se conserva
+> como registro de dónde nació.
+
 ### Decisión de diseño clave (más simple y segura que el plan original)
 - **Los endpoints NO usan RPCs SECURITY DEFINER.** PostgREST expone `public, intel, content`, así que
   leen/escriben directo con `Accept-Profile`/`Content-Profile` + service_role. El diff

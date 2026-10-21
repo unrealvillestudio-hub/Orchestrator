@@ -1,0 +1,23 @@
+# CI — corre los tests del repo en cada PR y en cada push a main.
+#
+# Por qué existe (2026-10-21): la barrera de voseo (`tests/sin_voseo_test.mjs`) y el resto de los
+# tests sólo vigilaban si alguien corría `npm test` a mano. Sam pidió CI en los repos que no lo
+# tenían, para que una regresión se vea en el PR y no después de mergear.
+# Mismo patrón que `CopyLab/.github/workflows/ci.yml`.
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+        working-directory: .
+      - run: npm test
+        working-directory: .
