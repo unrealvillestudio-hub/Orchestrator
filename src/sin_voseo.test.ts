@@ -25,7 +25,9 @@ import { formasVoseantes } from './idioma/voseo';
  *     citan el voseo como ejemplo. Se revisan a mano.
  */
 const RAIZ = fileURLToPath(new URL('..', import.meta.url));
-const CARPETAS = ['src', 'api'];
+// `supabase/functions` entra el 2026-10-21: el correo de `iid-approval-digest` abría con una forma
+// voseante y el barrido de #82 no la vio porque esta lista no incluía la carpeta.
+const CARPETAS = ['src', 'api', 'supabase/functions'];
 const EXTENSIONES = /\.(tsx?|mjs|md|html|css|json)$/;
 
 function archivos(dir: string): string[] {
@@ -44,7 +46,7 @@ describe('el texto del repo está en ES neutro internacional', () => {
     expect(todos.length).toBeGreaterThan(50);
   });
 
-  it('ni una forma voseante ni regional en src/ ni en api/', () => {
+  it('ni una forma voseante ni regional en src/, api/ ni supabase/functions/', () => {
     const hallazgos = todos.flatMap((ruta) =>
       readFileSync(ruta, 'utf8').split('\n').flatMap((linea, i) =>
         formasVoseantes(linea).map((forma) => `${relative(RAIZ, ruta)}:${i + 1} «${forma}»`),

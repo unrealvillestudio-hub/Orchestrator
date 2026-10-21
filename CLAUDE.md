@@ -41,7 +41,7 @@ Antes de cualquier acción en este repositorio, Claude Code DEBE cargar y obedec
    > Web UI** desde el 2026-07-29, **no por GitHub Desktop**. Este `CLAUDE.md` nunca se sincronizó, y
    > leer «nunca por CC» como imperativo vigente **traba a CC** — ya ocurrió en sesión. Fuente de verdad:
    > `CC_PROTOCOL.md` §1 + «Flujo de entrega de context files». Los `CLAUDE.md` de cada repo **sólo
-   > apuntan** al protocolo; cuando duplican una regla, divergen — que es exactamente lo que pasó acá.
+   > apuntan** al protocolo; cuando duplican una regla, divergen — que es exactamente lo que pasó aquí.
 
 3. **VERIFICACIÓN REFORZADA POR COMPLEJIDAD:** cambios que afecten `lab_jobs`, `lab_configs`, Edge Functions, o el flujo del pipeline requieren mensaje de verificación EXPLÍCITO a Sam antes de commitear (objetivo, pasos, archivos, repos y EFs afectados), porque un error se propaga aguas abajo a CopyLab/ImageLab/Meta y a todas las marcas. Reportar al final con el formato de CC_PROTOCOL (incluida PRESERVACIÓN DE CONTEXTO).
 
@@ -56,7 +56,7 @@ El Orchestrator es el cerebro del pipeline de contenido UNRLVL. Recibe un `brand
 **Vercel project:** prj_93AJfDiY1pcktG7b7fDStBqONYWy  
 **Framework:** Vite + React (UI) + Vercel Edge Functions (API)  
 **Versión:** la declara `package.json` y la pinta el pie de la UI con el commit desplegado
-al lado. **No se escribe otro número acá** — hasta el 2026-09-13 convivían tres distintos (el
+al lado. **No se escribe otro número aquí** — hasta el 2026-09-13 convivían tres distintos (el
 del pie, el de `package.json` y el de esta línea, que decía `v4.1`) y ninguno coincidía con
 otro. Un valor escrito a mano sólo se actualiza cuando alguien se acuerda.
 
