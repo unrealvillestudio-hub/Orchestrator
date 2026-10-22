@@ -62,9 +62,8 @@ export interface PublishSlotRow {
   status: string;
   piece_id: string | null;
   /**
-   * Carril de formato de la franja (`null` = carril general). Opcional a propósito: la columna
-   * `intel.brand_publish_slots.format` llega con la migración del carril de artículos, y hasta
-   * entonces `SLOT_SELECT` no la pide (ver `slotAcceptsPiece`).
+   * Carril de formato de la franja (`null` = carril general). Lo trae `SLOT_SELECT`; es opcional en
+   * el tipo para que una fila sin la columna se lea como carril general (ver `slotAcceptsPiece`).
    */
   format?: string | null;
 }
@@ -161,7 +160,10 @@ export async function fetchBrandTimezones(): Promise<BrandTimezoneCatalog> {
   return indexBrandTimezones(rows);
 }
 
-const SLOT_SELECT = 'brand_id,platform_key,slot_at,status,piece_id';
+// `format` (2026-10-22): el carril de la franja. La columna la crea la migración del carril de
+// artículos (`unrlvl-iid-functions#460`), que se aplica ANTES de desplegar este cambio.
+// ⛔ NO OPERATIVO — 'brand_id,platform_key,slot_at,status,piece_id'.
+const SLOT_SELECT = 'brand_id,platform_key,slot_at,status,piece_id,format';
 
 /**
  * Un índice de franjas, o `null` cuando la LECTURA FALLÓ.
@@ -224,6 +226,15 @@ export function channelSlotKey(brandId: string, platformKey: string): string {
 }
 
 /**
+ * Clave de CARRIL (2026-10-22): el carril general conserva EXACTAMENTE la clave de canal de siempre
+ * —una marca sin carriles dedicados indexa igual que antes—, y un carril dedicado le añade su formato.
+ */
+export function laneSlotKey(brandId: string, platformKey: string, format: string | null | undefined): string {
+  const f = clean(format);
+  return f ? `${channelSlotKey(brandId, platformKey)}\u0000${f}` : channelSlotKey(brandId, platformKey);
+}
+
+/**
  * La PRÓXIMA franja libre de cada (marca, canal). Se leen todas las libres futuras de una
  * vez —son el horizonte sembrado, no una tabla de piezas— y se indexa la de menor `slot_at`.
  *
@@ -249,7 +260,7 @@ export async function fetchNextFreeSlots(now: Date = new Date()): Promise<SlotIn
 }
 
 /**
- * Indexa la franja libre más temprana por (marca, canal). Puro y exportado: la previsión se
+ * Indexa la franja libre más temprana por (marca, canal, carril). Puro y exportado: la previsión se
  * prueba sin red, y el orden NO se confía al `order=` de la consulta —se compara aquí— para
  * que una respuesta desordenada no produzca una previsión falsa.
  */
@@ -260,7 +271,7 @@ export function indexNextFree(rows: PublishSlotRow[]): Map<string, PublishSlotRo
     const platform = clean(r?.platform_key);
     const at = millis(r?.slot_at);
     if (!brand || !platform || at === null) continue;
-    const key = channelSlotKey(brand, platform);
+    const key = laneSlotKey(brand, platform, r?.format);
     const cur = best.get(key);
     if (!cur || at < (millis(cur.slot_at) ?? Infinity)) best.set(key, r);
   }
@@ -308,14 +319,24 @@ export function forecastFor(
   piece: ContentPiece,
   freeSlots: SlotIndex,
   timezones: BrandTimezoneCatalog,
+  policies: PolicyFormatRow[] = [],
 ): ForecastSlot | null {
   if (!freeSlots) return null; // lectura caída — lo declara `slots_source`, no este `null`.
+  const brand = clean(piece.brand_id);
   const platform = clean(piece.platform);
-  if (!platform) return null;
-  const row = freeSlots.get(channelSlotKey(piece.brand_id, platform));
-  const slot_at = row ? clean(row.slot_at) : null;
-  if (!slot_at) return null;
-  return { slot_at, timezone: timezoneOf(piece.brand_id, timezones) };
+  if (!brand || !platform) return null;
+  // CARRIL (2026-10-22): la más temprana entre las franjas que `slotAcceptsPiece` acepta para esta
+  // pieza. La previsión de un artículo nunca es la franja general del canal, ni la de un post la del
+  // carril de artículos.
+  let best: { slot_at: string; t: number } | null = null;
+  for (const lane of acceptedLanesOf(piece, policies)) {
+    const row = freeSlots.get(laneSlotKey(brand, platform, lane));
+    const slot_at = row ? clean(row.slot_at) : null;
+    const t = millis(slot_at);
+    if (slot_at && t !== null && (!best || t < best.t)) best = { slot_at, t };
+  }
+  if (!best) return null;
+  return { slot_at: best.slot_at, timezone: timezoneOf(piece.brand_id, timezones) };
 }
 
 // ── URGENCIA · QUÉ CANAL ESTÁ A PUNTO DE PUBLICAR EN VACÍO ──────────────────────
@@ -353,6 +374,11 @@ export function forecastFor(
 export interface UrgentChannel {
   brand_id: string;
   platform: string;
+  /**
+   * Carril dedicado de la franja (2026-10-22). AUSENTE en el carril general, para que la urgencia
+   * de una marca sin carriles dedicados salga idéntica a la de siempre.
+   */
+  format?: string;
   /** La franja libre más próxima de ese canal, en ISO. */
   slot_at: string;
   /** Horas que faltan, redondeadas hacia abajo: «faltan 3» no puede leerse cuando faltan 3,9. */
@@ -395,9 +421,11 @@ export function urgentChannels(
     if (!Number.isFinite(t)) continue;
     // Una franja ya vencida tampoco entra: no queda nada que hacer con ella desde la bandeja.
     if (t <= now.getTime() || t > limite) continue;
+    const format = clean(row?.format);
     out.set(key, {
       brand_id: brand,
       platform,
+      ...(format ? { format } : {}),
       slot_at,
       hours_left: Math.floor((t - now.getTime()) / 3_600_000),
     });
@@ -405,15 +433,20 @@ export function urgentChannels(
   return out;
 }
 
-/** ¿La pieza pertenece a un canal urgente? Misma clave que el índice, sin recalcular nada. */
+/**
+ * ¿La pieza pertenece a un canal urgente? Misma clave que el índice, sin recalcular nada. Con
+ * carriles (2026-10-22), sólo cuentan los carriles que `slotAcceptsPiece` acepta para la pieza: la
+ * franja general por vencer no vuelve urgente a un artículo, ni la del carril de artículos a un post.
+ */
 export function isUrgentPiece(
-  piece: { brand_id?: unknown; platform?: unknown },
+  piece: { brand_id?: unknown; platform?: unknown; format?: unknown },
   urgentes: Map<string, UrgentChannel>,
+  policies: PolicyFormatRow[] = [],
 ): boolean {
   const brand = clean(piece?.brand_id as string | null | undefined);
   const platform = clean(piece?.platform as string | null | undefined);
   if (!brand || !platform) return false;
-  return urgentes.has(channelSlotKey(brand, platform));
+  return acceptedLanesOf(piece, policies).some((lane) => urgentes.has(laneSlotKey(brand, platform, lane)));
 }
 
 // ── CARRIL DE FORMATO · qué pieza cabe en qué franja (Sam, 2026-10-22) ──────────
@@ -427,9 +460,41 @@ export function isUrgentPiece(
 // `intel.brand_publish_policies` de esa marca × canal. Aquí no se nombra ningún formato: un carril
 // nuevo aparece sembrando su política, sin tocar este archivo.
 
+/** Una fila de `intel.brand_publish_policies` reducida a lo que decide el carril. */
+export interface PolicyFormatRow {
+  brand_id?: string | null;
+  platform_key?: string | null;
+  format?: string | null;
+}
+
+/** Las políticas leídas, o `null` cuando la LECTURA FALLÓ (misma distinción que `SlotIndex`). */
+export type PolicyCatalog = PolicyFormatRow[] | null;
+
+/**
+ * Las políticas de TODOS los canales, activas o no —igual que `intel.carril_de_pieza` en la base—,
+ * UNA vez por petición. Son decenas de filas. Falla en blando y lo declara: `null`, nunca `[]`,
+ * porque «no hay carriles dedicados» y «no se pudo saber» llevan a previsiones distintas.
+ */
+export async function fetchPolicyFormats(): Promise<PolicyCatalog> {
+  const url = `${SB_URL()}/rest/v1/brand_publish_policies?select=brand_id,platform_key,format&limit=${SLOTS_CAP}`;
+  let res: Response;
+  try {
+    res = await fetchWithTimeout('db', url, { headers: intelHeaders() });
+  } catch {
+    console.warn('[publish-slots] brand_publish_policies no disponible (red) — carriles SIN LEER');
+    return null;
+  }
+  if (!res.ok) {
+    console.warn(`[publish-slots] brand_publish_policies no disponible (${res.status}) — carriles SIN LEER`);
+    return null;
+  }
+  const rows = (await res.json().catch(() => null)) as unknown;
+  return Array.isArray(rows) ? (rows as PolicyFormatRow[]) : null;
+}
+
 /** Los formatos con carril dedicado en una marca × canal, desde las filas de política. Puro. */
 export function dedicatedFormatsOf(
-  policies: Array<{ brand_id?: string | null; platform_key?: string | null; format?: string | null }>,
+  policies: PolicyFormatRow[],
   brandId: string,
   platformKey: string,
 ): Set<string> {
@@ -455,6 +520,35 @@ export function slotAcceptsPiece(
   const pieza = clean(pieceFormat);
   if (franja === null) return !(pieza !== null && dedicated.has(pieza));
   return franja === pieza;
+}
+
+/**
+ * Los carriles en los que cabe una pieza en su marca × canal (`null` = general). Sólo pueden ser el
+ * general y el de su propio formato —una franja dedicada sólo acepta su formato—, así que se
+ * enumeran esos dos y decide `slotAcceptsPiece`. No hay una segunda regla.
+ */
+export function acceptedLanesOf(
+  piece: { brand_id?: unknown; platform?: unknown; format?: unknown },
+  policies: PolicyFormatRow[] = [],
+): Array<string | null> {
+  const brand = clean(piece?.brand_id as string | null | undefined);
+  const platform = clean(piece?.platform as string | null | undefined);
+  if (!brand || !platform) return [];
+  const formato = clean(piece?.format as string | null | undefined);
+  const dedicados = dedicatedFormatsOf(policies, brand, platform);
+  const carriles: Array<string | null> = formato ? [null, formato] : [null];
+  return carriles.filter((c) => slotAcceptsPiece(c, formato, dedicados));
+}
+
+/** ¿Es la pieza candidata de este carril urgente? Para contar `candidates` con el mismo criterio. */
+export function pieceFitsUrgentLane(
+  piece: { brand_id?: unknown; platform?: unknown; format?: unknown },
+  lane: UrgentChannel,
+  policies: PolicyFormatRow[] = [],
+): boolean {
+  if (clean(piece?.brand_id as string | null | undefined) !== lane.brand_id) return false;
+  if (clean(piece?.platform as string | null | undefined) !== lane.platform) return false;
+  return acceptedLanesOf(piece, policies).includes(lane.format ?? null);
 }
 
 // ── ESCRITURA · liberación de franja ────────────────────────────────────────────

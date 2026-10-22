@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   indexBrandTimezones, indexByPiece, indexNextFree, timezoneOf, slotOf, forecastFor,
   releaseSlotsForPiece, urgentChannels, isUrgentPiece, slotAcceptsPiece, dedicatedFormatsOf,
+  pieceFitsUrgentLane,
   type PublishSlotRow,
 } from './_publishSlots.js';
 import type { ContentPiece } from './_calibrationShared.js';
@@ -464,5 +465,83 @@ describe('carril de formato · qué pieza cabe en qué franja', () => {
   it('los espacios y vacíos cuentan como «sin formato»', () => {
     expect(slotAcceptsPiece('  ', OTRO, dedicados)).toBe(true);
     expect(slotAcceptsPiece(` ${DEDICADO} `, DEDICADO, dedicados)).toBe(true);
+  });
+});
+
+// ── CARRILES EN LA PREVISIÓN Y LA URGENCIA (2026-10-22) ──────────────────────────
+//
+// Dos carriles en el MISMO canal: el general sale lunes, miércoles y viernes; el de un formato
+// dedicado, martes y jueves. Un post tiene que prever su franja general y un artículo la suya; y la
+// franja de un carril no vuelve urgentes las piezas del otro.
+describe('carriles · previsión y urgencia con dos carriles en el mismo canal', () => {
+  const ARTICULO = 'formato_dedicado';
+  const POLITICAS = [
+    { brand_id: BRAND_A, platform_key: CHANNEL_ONE, format: null },
+    { brand_id: BRAND_A, platform_key: CHANNEL_ONE, format: ARTICULO },
+  ];
+  const LUN = '2026-10-26T15:00:00+00:00';
+  const MAR = '2026-10-27T15:00:00+00:00';
+  const MIE = '2026-10-28T15:00:00+00:00';
+  const JUE = '2026-10-29T15:00:00+00:00';
+  const VIE = '2026-10-30T15:00:00+00:00';
+  const LIBRES = indexNextFree([
+    slot({ slot_at: VIE }), slot({ slot_at: MIE }), slot({ slot_at: LUN }),
+    slot({ slot_at: JUE, format: ARTICULO }), slot({ slot_at: MAR, format: ARTICULO }),
+  ]);
+  const post = piece({ format: 'post' });
+  const articulo = piece({ format: ARTICULO });
+
+  it('la previsión de un post es su franja general (lunes), no la del carril dedicado', () => {
+    expect(forecastFor(post, LIBRES, ZONES, POLITICAS)?.slot_at).toBe(LUN);
+  });
+
+  it('la previsión de un artículo es la franja de su carril (martes), no la general', () => {
+    expect(forecastFor(articulo, LIBRES, ZONES, POLITICAS)?.slot_at).toBe(MAR);
+  });
+
+  it('aunque la general sea la más temprana del canal, el artículo no la toma', () => {
+    const soloGeneralAntes = indexNextFree([slot({ slot_at: LUN }), slot({ slot_at: JUE, format: ARTICULO })]);
+    expect(forecastFor(articulo, soloGeneralAntes, ZONES, POLITICAS)?.slot_at).toBe(JUE);
+    expect(forecastFor(post, soloGeneralAntes, ZONES, POLITICAS)?.slot_at).toBe(LUN);
+  });
+
+  it('un artículo sin franja libre en su carril no tiene previsión — no hereda la general', () => {
+    const soloGeneral = indexNextFree([slot({ slot_at: LUN })]);
+    expect(forecastFor(articulo, soloGeneral, ZONES, POLITICAS)).toBeNull();
+  });
+
+  it('sin políticas con formato, la previsión es la de siempre: la más temprana del canal', () => {
+    const generalSolo = indexNextFree([slot({ slot_at: MIE }), slot({ slot_at: LUN })]);
+    const sinFormato = [{ brand_id: BRAND_A, platform_key: CHANNEL_ONE, format: null }];
+    expect(forecastFor(articulo, generalSolo, ZONES, sinFormato)).toEqual(forecastFor(articulo, generalSolo, ZONES));
+    expect(forecastFor(articulo, generalSolo, ZONES, sinFormato)?.slot_at).toBe(LUN);
+  });
+
+  const AHORA = new Date('2026-10-26T12:00:00Z');
+
+  it('urgencia: la franja general por vencer vuelve urgentes los posts, no los artículos', () => {
+    const idx = indexNextFree([slot({ slot_at: LUN }), slot({ slot_at: JUE, format: ARTICULO })]);
+    const u = urgentChannels(idx, 24, AHORA); // sólo el lunes cae en la ventana
+    expect(isUrgentPiece(post, u, POLITICAS)).toBe(true);
+    expect(isUrgentPiece(articulo, u, POLITICAS)).toBe(false);
+  });
+
+  it('urgencia: la franja dedicada por vencer vuelve urgentes los artículos, no los posts', () => {
+    const idx = indexNextFree([slot({ slot_at: VIE }), slot({ slot_at: MAR, format: ARTICULO })]);
+    const u = urgentChannels(idx, 48, AHORA); // sólo el martes cae en la ventana
+    expect(isUrgentPiece(articulo, u, POLITICAS)).toBe(true);
+    expect(isUrgentPiece(post, u, POLITICAS)).toBe(false);
+  });
+
+  it('urgencia: cada carril es una urgencia aparte, y la dedicada dice su formato', () => {
+    const u = urgentChannels(LIBRES, 48, AHORA);
+    expect(u.size).toBe(2);
+    const [general, dedicada] = [...u.values()].sort((a, b) => a.slot_at.localeCompare(b.slot_at));
+    expect(general).toEqual({ brand_id: BRAND_A, platform: CHANNEL_ONE, slot_at: LUN, hours_left: 3 });
+    expect(dedicada.format).toBe(ARTICULO);
+    expect(pieceFitsUrgentLane(articulo, dedicada, POLITICAS)).toBe(true);
+    expect(pieceFitsUrgentLane(post, dedicada, POLITICAS)).toBe(false);
+    expect(pieceFitsUrgentLane(post, general, POLITICAS)).toBe(true);
+    expect(pieceFitsUrgentLane(articulo, general, POLITICAS)).toBe(false);
   });
 });

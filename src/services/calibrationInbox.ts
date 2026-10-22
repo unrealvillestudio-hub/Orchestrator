@@ -53,6 +53,8 @@ export type UrgencyFilter = 'all' | 'urgent';
 export interface UrgentChannelInfo {
   brand_id: string;
   platform: string;
+  /** Carril dedicado de la franja (2026-10-22); ausente en el carril general. */
+  format?: string;
   slot_at: string;
   hours_left: number;
   /** Siempre 1: una franja, una pieza. Explícito a propósito. */
@@ -477,6 +479,8 @@ export interface QueueResult {
    * el canal que nadie midió.
    */
   slots_source: 'ok' | 'unavailable';
+  /** 2026-10-22 — si se leyeron los carriles por formato. Con `unavailable`, `slots_source` también lo es. */
+  lanes_source?: 'ok' | 'unavailable';
   /** Arbitrajes abiertos que hoy muestra Retenidas. `null` = no se leyeron. Opcional: un server
    *  anterior no lo manda. */
   open_challenges?: number | null;
