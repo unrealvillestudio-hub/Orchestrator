@@ -31,7 +31,7 @@
  * con un veredicto que el código no conociera desaparecería del historial sin decir nada.
  * `by_verdict` se descubre del dato, igual que `by_brand` y `by_channel`.
  *
- * GET /api/evaluated-history?from=&to=&brand=&channel=&verdict=&source=&limit=&offset=
+ * GET /api/evaluated-history?from=&to=&brand=&channel=&verdict=&source=&published=&limit=&offset=
  *   Auth: admin JWT vía `Authorization: Bearer <session_token>` — nunca por query string.
  *
  * Devuelve: { total, by_brand, by_channel, by_verdict, limit, offset, rows[], truncated? }
@@ -50,6 +50,7 @@ import { PUBLISH_STATUSES } from './_publishShared.js';
 // que las otras tres bandejas: una marca nueva entra sembrando su fila, no editando código.
 import { fetchBrandLanguages, readingLanguageOf } from './_brandLanguage.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
+import { publishedParam, conPublicacion, soloPublicadas, type PublicacionDePieza } from './_publicadas.js';
 
 /** Tope de lectura por tabla. El corpus crece por veredicto humano: decenas al mes. */
 export const HISTORY_CAP = 5000;
@@ -185,6 +186,36 @@ async function fetchCorpusRows(
   }));
 }
 
+/**
+ * LO PUBLICADO (2026-10-22) — el estado vivo de las piezas: si salió, cuándo y su enlace. Con `ids`, sólo esas
+ * (las de la página); sin ellos, todas las publicadas (el filtro «sólo publicadas» necesita el conjunto entero
+ * antes de paginar). Lanza en error: un historial que dice «no publicada» porque no pudo leer, miente.
+ */
+async function fetchPublicacion(ids: string[] | null): Promise<Map<string, PublicacionDePieza>> {
+  const out = new Map<string, PublicacionDePieza>();
+  if (ids && ids.length === 0) return out;
+  const filtro = ids
+    ? `id=in.(${ids.map(encodeURIComponent).join(',')})`
+    : `status=eq.published&order=published_at.desc&limit=${HISTORY_CAP}`;
+  const url = `${SB_URL()}/rest/v1/content_pieces?select=id,status,published_at,post_url&${filtro}`;
+  const res = await fetchWithTimeout('db', url, {
+    headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': 'content' },
+  });
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => '')).slice(0, 300);
+    throw new Error(`content_pieces read failed: ${res.status} ${detail}`);
+  }
+  const rows = (await res.json().catch(() => [])) as Array<Record<string, unknown>>;
+  for (const r of Array.isArray(rows) ? rows : []) {
+    out.set(String(r.id ?? ''), {
+      status: (r.status as string) ?? null,
+      published_at: (r.published_at as string) ?? null,
+      post_url: (r.post_url as string) ?? null,
+    });
+  }
+  return out;
+}
+
 /** Cuenta por una dimensión, saltándose lo vacío. Las facetas se DESCUBREN del dato. */
 function tally(rows: EvaluatedRow[], key: (r: EvaluatedRow) => string | null): Record<string, number> {
   const out: Record<string, number> = {};
@@ -217,6 +248,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // las láminas, así que el criterio se resuelve sobre `content_pieces` (`fetchCarouselPieceIds`), y
   // SÓLO cuando el filtro está puesto: sin él, el historial no lee una tabla más.
   const carousel = carouselParam(req.query.carousel);
+  // 2026-10-22 — sólo las publicadas, por fecha de publicación (Sam: «para eso es historial»).
+  const published = publishedParam(req.query.published);
 
   // U-7 — buscar por id de pieza, el MISMO resolvedor que las otras tres bandejas.
   //
@@ -285,8 +318,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (verdict && verdict !== 'all') filtradas = filtradas.filter((r) => r.verdict === verdict);
     if (carruseles) filtradas = filtradas.filter((r) => carruseles.ids.has(r.piece_id));
 
-    const ordenadas = filtradas.sort((a, b) => ms(b.created_at) - ms(a.created_at));
-    const page = ordenadas.slice(offset, offset + limit);
+    // LO PUBLICADO (2026-10-22). Con el filtro, el conjunto entero se cruza con las publicadas ANTES de paginar
+    // y se ordena por fecha de publicación; sin él, el orden sigue siendo el del veredicto y sólo la página se
+    // enriquece con si salió y cuándo.
+    const publicadas = published ? await fetchPublicacion(null) : null;
+    const ordenadas = publicadas
+      ? soloPublicadas(conPublicacion(filtradas, publicadas))
+      : filtradas.sort((a, b) => ms(b.created_at) - ms(a.created_at));
+    const page = publicadas
+      ? ordenadas.slice(offset, offset + limit)
+      : conPublicacion(ordenadas.slice(offset, offset + limit),
+        await fetchPublicacion([...new Set(ordenadas.slice(offset, offset + limit).map((r) => r.piece_id))]));
 
     // Que una de las dos lecturas tope el CAP se DICE: un historial truncado en silencio es
     // peor que uno corto, porque parece completo.
@@ -306,6 +348,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       offset,
       rows: page,
       carousel,
+      published,
       /**
        * U-7 — qué se buscó y si alguna de las dos lecturas topó su cap. Si se truncó, una
        * lista vacía NO es «no existe»: es «puede que no lo haya traído».

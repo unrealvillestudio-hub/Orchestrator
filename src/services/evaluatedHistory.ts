@@ -58,6 +58,12 @@ export interface EvaluatedRow {
   /** Sólo en `archived`. */
   archived_at: string | null;
   archived_reason: string | null;
+  /** 2026-10-22 — el estado vivo de la pieza; `null` si no se pudo leer. */
+  piece_status?: string | null;
+  /** Cuándo salió. Sólo en una pieza publicada. */
+  published_at?: string | null;
+  /** El enlace a la publicación, si el publicador lo guardó. */
+  post_url?: string | null;
 }
 
 export interface EvaluatedHistoryResult {
@@ -71,6 +77,8 @@ export interface EvaluatedHistoryResult {
   rows: EvaluatedRow[];
   /** 2026-10-06 — el filtro «Carrusel» aplicado. */
   carousel?: boolean;
+  /** 2026-10-22 — el filtro «Sólo publicadas» aplicado: orden por fecha de publicación. */
+  published?: boolean;
   /** U-7 — qué se buscó. `null` = no se buscó nada, que no es «no se encontró nada». */
   search: SearchInfo | null;
   /** La lectura topó el límite del server: el historial mostrado puede no estar completo. */
@@ -121,6 +129,8 @@ export function fetchEvaluatedHistory(
     q?: string;
     /** 2026-10-06 — sólo carruseles, de cualquier canal. Se combina con `channel`. */
     carousel?: boolean;
+    /** 2026-10-22 — sólo lo publicado, la más reciente primero por fecha de publicación. */
+    published?: boolean;
   } = {},
 ): Promise<EvaluatedHistoryResult> {
   const q = new URLSearchParams();
@@ -134,6 +144,7 @@ export function fetchEvaluatedHistory(
   if (opts.source) q.set('source', opts.source);
   if (opts.q) q.set('q', opts.q);
   if (opts.carousel) q.set('carousel', '1');
+  if (opts.published) q.set('published', '1');
   const qs = q.toString();
   return req<EvaluatedHistoryResult>(`/api/evaluated-history${qs ? `?${qs}` : ''}`, token);
 }
