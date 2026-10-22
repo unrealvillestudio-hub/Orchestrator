@@ -11,12 +11,15 @@
  *   edit_reason?: string,          // en palabras de quien la pide, si se quiere registrar
  *   mode?: 'edit_from_current' | 'same_scene' | 'regenerate_full'   // BRIEF-IMG-01 fase 4 (2026-09-27); same_scene 2026-10-20
  *   restore_index?: number         // 2026-10-20 — volver a una imagen anterior (sin generar): ver `volverALaAnterior`
- *   slide_text?: { n, headline?, subheadline?, eyebrow?, steps? }   // 2026-10-22 — el texto de la lámina n (2..N) de
- *                                  // un carrusel, sin generar: ver `textoDeLaLamina` y `_carouselText.ts`
+ *   slide_text?: { n, headline?, subheadline?, eyebrow?, steps?, text_place? }   // 2026-10-22 — el texto de la lámina
+ *                                  // n (2..N) de un carrusel, sin generar: ver `textoDeLaLamina` y `_carouselText.ts`
+ *   text_place?: 'top' | 'bottom' | 'auto' | null   // 2026-10-22 — la ubicación del texto de la imagen (y de la portada
+ *                                  // de un carrusel), sola o con `overlay_override`, sin generar: ver `_textPlace.ts`
  * }
  * GET /api/recompose-image?piece_id= → { options (colores del resaltado), cast (En la escena), history (anteriores), overlay (texto vigente),
  *   shadow (la sombra de la marca), rule_options (colores del filete), identity_options (colores de la barra lateral),
- *   carousel (2026-10-22: las láminas con su texto, o null si la pieza no es un carrusel) }
+ *   carousel (2026-10-22: las láminas con su texto, o null si la pieza no es un carrusel),
+ *   text_place (2026-10-22: la ubicación del texto guardada en la imagen, o null) }
  *
  * ─── LOS DOS MODOS (BRIEF-IMG-01 fase 4) ─────────────────────────────────────────────
  * `edit_from_current` CORRIGE SOBRE LA IMAGEN ACTUAL: el generador recibe la imagen limpia vigente
@@ -58,6 +61,7 @@ import { fetchWithTimeout } from './_fetchWithTimeout.js';
 import { requireReviewer, guardPiece } from './_reviewScope.js';
 import { callEdgeFunction } from './_challengedShared.js';
 import { carouselTextViewOf, readSlideTextRequest } from './_carouselText.js';
+import { readTextPlaceRequest, textPlaceOfImage } from './_textPlace.js';
 
 /**
  * Mismo techo que declara el motor (`SCENE_DIRECTIVE_MAX_CHARS` en content-run-stage). Se valida
@@ -93,6 +97,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     restore_index?: unknown;
     // 2026-10-22 — el texto de una lámina 2..N de un carrusel (la portada va por `overlay_override`).
     slide_text?: unknown;
+    // 2026-10-22 — la ubicación del texto de la imagen: 'top' | 'bottom' | 'auto' | null (ver `_textPlace.ts`).
+    text_place?: unknown;
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
@@ -153,7 +159,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const tieneImagen = typeof piece.assets?.image?.url === 'string' && !!piece.assets.image.url;
 
     const conTexto = Object.prototype.hasOwnProperty.call(body, 'overlay_override');
-    if (tieneImagen && !directive && !conTexto) {
+    // 2026-10-22 — LA UBICACIÓN DEL TEXTO: sola o con el texto escrito, por la misma vía sin generar (0 USD).
+    const conUbicacion = Object.prototype.hasOwnProperty.call(body, 'text_place');
+    const ubicacion = conUbicacion ? readTextPlaceRequest(body.text_place) : null;
+    if (ubicacion && !ubicacion.ok) return res.status(400).json({ error: 'invalid text_place', detail: ubicacion.error });
+    if (tieneImagen && !directive && !conTexto && !conUbicacion) {
       return res.status(400).json({
         error: 'visual_directive required',
         detail: 'regenerar sin directriz devuelve el mismo defecto y cobra una generación por no cambiar nada. '
@@ -164,13 +174,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 2026-10-19 — EL TEXTO DE LA IMAGEN, SIN TOCAR LA ESCENA. Con `overlay_override` en el cuerpo no hay
     // directriz ni generación: se recompone sobre la escena limpia que ya existe (0 USD). El motor valida el
     // texto antes de componer; aquí sólo se exige que haya una imagen sobre la que escribir.
-    if (conTexto) {
+    if (conTexto || conUbicacion) {
       if (!tieneImagen) {
         return res.status(409).json({ error: 'no_image', detail: 'la pieza no tiene imagen: primero hay que generarla, después se escribe su texto' });
       }
       const ef = await callEdgeFunction('content-run-stage', {
         action: 'recompose', piece_id: pieceId, regenerate_image: false,
-        overlay_override: body.overlay_override ?? null,
+        // Cada clave viaja sólo si se pidió: su ausencia no toca lo guardado en la pieza.
+        ...(conTexto ? { overlay_override: body.overlay_override ?? null } : {}),
+        ...(ubicacion && ubicacion.ok ? { text_place: ubicacion.value } : {}),
         edit_reason: editReason || null, edited_by: session.sub || 'sam',
       });
       if (!ef.body?.ok) {
@@ -181,10 +193,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       // El motor tiene que ACUSAR que aplicó el texto: uno anterior al soporte de `overlay_override` respondería
       // «ok» habiéndolo ignorado, y la pantalla diría que se aplicó algo que no se aplicó.
-      if (ef.body.overlay_override_applied !== true) {
+      if (conTexto && ef.body.overlay_override_applied !== true) {
         return res.status(409).json({
           error: 'overlay_override_unsupported',
           detail: 'el motor recompuso la imagen pero no aplicó el texto escrito: falta desplegar content-run-stage con overlay_override (unrlvl-iid-functions#411)',
+        });
+      }
+      // Lo mismo con la ubicación: un motor anterior recompondría en el lugar de siempre y respondería «ok».
+      if (conUbicacion && ef.body.text_place_applied !== true) {
+        return res.status(409).json({
+          error: 'text_place_unsupported',
+          detail: 'el motor recompuso la imagen pero no aplicó la ubicación del texto: falta desplegar content-run-stage con text_place',
         });
       }
       let html: string | null = null;
@@ -198,6 +217,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 2026-10-22 — en un carrusel, el motor recompone también la portada con este texto: `true`, o el motivo
         // por el que no pudo (la pantalla lo dice). Ausente = la pieza no es un carrusel.
         carousel_recomposed: ef.body.carousel_recomposed ?? null,
+        // 2026-10-22 — la ubicación que quedó guardada (o null: la de la marca).
+        text_place: ef.body.text_place ?? null,
         artifact_url, html, artifact_refreshed: html !== null,
       });
     }
@@ -315,6 +336,8 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
       identity_options: identityColorOptions(tokens, palette, brandId),
       // 2026-10-22 — las láminas del carrusel con su texto: el editor ofrece el selector de lámina con esto.
       carousel: carouselTextViewOf(piece),
+      // 2026-10-22 — la ubicación del texto que la imagen tiene guardada: el selector abre con ella.
+      text_place: textPlaceOfImage(piece.assets),
     });
   } catch (err) {
     console.error(`[recompose-image] GET colores ${pieceId}: ${String(err)}`);
@@ -373,6 +396,7 @@ async function textoDeLaLamina(res: VercelResponse, piece: any, raw: unknown, ed
       server_detail: typeof ef.body?.error === 'string' ? ef.body.error : null,
     });
   }
+  // Con la ubicación, el motor también tiene que acusarla: uno anterior rechaza el campo, uno nuevo dice que la aplicó.
   if (ef.body.slides_text_applied !== true) {
     return res.status(409).json({
       error: 'slides_text_unsupported',

@@ -17,6 +17,7 @@ import {
   carouselViewAfterSlideSave, coverNoteOf, slideTabLabel, slideTextDraftOf, slideTextPayload, CAROUSEL_SLIDE_HELP,
   type CarouselTextView, type SlideTextDraft,
 } from '../../../api/_carouselText';
+import { TEXT_PLACE_CHOICES, TEXT_PLACE_HELP, textPlaceLabel, textPlaceNoteOf, textPlaceToSend, type TextPlace } from '../../../api/_textPlace';
 
 /**
  * pieceActions.tsx — U-5 · LAS ACCIONES DE UNA PIEZA, EN UN SOLO SITIO.
@@ -560,6 +561,8 @@ export function PieceActionsBar({
   const [editNote, setEditNote] = useState<null | { avisos: string[]; refrescado: boolean }>(null);
   const [regenNote, setRegenNote] = useState<null | {
     compuesta: boolean; refrescado: boolean; posts: number; cambioDeModo?: string | null; restaurada?: boolean;
+    /** 2026-10-22 — se recompuso sólo la ubicación del texto: lo que dice la tarjeta. */
+    lugar?: string;
     // 2026-10-22 — carrusel: la lámina cuyo texto se guardó, y qué pasó con la portada al aplicar el texto de la imagen.
     lamina?: { n: number; sinCambios: boolean } | null; portada?: boolean | string | null;
   }>(null);
@@ -594,8 +597,13 @@ export function PieceActionsBar({
   const [slideN, setSlideN] = useState(1);
   const [slideDraft, setSlideDraft] = useState<SlideTextDraft>(slideTextDraftOf(null));
   const laminaElegida = slideN > 1 ? carouselView?.slides.find((s) => s.n === slideN) ?? null : null;
+  // 2026-10-22 — UBICACIÓN DEL TEXTO: la guardada en la imagen (rige también la portada), la de la lámina elegida y la
+  // que se elige en el selector. `placeSel` null = no se tocó el selector.
+  const [placeVigente, setPlaceVigente] = useState<TextPlace | null>(null);
+  const [placeSel, setPlaceSel] = useState<TextPlace | null>(null);
+  const placeActual = laminaElegida ? laminaElegida.text_place : placeVigente;
   const elegirLamina = (n: number) => {
-    setSlideN(n); setError(null);
+    setSlideN(n); setError(null); setPlaceSel(null);
     if (n > 1) setSlideDraft(slideTextDraftOf(carouselView?.slides.find((s) => s.n === n) ?? null));
   };
   const overlayTocado = useRef(false);
@@ -643,6 +651,7 @@ export function PieceActionsBar({
       // El editor abre con el texto que la imagen lleva HOY, con su énfasis marcado.
       setRegenTab('scene');
       setSlideN(1);
+      setPlaceSel(null);
       overlayTocado.current = false;
       sembrarEditor(overlayVigente);
       // Sin opciones (o si la lectura falla) el editor funciona igual, sin selector de color.
@@ -653,6 +662,7 @@ export function PieceActionsBar({
           setShadowOpt(r.shadow ?? null); setRuleColors(r.rule_options ?? []); setIdentityColors(r.identity_options ?? []);
           if (r.overlay !== undefined) { setOverlayVigente(r.overlay); if (!overlayTocado.current) sembrarEditor(r.overlay); }
           setCarouselView(r.carousel ?? null);
+          setPlaceVigente(r.text_place ?? null);
         })
         .catch(() => { setEmColors([]); setCast(null); setHistory([]); setCarouselView(null); });
     }
@@ -744,8 +754,12 @@ export function PieceActionsBar({
     }
     setBusy('recompose_image'); setError(null); setRegenNote(null);
     try {
-      const r = await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: '', overlay_override: override });
+      // 2026-10-22 — la ubicación elegida viaja con el texto (sólo si cambió); volver al copy no la toca.
+      const lugar = clear ? null : textPlaceToSend(placeSel, placeVigente);
+      const r = await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: '', overlay_override: override,
+        ...(lugar ? { text_place: lugar } : {}) });
       setOverlayVigente(overlayViewAfterApply(override));
+      if (lugar) setPlaceVigente(r.text_place ?? lugar);
       onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: r.composed, refreshed: r.artifact_refreshed, posts: r.scheduled_posts_updated });
       setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated, portada: r.carousel_recomposed ?? null });
       setPanel(null);
@@ -759,13 +773,16 @@ export function PieceActionsBar({
     if (!laminaElegida || !carouselView) return;
     const p = slideTextPayload(laminaElegida, slideDraft);
     if (!p.ok) { setError({ message: p.error, detail: null }); return; }
-    if (!p.changed) { setError({ message: 'No hay cambios que guardar en esta lámina.', detail: null }); return; }
+    // 2026-10-22 — la ubicación elegida viaja con el texto de la lámina (sólo si cambió).
+    const lugar = textPlaceToSend(placeSel, laminaElegida.text_place);
+    const value = lugar ? { ...p.value, text_place: lugar } : p.value;
+    if (!p.changed && !lugar) { setError({ message: 'No hay cambios que guardar en esta lámina.', detail: null }); return; }
     setBusy('recompose_image'); setError(null); setRegenNote(null);
     try {
-      const r = await saveSlideText(token, piece.piece_id, p.value);
-      setCarouselView(carouselViewAfterSlideSave(carouselView, p.value));
+      const r = await saveSlideText(token, piece.piece_id, value);
+      setCarouselView(carouselViewAfterSlideSave(carouselView, value));
       onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: true, refreshed: r.artifact_refreshed, posts: 0 });
-      setRegenNote({ compuesta: true, refrescado: r.artifact_refreshed, posts: 0, lamina: { n: p.value.n, sinCambios: r.unchanged } });
+      setRegenNote({ compuesta: true, refrescado: r.artifact_refreshed, posts: 0, lamina: { n: value.n, sinCambios: r.unchanged } });
       setPanel(null);
     } catch (err) {
       setError(cardError(err, `No se pudo recomponer la lámina ${laminaElegida.n}.`));
@@ -790,6 +807,34 @@ export function PieceActionsBar({
       setPanel(null);
     } catch (err) {
       setError(cardError(err, 'No se pudo volver a la imagen anterior.'));
+    } finally { setBusy(null); }
+  };
+
+  /**
+   * 2026-10-22 — SÓLO LA UBICACIÓN DEL TEXTO, sin cambiar el texto («Recomponer»). La portada y la imagen de la pieza
+   * van por `recompose` (el motor recompone también la portada del carrusel); las láminas 2..N, por la suya. Sin
+   * generar: se recompone sobre la misma foto (0 USD).
+   */
+  const submitPlace = async () => {
+    if (!placeSel) return;
+    setBusy('recompose_image'); setError(null); setRegenNote(null);
+    try {
+      if (laminaElegida && carouselView) {
+        const out = { n: laminaElegida.n, text_place: placeSel };
+        const r = await saveSlideText(token, piece.piece_id, out);
+        setCarouselView(carouselViewAfterSlideSave(carouselView, out));
+        onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: true, refreshed: r.artifact_refreshed, posts: 0 });
+        setRegenNote({ compuesta: true, refrescado: r.artifact_refreshed, posts: 0, lugar: textPlaceNoteOf(placeSel, laminaElegida.n) });
+      } else {
+        const r = await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: '', text_place: placeSel });
+        setPlaceVigente(r.text_place ?? placeSel);
+        onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: r.composed, refreshed: r.artifact_refreshed, posts: r.scheduled_posts_updated });
+        setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated,
+          portada: r.carousel_recomposed ?? null, lugar: textPlaceNoteOf(placeSel, null) });
+      }
+      setPlaceSel(null); setPanel(null);
+    } catch (err) {
+      setError(cardError(err, 'No se pudo recomponer con la ubicación pedida.'));
     } finally { setBusy(null); }
   };
 
@@ -968,7 +1013,9 @@ export function PieceActionsBar({
 
       {regenNote && (
         <div className="text-[11px] font-mono leading-snug text-violet-300/80 bg-violet-500/[0.06] border border-violet-500/20 rounded-xl px-3 py-2 space-y-0.5">
-          <p>{regenNote.lamina
+          <p>{regenNote.lugar
+            ? regenNote.lugar
+            : regenNote.lamina
             ? (regenNote.lamina.sinCambios ? `La lámina ${regenNote.lamina.n} ya tenía ese texto: no se recompuso.`
               : `Lámina ${regenNote.lamina.n} recompuesta con el texto nuevo, sobre su misma foto (0 USD).`)
             : regenNote.restaurada
@@ -1091,6 +1138,38 @@ export function PieceActionsBar({
                   ))}
                 </div>
                 <p className="text-[10px] text-zinc-500 leading-snug">{CAROUSEL_SLIDE_HELP}</p>
+              </div>
+            )}
+
+            {/* 2026-10-22 — UBICACIÓN DEL TEXTO: arriba, abajo o que no tape. Vale para la lámina elegida (la 1 es la
+                imagen de la pieza) y se puede pedir sola con «Recomponer», sin cambiar el texto (0 USD). */}
+            {panel === 'regen' && regenTab === 'text' && (
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Ubicación del texto">
+                  <span className="text-[10px] text-zinc-400 mr-1">Ubicación del texto</span>
+                  {TEXT_PLACE_CHOICES.map((c) => (
+                    <button
+                      key={c.value}
+                      role="radio"
+                      aria-checked={(placeSel ?? placeActual) === c.value}
+                      title={c.hint}
+                      onClick={() => setPlaceSel(c.value)}
+                      className={cn('px-2 py-0.5 rounded-lg text-[11px] border transition-colors',
+                        (placeSel ?? placeActual) === c.value ? 'border-violet-400/70 text-violet-200 bg-violet-500/10' : 'border-zinc-700 text-zinc-400 hover:text-zinc-200')}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                  <button
+                    onClick={submitPlace}
+                    disabled={!!busy || !placeSel}
+                    title={placeSel ? 'Recompone sólo con la ubicación elegida, sin cambiar el texto (0 USD)' : 'Elige primero una ubicación'}
+                    className="ml-1 px-2 py-0.5 rounded-lg text-[11px] border border-violet-500/60 bg-violet-500/15 text-violet-100 hover:bg-violet-500/25 disabled:opacity-40"
+                  >
+                    Recomponer
+                  </button>
+                </div>
+                <p className="text-[10px] text-zinc-500 leading-snug">{TEXT_PLACE_HELP} Hoy: {textPlaceLabel(placeActual)}.</p>
               </div>
             )}
 

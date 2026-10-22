@@ -34,6 +34,7 @@ import type { ImageOverlayView, EmphasisColorOption, OverlayOverrideOut, ShadowO
 import type { SceneCast, ImageHistoryEntry } from '../../api/_sceneCast';
 import type { HighlightFields } from '../../api/_highlights';
 import type { CarouselTextView, SlideTextOut } from '../../api/_carouselText';
+import type { TextPlace } from '../../api/_textPlace';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
@@ -632,6 +633,8 @@ export function recomposeImage(
     piece_id: string; visual_directive: string; edit_reason?: string | null; mode?: 'edit_from_current' | 'same_scene' | 'regenerate_full';
     // 2026-10-19 — el texto de la imagen escrito en la bandeja. Con él no se regenera la escena.
     overlay_override?: OverlayOverrideOut | null;
+    // 2026-10-22 — la ubicación del texto de la imagen (`api/_textPlace.ts`). Sola o con el texto; no regenera.
+    text_place?: TextPlace | null;
   },
 ): Promise<{
   ok: true; piece_id: string; image_url: string | null; composed: boolean;
@@ -641,6 +644,8 @@ export function recomposeImage(
   scheduled_posts_updated: number;
   /** 2026-10-22 — en un carrusel: `true` si la portada también se recompuso, o el motivo por el que no. */
   carousel_recomposed?: boolean | string | null;
+  /** 2026-10-22 — la ubicación del texto que quedó guardada (null = la de la marca). */
+  text_place?: TextPlace | null;
   artifact_url: string | null; html: string | null; artifact_refreshed: boolean;
 }> {
   return req('/api/recompose-image', token, {
@@ -652,6 +657,8 @@ export function recomposeImage(
       ...(input.mode ? { mode: input.mode } : {}),
       // 2026-10-19 — la clave viaja sólo si se pidió (null incluido: vuelve al texto del copy).
       ...('overlay_override' in input ? { overlay_override: input.overlay_override ?? null } : {}),
+      // 2026-10-22 — ídem con la ubicación del texto.
+      ...('text_place' in input ? { text_place: input.text_place ?? null } : {}),
     },
   });
 }
@@ -670,6 +677,8 @@ export function fetchEmphasisColors(token: string, pieceId: string): Promise<{
   shadow?: ShadowOption; rule_options?: EmphasisColorOption[]; identity_options?: EmphasisColorOption[];
   /** 2026-10-22 — las láminas del carrusel con su texto; `null` si la pieza no es un carrusel. */
   carousel?: CarouselTextView | null;
+  /** 2026-10-22 — la ubicación del texto guardada en la imagen de la pieza (null = la de la marca). */
+  text_place?: TextPlace | null;
 }> {
   return req(`/api/recompose-image?piece_id=${encodeURIComponent(pieceId)}`, token);
 }
