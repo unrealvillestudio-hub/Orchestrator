@@ -58,6 +58,8 @@ export interface ManualPieceInput {
     image?: { url?: string | null } | null;
     carousel?: { slides?: Array<{ n?: number | null; url?: string | null }> | null } | null;
     builder_meta?: { signature_closer?: { text?: string | null } | null } | null;
+    /** Sólo en piezas derivadas de otra (p. ej. un artículo hecho a partir de un post del blog). */
+    source_piece?: { piece_id?: string | null; post_url?: string | null; title?: string | null } | null;
   } | null;
 }
 
@@ -100,6 +102,22 @@ export type ManualPasteSource = 'channel_adapted' | 'master_copy' | 'empty';
  */
 export function manualPasteOf(piece: ManualPieceInput, platformKey: string): { text: string; source: ManualPasteSource } {
   const assets = piece.assets ?? {};
+  const { cuerpo, source } = manualBodyOf(piece, platformKey);
+  const titulo = String(assets.copy?.title ?? '').trim();
+  if (!titulo) return { text: cuerpo, source };
+  if (!cuerpo) return { text: titulo, source };
+  if (cuerpo.startsWith(titulo)) return { text: cuerpo, source };
+  return { text: `${titulo}\n\n${cuerpo}`, source };
+}
+
+/**
+ * EL CUERPO, sin título: la base que corresponde al canal de la franja (adaptado, o texto juzgado)
+ * con la firma canónica una vez al final. Es la mitad de `manualPasteOf`, separada para que el
+ * artículo (`manualArticleOf`) entregue el cuerpo sin el título delante y con LA MISMA regla de base
+ * y de firma: no hay una segunda forma de elegir el texto ni de firmarlo.
+ */
+function manualBodyOf(piece: ManualPieceInput, platformKey: string): { base: string; sig: string | null; cuerpo: string; source: ManualPasteSource } {
+  const assets = piece.assets ?? {};
   const sig = assets.builder_meta?.signature_closer?.text ?? null;
   const k = String(platformKey ?? '').toLowerCase();
 
@@ -107,12 +125,7 @@ export function manualPasteOf(piece: ManualPieceInput, platformKey: string): { t
   const base = propia ? propia.copy : (assets.copy?.aife_filtered ?? assets.copy?.raw ?? '');
   const cuerpo = base ? canonicalizeSignature(base, sig).trim() : '';
   const source: ManualPasteSource = !cuerpo ? 'empty' : propia ? 'channel_adapted' : 'master_copy';
-
-  const titulo = String(assets.copy?.title ?? '').trim();
-  if (!titulo) return { text: cuerpo, source };
-  if (!cuerpo) return { text: titulo, source };
-  if (cuerpo.startsWith(titulo)) return { text: cuerpo, source };
-  return { text: `${titulo}\n\n${cuerpo}`, source };
+  return { base, sig, cuerpo, source };
 }
 
 /**
@@ -156,6 +169,139 @@ export function isCarouselPiece(piece: ManualPieceInput): boolean {
   return manualImagesOf(piece).length >= 2;
 }
 
+// ── ARTÍCULO (Sam, 2026-10-22) ───────────────────────────────────────────────────
+/**
+ * El valor de `content_pieces.format` que declara un artículo. Mismo eje que `CAROUSEL_FORMAT`:
+ * un formato, no una plataforma ni una marca. Un artículo de cualquier marca, en cualquier canal
+ * manual, llega a la pestaña igual.
+ */
+export const ARTICLE_FORMAT = 'article';
+
+/**
+ * Lo que la pestaña entrega de un artículo, en piezas sueltas: el editor de artículos de la
+ * plataforma pide el título en un campo, la portada en otro y el cuerpo en un tercero, así que aquí
+ * —al revés que en un post— el título NO va pegado al cuerpo.
+ *
+ *   title          — texto plano.
+ *   cover_url      — la portada 16:9 compuesta; `null` si la pieza no tiene una URL http(s).
+ *   body_markdown  — el cuerpo (`markdown_min`) sin título, con la firma canónica una vez al final.
+ *   body_html      — el mismo cuerpo en HTML mínimo y SEGURO (ver `articleBodyHtml`): es lo que el
+ *                    editor conserva como subtítulos al pegar.
+ *   body_text      — el mismo cuerpo en texto plano, para portapapeles sin HTML.
+ *   source_url     — el post original del blog; `null` si no hay un enlace http(s) válido.
+ */
+export interface ManualArticle {
+  title: string;
+  cover_url: string | null;
+  body_markdown: string;
+  body_html: string;
+  body_text: string;
+  source_url: string | null;
+}
+
+const SUBTITULO = /^##\s+(.*)$/u;
+// Un enlace termina en el primer espacio o comilla; la puntuación de cierre de frase no es parte de él.
+const URL_SUELTA = /https?:\/\/[^\s<>"'`]+/gu;
+const PUNTUACION_FINAL = /[.,;:!?)\]]+$/u;
+
+/** Escapa TODO lo que el HTML interpreta. Va antes de cualquier otra transformación. */
+function escapeHtml(s: string): string {
+  return s.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;')
+    .replace(/"/gu, '&quot;').replace(/'/gu, '&#39;');
+}
+
+/** Negrita: lo único que se interpreta dentro de un texto YA escapado. */
+function negrita(escapado: string): string {
+  return escapado.replace(/\*\*(.+?)\*\*/gu, '<strong>$1</strong>');
+}
+
+/**
+ * Una línea en HTML. Con `enlazar`, cada URL suelta que pase `cleanPostLink` —http(s) y nada más:
+ * ni `javascript:` ni `data:`— se vuelve `<a href>`; el resto se escapa y sólo entonces se le
+ * interpreta la negrita.
+ */
+function lineaHtml(linea: string, enlazar: boolean): string {
+  if (!enlazar) return negrita(escapeHtml(linea));
+  let out = '';
+  let desde = 0;
+  for (const m of linea.matchAll(URL_SUELTA)) {
+    const inicio = m.index ?? 0;
+    const bruta = m[0];
+    const url = bruta.replace(PUNTUACION_FINAL, '');
+    const limpia = cleanPostLink(url);
+    if (!limpia) continue;
+    out += negrita(escapeHtml(linea.slice(desde, inicio)));
+    out += `<a href="${escapeHtml(limpia)}">${escapeHtml(limpia)}</a>`;
+    desde = inicio + url.length;
+  }
+  return out + negrita(escapeHtml(linea.slice(desde)));
+}
+
+/** Párrafos del `markdown_min`: bloques separados por una línea en blanco. */
+function parrafosDe(md: string): string[] {
+  return md.split(/\n[ \t]*\n/u).map((p) => p.trim()).filter(Boolean);
+}
+
+/**
+ * `markdown_min` → HTML mínimo y seguro. Primero se escapa todo; después, y sólo sobre lo escapado:
+ * `## x` → `<h2>`, `**x**` → `<strong>`, párrafo → `<p>` (saltos simples → `<br>`) y, en el párrafo
+ * indicado por `parrafoEnlace` (el del post original), las URL sueltas → `<a href>`. Nada más.
+ */
+export function articleBodyHtml(md: string, parrafoEnlace: number | null = null): string {
+  return parrafosDe(md).map((p, i) => {
+    const enlazar = i === parrafoEnlace;
+    const bloques: string[] = [];
+    let lineas: string[] = [];
+    const cerrar = () => {
+      if (lineas.length) bloques.push(`<p>${lineas.map((l) => lineaHtml(l, enlazar)).join('<br>')}</p>`);
+      lineas = [];
+    };
+    for (const linea of p.split('\n').map((l) => l.trim()).filter(Boolean)) {
+      const h = SUBTITULO.exec(linea);
+      if (h) { cerrar(); bloques.push(`<h2>${lineaHtml(h[1].trim(), false)}</h2>`); }
+      else lineas.push(linea);
+    }
+    cerrar();
+    return bloques.join('');
+  }).join('');
+}
+
+/** `markdown_min` → texto plano: sin `## ` al inicio de línea ni marcas de negrita. */
+export function articleBodyText(md: string): string {
+  return md.split('\n')
+    .map((l) => l.replace(/^(\s*)##\s+/u, '$1').replace(/\*\*(.+?)\*\*/gu, '$1'))
+    .join('\n');
+}
+
+/**
+ * El artículo listo para el editor. El cuerpo sale de la MISMA base y con la MISMA firma que el
+ * bloque de un post (`manualBodyOf`); lo único que cambia es que no lleva el título delante.
+ *
+ * El párrafo del post original es el ÚLTIMO del cuerpo SIN firma —lo estampa el sistema—: la firma
+ * canónica va detrás, así que en el cuerpo firmado ese párrafo es el penúltimo, y es ése el que se
+ * enlaza, no la firma.
+ */
+export function manualArticleOf(piece: ManualPieceInput, platformKey: string): ManualArticle {
+  const assets = piece.assets ?? {};
+  const { base, sig, cuerpo } = manualBodyOf(piece, platformKey);
+  const sinFirma = base ? stripSignatureOccurrences(base, sig).trim() : '';
+  const parrafosSinFirma = parrafosDe(sinFirma);
+  const parrafoEnlace = parrafosSinFirma.length ? parrafosSinFirma.length - 1 : null;
+
+  const ultimo = parrafoEnlace === null ? '' : parrafosSinFirma[parrafoEnlace];
+  const enlaceDelCuerpo = cleanPostLink(ultimo.replace(PUNTUACION_FINAL, ''));
+  const portada = assets.image?.url;
+
+  return {
+    title: String(assets.copy?.title ?? '').trim(),
+    cover_url: cleanPostLink(portada),
+    body_markdown: cuerpo,
+    body_html: articleBodyHtml(cuerpo, parrafoEnlace),
+    body_text: articleBodyText(cuerpo),
+    source_url: cleanPostLink(assets.source_piece?.post_url) ?? enlaceDelCuerpo,
+  };
+}
+
 // ── La lista ─────────────────────────────────────────────────────────────────────
 export interface ManualSlotRow {
   id: string;
@@ -179,6 +325,8 @@ export interface ManualItem {
   format: string | null;
   text: string;
   images: string[];
+  /** Sólo cuando `format === ARTICLE_FORMAT`: título, portada y cuerpo por separado. */
+  article?: ManualArticle;
 }
 
 /**
@@ -210,6 +358,7 @@ export function buildManualItems(
       format: piece.format ?? null,
       text: manualTextOf(piece, s.platform_key),
       images: manualImagesOf(piece),
+      ...(String(piece.format ?? '') === ARTICLE_FORMAT ? { article: manualArticleOf(piece, s.platform_key) } : {}),
     });
   }
   return out.sort((a, b) => Date.parse(a.slot_at) - Date.parse(b.slot_at));

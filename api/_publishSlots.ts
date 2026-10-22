@@ -61,6 +61,12 @@ export interface PublishSlotRow {
   slot_at: string;
   status: string;
   piece_id: string | null;
+  /**
+   * Carril de formato de la franja (`null` = carril general). Opcional a propósito: la columna
+   * `intel.brand_publish_slots.format` llega con la migración del carril de artículos, y hasta
+   * entonces `SLOT_SELECT` no la pide (ver `slotAcceptsPiece`).
+   */
+  format?: string | null;
 }
 
 // ── Lo que viaja a la tarjeta ────────────────────────────────────────────────────
@@ -408,6 +414,47 @@ export function isUrgentPiece(
   const platform = clean(piece?.platform as string | null | undefined);
   if (!brand || !platform) return false;
   return urgentes.has(channelSlotKey(brand, platform));
+}
+
+// ── CARRIL DE FORMATO · qué pieza cabe en qué franja (Sam, 2026-10-22) ──────────
+//
+// Una franja con `format` NO NULO es de un carril dedicado (p. ej. artículos) y sólo admite piezas de
+// ese formato. Una franja con `format` NULO es del carril general y admite cualquier pieza CUYO
+// FORMATO NO TENGA carril dedicado en esa marca × canal; si lo tiene, esa pieza va a su carril y no
+// ocupa la franja general.
+//
+// Qué formatos son dedicados lo dice el DATO: los `format` no nulos distintos de
+// `intel.brand_publish_policies` de esa marca × canal. Aquí no se nombra ningún formato: un carril
+// nuevo aparece sembrando su política, sin tocar este archivo.
+
+/** Los formatos con carril dedicado en una marca × canal, desde las filas de política. Puro. */
+export function dedicatedFormatsOf(
+  policies: Array<{ brand_id?: string | null; platform_key?: string | null; format?: string | null }>,
+  brandId: string,
+  platformKey: string,
+): Set<string> {
+  const out = new Set<string>();
+  for (const p of Array.isArray(policies) ? policies : []) {
+    if (clean(p?.brand_id) !== clean(brandId) || clean(p?.platform_key) !== clean(platformKey)) continue;
+    const f = clean(p?.format);
+    if (f) out.add(f);
+  }
+  return out;
+}
+
+/**
+ * ¿Cabe esta pieza en esta franja? `slotFormat == null ? !esDedicado : slotFormat === pieceFormat`,
+ * donde `esDedicado` = el formato de la pieza tiene carril propio en `dedicated`.
+ */
+export function slotAcceptsPiece(
+  slotFormat: string | null | undefined,
+  pieceFormat: string | null | undefined,
+  dedicated: ReadonlySet<string>,
+): boolean {
+  const franja = clean(slotFormat);
+  const pieza = clean(pieceFormat);
+  if (franja === null) return !(pieza !== null && dedicated.has(pieza));
+  return franja === pieza;
 }
 
 // ── ESCRITURA · liberación de franja ────────────────────────────────────────────

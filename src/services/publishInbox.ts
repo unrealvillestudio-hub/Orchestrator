@@ -262,6 +262,19 @@ export interface ManualItem {
   format: string | null;
   text: string;
   images: string[];
+  /** Sólo en artículos: título, portada y cuerpo por separado (copia de `api/_manualShared.ts`). */
+  article?: ManualArticle;
+}
+
+/** Copia de `ManualArticle` de `api/_manualShared.ts`: si cambia allá, cambia aquí. */
+export interface ManualArticle {
+  title: string;
+  cover_url: string | null;
+  body_markdown: string;
+  /** HTML mínimo y escapado en el server: sólo `<p>`, `<br>`, `<h2>`, `<strong>` y `<a href>` http(s). */
+  body_html: string;
+  body_text: string;
+  source_url: string | null;
 }
 
 export interface ManualQueueResult {

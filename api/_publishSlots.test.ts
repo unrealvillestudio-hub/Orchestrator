@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   indexBrandTimezones, indexByPiece, indexNextFree, timezoneOf, slotOf, forecastFor,
-  releaseSlotsForPiece, urgentChannels, isUrgentPiece,
+  releaseSlotsForPiece, urgentChannels, isUrgentPiece, slotAcceptsPiece, dedicatedFormatsOf,
   type PublishSlotRow,
 } from './_publishSlots.js';
 import type { ContentPiece } from './_calibrationShared.js';
@@ -419,5 +419,50 @@ describe('isUrgentPiece · la pieza hereda la urgencia de su canal', () => {
   it('una pieza sin marca o sin canal no es urgente por descarte', () => {
     expect(isUrgentPiece({ brand_id: 'Alfa', platform: null }, urgentes)).toBe(false);
     expect(isUrgentPiece({ brand_id: '', platform: 'meta_ig' }, urgentes)).toBe(false);
+  });
+});
+
+describe('carril de formato · qué pieza cabe en qué franja', () => {
+  // Formatos ficticios: el carril dedicado sale de la política, no de un nombre en el código.
+  const DEDICADO = 'formato_dedicado';
+  const OTRO = 'formato_comun';
+  const POLITICAS = [
+    { brand_id: BRAND_A, platform_key: CHANNEL_ONE, format: null },
+    { brand_id: BRAND_A, platform_key: CHANNEL_ONE, format: DEDICADO },
+    { brand_id: BRAND_A, platform_key: CHANNEL_ONE, format: DEDICADO },
+    { brand_id: BRAND_B, platform_key: CHANNEL_ONE, format: OTRO },
+    { brand_id: BRAND_A, platform_key: CHANNEL_TWO, format: OTRO },
+  ];
+  const dedicados = dedicatedFormatsOf(POLITICAS, BRAND_A, CHANNEL_ONE);
+
+  it('los formatos dedicados son los no nulos distintos de esa marca × canal', () => {
+    expect([...dedicados]).toEqual([DEDICADO]);
+    expect(dedicatedFormatsOf(POLITICAS, BRAND_A, 'surface_sin_politica').size).toBe(0);
+  });
+
+  it('una pieza de formato dedicado sólo cabe en la franja de su carril', () => {
+    expect(slotAcceptsPiece(DEDICADO, DEDICADO, dedicados)).toBe(true);
+    expect(slotAcceptsPiece(null, DEDICADO, dedicados)).toBe(false);
+    expect(slotAcceptsPiece(OTRO, DEDICADO, dedicados)).toBe(false);
+  });
+
+  it('una pieza de formato sin carril va a la franja general y no a una dedicada', () => {
+    expect(slotAcceptsPiece(null, OTRO, dedicados)).toBe(true);
+    expect(slotAcceptsPiece(null, null, dedicados)).toBe(true);
+    expect(slotAcceptsPiece(DEDICADO, OTRO, dedicados)).toBe(false);
+    expect(slotAcceptsPiece(DEDICADO, null, dedicados)).toBe(false);
+  });
+
+  it('sin carril dedicado sembrado, el formato de la pieza no restringe la franja general', () => {
+    expect(slotAcceptsPiece(null, DEDICADO, new Set())).toBe(true);
+  });
+
+  it('una franja dedicada acepta una pieza de su mismo formato aunque la política no esté leída', () => {
+    expect(slotAcceptsPiece(DEDICADO, DEDICADO, new Set())).toBe(true);
+  });
+
+  it('los espacios y vacíos cuentan como «sin formato»', () => {
+    expect(slotAcceptsPiece('  ', OTRO, dedicados)).toBe(true);
+    expect(slotAcceptsPiece(` ${DEDICADO} `, DEDICADO, dedicados)).toBe(true);
   });
 });
