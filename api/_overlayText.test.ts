@@ -58,12 +58,13 @@ describe('el cableado', () => {
   const API = sinComentarios(readFileSync(new URL('./recompose-image.ts', import.meta.url), 'utf8'));
   const MOD = sinComentarios(readFileSync(new URL('../src/modules/iid/pieceActions.tsx', import.meta.url), 'utf8'));
   it('con texto de la imagen no se regenera la escena ni se pide directriz', () => {
-    expect(API).toContain('if (tieneImagen && !directive && !conTexto) {');
-    const i = API.indexOf('if (conTexto) {');
+    // 2026-10-22 — la ubicación del texto (`_textPlace.ts`) va por la misma rama sin generar.
+    expect(API).toContain('if (tieneImagen && !directive && !conTexto && !conUbicacion) {');
+    const i = API.indexOf('if (conTexto || conUbicacion) {');
     expect(i).toBeGreaterThan(0);
     expect(i).toBeLessThan(API.indexOf("regenerate_image: true"), 'la rama del texto sale antes de la que regenera');
     expect(API.slice(i, i + 900)).toContain('regenerate_image: false');
-    expect(API).toContain('if (ef.body.overlay_override_applied !== true) {');
+    expect(API).toContain('if (conTexto && ef.body.overlay_override_applied !== true) {');
   });
   it('el panel manda el texto parseado, y null para volver al copy', () => {
     expect(MOD).toContain('overlay_override: override');

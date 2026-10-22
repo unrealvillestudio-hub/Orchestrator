@@ -17,6 +17,7 @@
  */
 
 import { CAROUSEL_FORMAT } from './_manualShared.js';
+import { readTextPlaceRequest, storedTextPlace, type TextPlace } from './_textPlace.js';
 
 /** El mismo techo que el motor (`CAROUSEL_HEADLINE_MAX`, `CAROUSEL_EYEBROW_MAX`, `CAROUSEL_SUBHEADLINE_MAX`). */
 export const SLIDE_HEADLINE_MAX = 140;
@@ -37,6 +38,8 @@ export interface CarouselSlideTextView {
   /** Sin imagen limpia el motor no puede recomponer su texto sin cambiarle la foto: el editor lo dice. */
   editable: boolean;
   url: string | null;
+  /** 2026-10-22 — la ubicación del texto guardada en la lámina (`_textPlace.ts`); la portada, la de la imagen. */
+  text_place: TextPlace | null;
 }
 
 export interface CarouselTextView { total: number; slides: CarouselSlideTextView[] }
@@ -69,6 +72,8 @@ export function carouselTextViewOf(piece: { format?: string | null; assets?: any
       // La portada se recompone sobre la limpia de la pieza; las demás, sobre la suya.
       editable: i === 0 || (typeof s.clean_url === 'string' && !!s.clean_url),
       url: typeof s.url === 'string' ? s.url : null,
+      // La portada es la imagen de la pieza: su fila es la de `image.text_place`.
+      text_place: storedTextPlace(i === 0 ? piece.assets?.image?.text_place : s.text_place),
     })),
   };
 }
@@ -95,7 +100,11 @@ export function slideTextDraftOf(slide: CarouselSlideTextView | null | undefined
   };
 }
 
-export interface SlideTextOut { n: number; headline?: string; subheadline?: string | null; eyebrow?: string | null; steps?: SlideStep[] | null }
+export interface SlideTextOut {
+  n: number; headline?: string; subheadline?: string | null; eyebrow?: string | null; steps?: SlideStep[] | null;
+  /** 2026-10-22 — la ubicación del texto de la lámina (`_textPlace.ts`). Puede viajar sola. */
+  text_place?: TextPlace | null;
+}
 
 /**
  * Lo que viaja al motor: SÓLO los campos que cambiaron respecto de la lámina actual (lo no tocado no se reescribe
@@ -130,12 +139,12 @@ export function slideTextPayload(slide: CarouselSlideTextView, draft: SlideTextD
  * la portada va por `overlay_override`.
  */
 export function readSlideTextRequest(raw: unknown): { ok: true; value: SlideTextOut } | { ok: false; error: string } {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'slide_text debe ser un objeto { n, headline?, subheadline?, eyebrow?, steps? }' };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'slide_text debe ser un objeto { n, headline?, subheadline?, eyebrow?, steps?, text_place? }' };
   const o = raw as Record<string, unknown>;
   const n = Number(o.n);
   if (!Number.isInteger(n) || n < 1) return { ok: false, error: 'slide_text.n debe ser el número entero de la lámina' };
   if (n === 1) return { ok: false, error: 'la lámina 1 es la portada: su texto se corrige con overlay_override' };
-  const permitidos = ['n', 'headline', 'subheadline', 'eyebrow', 'steps'];
+  const permitidos = ['n', 'headline', 'subheadline', 'eyebrow', 'steps', 'text_place'];
   const ajenos = Object.keys(o).filter((k) => !permitidos.includes(k));
   if (ajenos.length) return { ok: false, error: `slide_text trae campos que esta vía no corrige: ${ajenos.join(', ')}` };
   const value: SlideTextOut = { n };
@@ -143,6 +152,11 @@ export function readSlideTextRequest(raw: unknown): { ok: true; value: SlideText
   if ('subheadline' in o) value.subheadline = o.subheadline == null ? null : String(o.subheadline);
   if ('eyebrow' in o) value.eyebrow = o.eyebrow == null ? null : String(o.eyebrow);
   if ('steps' in o) value.steps = Array.isArray(o.steps) ? (o.steps as SlideStep[]) : null;
+  if ('text_place' in o) {
+    const tp = readTextPlaceRequest(o.text_place);
+    if (!tp.ok) return { ok: false, error: `slide_text.${tp.error}` };
+    value.text_place = tp.value;
+  }
   if (Object.keys(value).length < 2) return { ok: false, error: `la lámina ${n} no trae ningún campo que corregir` };
   return { ok: true, value };
 }
@@ -157,6 +171,7 @@ export function carouselViewAfterSlideSave(view: CarouselTextView, out: SlideTex
       ...('subheadline' in out ? { subheadline: out.subheadline ?? null } : {}),
       ...('eyebrow' in out ? { eyebrow: out.eyebrow ?? null } : {}),
       ...('steps' in out ? { steps: out.steps ?? [] } : {}),
+      ...('text_place' in out ? { text_place: out.text_place ?? null } : {}),
     })),
   };
 }

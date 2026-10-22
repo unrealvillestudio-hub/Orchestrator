@@ -144,7 +144,8 @@ describe('el cableado', () => {
     expect(MOD).toContain('aria-label="Lámina del carrusel"');
     const i = MOD.indexOf('const submitSlideText');
     const cuerpo = MOD.slice(i, MOD.indexOf('const pickSlot', i));
-    expect(cuerpo).toContain('await saveSlideText(token, piece.piece_id, p.value)');
+    // 2026-10-22 — `value` es `p.value` más la ubicación del texto si se eligió (`_textPlace.ts`).
+    expect(cuerpo).toContain('await saveSlideText(token, piece.piece_id, value)');
     expect(cuerpo).toContain('onRegenerated?.({ html: r.html');
     expect(cuerpo, 'la lámina no es un veredicto').not.toContain('saveVerdict');
     expect(cuerpo).not.toContain('recomposeImage(');
