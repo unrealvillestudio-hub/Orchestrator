@@ -459,7 +459,7 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
               srcDoc={artHtml}
               title={`preview-${piece.piece_id}`}
               sandbox=""
-              className="w-full h-[70vh] md:h-[480px]"
+              className="w-full h-[70vh] md:h-[85vh]"
               style={{ border: 'none', background: '#050508' }}
             />
           )}

@@ -1229,7 +1229,12 @@ const ARTIFACT_CSS = `
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .head .brand { color: #FFAB00; font-weight: 700; }
   .head .sep { color: #3f3f46; }
-  .media img { display: block; width: 100%; height: auto; }
+  /* LA IMAGEN SE VE ENTERA (Sam, 2026-10-22: «necesito poder ver las imágenes completas… ten en cuenta las
+     verticales»). Antes la imagen ocupaba todo el ancho sin tope de alto: una 4:5 o una 9:16 quedaba más alta
+     que el marco que la muestra y había que desplazarse para verla. Ahora el alto se topa al del marco (el
+     100vh del iframe, menos el margen y la cabecera de la tarjeta) y el ancho se ajusta solo, sin recortar. */
+  .media img { display: block; width: auto; max-width: 100%; height: auto; max-height: calc(100vh - 96px);
+    margin: 0 auto; object-fit: contain; }
   .carousel .strip { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 6px; background: #08080c; }
   .carousel .slide { position: relative; flex: 0 0 92%; margin: 0; scroll-snap-align: center; }
   .carousel .slide:only-child { flex-basis: 100%; }
