@@ -414,7 +414,7 @@ function HistoryRow({ row, token, open, onToggle }: {
                 srcDoc={artHtml}
                 title={`preview-${row.piece_id}`}
                 sandbox=""
-                className="w-full h-[70vh] md:h-[420px]"
+                className="w-full h-[70vh] md:h-[85vh]"
                 style={{ border: 'none', background: '#050508' }}
               />
             )}

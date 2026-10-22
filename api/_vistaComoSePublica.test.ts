@@ -156,23 +156,35 @@ const GOLDEN_MARCO: Record<string, { head: string; tail: string }> = {
   shopify_blog: { head: '1c8a834be695e29fa1d9b21dc142f31fabf7ceb648e184ec65355e533f9e1b94', tail: 'eeb2a1250cffe5c50e6537a2500e497a1c0625c7f50fa7cc918883dbee5b6b05' },
   meta_graph: { head: '13b00b2dec80a4a1b1dce58eeb11744384252e9a7704f52fdf9d6f4fdd5507f7', tail: 'e042662bedce5cc8b6782a79ba5327d1c0162fd5d88ae5fd644b9384cfb38966' },
 };
+/**
+ * 2026-10-22 — LA IMAGEN SE VE ENTERA (`_imagenEntera.test.ts`). Es el ÚNICO cambio deliberado de los estilos desde
+ * que se calcularon estos goldens: la regla `.media img` se topa al alto del marco. Para que el golden siga
+ * vigilando TODO lo demás byte a byte, la regla nueva se devuelve a la de antes antes de calcular el sha. Si otra
+ * línea cambia, el golden se pone rojo como siempre.
+ */
+const IMAGEN_ANTES = '  .media img { display: block; width: 100%; height: auto; }\n';
+const IMAGEN_AHORA = /  \/\* LA IMAGEN SE VE ENTERA[\s\S]*?object-fit: contain; \}\n/;
+const comoAntes = (html: string) => {
+  expect(html).toMatch(IMAGEN_AHORA);
+  return html.replace(IMAGEN_AHORA, IMAGEN_ANTES);
+};
 const AVISO_FUERA_DEL_MAPA = /\n {6}<div class="textsrc textsrc--warn">⚠ El proveedor «[^»]*» de este canal no está en el mapa de la vista publicada[^\n]*<\/div>/;
 
 describe('golden — lo que no cambia', () => {
   it.each(fx.piezas.map((p) => [p.caso, p] as const))('%s: con el proveedor sin resolver, la vista es byte a byte la de antes', (_c, f) => {
-    expect(sha(buildHtml(pieza(f), { provider: null }))).toBe(GOLDEN_SIN_PROVEEDOR[f.caso]);
+    expect(sha(comoAntes(buildHtml(pieza(f), { provider: null })))).toBe(GOLDEN_SIN_PROVEEDOR[f.caso]);
   });
 
   it.each(fx.piezas.map((p) => [p.caso, p] as const))('%s: con un proveedor fuera del mapa, la de antes más UN aviso, y queda en el log', (_c, f) => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const html = buildHtml(pieza(f), { provider: 'proveedor_texto_plano' });
     expect(html).toMatch(AVISO_FUERA_DEL_MAPA);
-    expect(sha(html.replace(AVISO_FUERA_DEL_MAPA, ''))).toBe(GOLDEN_SIN_PROVEEDOR[f.caso]);
+    expect(sha(comoAntes(html.replace(AVISO_FUERA_DEL_MAPA, '')))).toBe(GOLDEN_SIN_PROVEEDOR[f.caso]);
     expect(log).toHaveBeenCalledWith('[preview] PREVIEW_PROVIDER_UNMAPPED', f.piece.brand_id, f.piece.platform, 'proveedor_texto_plano');
   });
 
   it.each(fx.piezas.map((p) => [p.caso, p] as const))('%s: con su proveedor, cabecera, estilos y pie son los de antes', (_c, f) => {
-    const html = buildHtml(pieza(f), { provider: f.provider });
+    const html = comoAntes(buildHtml(pieza(f), { provider: f.provider }));
     expect(sha(html.slice(0, html.indexOf('    </div>\n') + 11))).toBe(GOLDEN_MARCO[f.caso].head);
     expect(sha(html.slice(html.indexOf('\n      <div class="meta">')))).toBe(GOLDEN_MARCO[f.caso].tail);
   });
