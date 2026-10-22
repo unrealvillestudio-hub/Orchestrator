@@ -59,13 +59,16 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
   const [q, setQ] = useState('');
   // 2026-10-06 — sólo carruseles, de cualquier canal; se combina con `channel`.
   const [carousel, setCarousel] = useState(false);
+  // 2026-10-22 — Sam: «cómo no voy a poder ver algo ya publicado, para eso es historial». Sólo lo publicado,
+  // ordenado por cuándo salió (no por cuándo se evaluó).
+  const [published, setPublished] = useState(false);
 
   type Query = {
     offset: number; from: string; to: string;
     brand: string; channel: string; verdict: string; source: HistorySourceFilter; q: string;
-    carousel: boolean;
+    carousel: boolean; published: boolean;
   };
-  const current = (): Query => ({ offset, from, to, brand, channel, verdict, source, q, carousel });
+  const current = (): Query => ({ offset, from, to, brand, channel, verdict, source, q, carousel, published });
 
   /**
    * Los `<input type="date">` dan un día suelto, y el corpus guarda un instante. Se abre el
@@ -89,6 +92,7 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
         source: q.source,
         q: q.q || undefined,
         carousel: q.carousel,
+        published: q.published,
       }));
     } catch (err) {
       setError(err instanceof CalibrationError ? err.message : 'No se pudo cargar el historial.');
@@ -106,7 +110,7 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
     const q = { ...current(), offset: 0, ...patch };
     setOffset(q.offset); setFrom(q.from); setTo(q.to);
     setBrand(q.brand); setChannel(q.channel); setVerdict(q.verdict); setSource(q.source);
-    setQ(q.q); setCarousel(q.carousel);
+    setQ(q.q); setCarousel(q.carousel); setPublished(q.published);
     setOpen(null);
     load(q);
   };
@@ -122,10 +126,10 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
   const channels = useMemo(() => Object.keys(byChannel).sort(), [byChannel]);
   const verdicts = useMemo(() => Object.keys(byVerdict).sort(), [byVerdict]);
 
-  const limpiar = () => apply({ from: '', to: '', brand: '', channel: '', verdict: '', source: 'all', q: '', carousel: false });
+  const limpiar = () => apply({ from: '', to: '', brand: '', channel: '', verdict: '', source: 'all', q: '', carousel: false, published: false });
   // U-7 — la búsqueda cuenta como filtro: «Limpiar filtros» tiene que limpiarla también, o
   // dejaría una lista acotada con todos los controles en su valor por defecto.
-  const hayFiltro = Boolean(from || to || brand || channel || verdict || source !== 'all' || q || carousel);
+  const hayFiltro = Boolean(from || to || brand || channel || verdict || source !== 'all' || q || carousel || published);
 
   return (
     <div className="max-w-5xl mx-auto px-3 md:px-6 py-2">
@@ -155,7 +159,7 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
       {/* Rango de fechas + origen. El origen es el eje de generación de este tab. */}
       <FilterBar
         q={q} onSearch={(v) => apply({ q: v })}
-        active={[from !== '', to !== '', source !== 'all'].filter(Boolean).length}
+        active={[from !== '', to !== '', source !== 'all', published].filter(Boolean).length}
         className="flex-wrap items-end gap-4 md:mb-3"
       >
         <label className="flex flex-col gap-1 text-[10px] font-mono text-zinc-600">
@@ -184,6 +188,19 @@ export default function EvaluatedHistoryModule({ session }: { session: IidSessio
             options={[['all', 'Todas'], ['live', 'Corpus vivo'], ['archived', 'Archivadas']]}
           />
         </div>
+        <button
+          onClick={() => apply({ published: !published })}
+          aria-pressed={published}
+          className={cn(
+            'mb-1 text-[11px] font-mono px-2.5 py-1.5 rounded-lg border transition-colors',
+            published
+              ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+              : 'bg-zinc-950 border-zinc-800 text-zinc-500 hover:text-zinc-300',
+          )}
+          title="Sólo las piezas que ya salieron, la más reciente primero por fecha de publicación"
+        >
+          Sólo publicadas
+        </button>
         {hayFiltro && (
           <button
             onClick={limpiar}
@@ -319,13 +336,32 @@ function HistoryRow({ row, token, open, onToggle }: {
           <Eye size={13} />
         </button>
 
-        <span className="text-[11px] font-mono text-zinc-600 shrink-0">{fmtDate(row.created_at)}</span>
+        <span className="text-[11px] font-mono text-zinc-600 shrink-0" title="Fecha del veredicto">{fmtDate(row.created_at)}</span>
         <span className="text-[11px] font-mono text-zinc-400 shrink-0">{row.brand_id}</span>
         {row.platform && <span className="text-[11px] font-mono text-zinc-600 shrink-0">{row.platform}</span>}
 
         {/* El veredicto se muestra TAL COMO está guardado: uno que este código no conozca
             aparece igual, en neutro, en vez de desaparecer del historial. */}
         <VerdictTag verdict={row.verdict} />
+
+        {/* 2026-10-22 — si salió y cuándo. Sin dato de la pieza no se pinta nada: no se inventa que salió. */}
+        {row.published_at && (
+          <span
+            className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 shrink-0"
+            title="Fecha de publicación"
+          >
+            publicada {fmtDate(row.published_at)}
+          </span>
+        )}
+        {row.post_url && (
+          <a
+            href={row.post_url} target="_blank" rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-[10px] font-mono text-zinc-500 hover:text-zinc-200 underline underline-offset-2 shrink-0"
+          >
+            ver publicación
+          </a>
+        )}
 
         {archivada && (
           <span
