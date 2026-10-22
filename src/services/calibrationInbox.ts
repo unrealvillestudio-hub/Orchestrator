@@ -33,6 +33,7 @@ import type { FixRequestCode, FixImageMode } from '../../api/_fixRequest';
 import type { ImageOverlayView, EmphasisColorOption, OverlayOverrideOut, ShadowOption } from '../../api/_overlayText';
 import type { SceneCast, ImageHistoryEntry } from '../../api/_sceneCast';
 import type { HighlightFields } from '../../api/_highlights';
+import type { CarouselTextView, SlideTextOut } from '../../api/_carouselText';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
@@ -638,6 +639,8 @@ export function recomposeImage(
   /** 2026-10-19 — el motor cambió el modo pedido y dice por qué (p. ej. editar no cambia a una persona). */
   mode_switched?: { from: string; to: string; reason: string } | null;
   scheduled_posts_updated: number;
+  /** 2026-10-22 — en un carrusel: `true` si la portada también se recompuso, o el motivo por el que no. */
+  carousel_recomposed?: boolean | string | null;
   artifact_url: string | null; html: string | null; artifact_refreshed: boolean;
 }> {
   return req('/api/recompose-image', token, {
@@ -665,8 +668,23 @@ export function fetchEmphasisColors(token: string, pieceId: string): Promise<{
   overlay?: ImageOverlayView | null;
   /** 2026-10-20 — la sombra de la marca y los colores posibles del filete. */
   shadow?: ShadowOption; rule_options?: EmphasisColorOption[]; identity_options?: EmphasisColorOption[];
+  /** 2026-10-22 — las láminas del carrusel con su texto; `null` si la pieza no es un carrusel. */
+  carousel?: CarouselTextView | null;
 }> {
   return req(`/api/recompose-image?piece_id=${encodeURIComponent(pieceId)}`, token);
+}
+
+/**
+ * 2026-10-22 — EL TEXTO DE UNA LÁMINA 2..N DE UN CARRUSEL. Sin generar: el motor la recompone sobre su imagen limpia
+ * (0 USD). Sólo viajan los campos que cambiaron (`slideTextPayload`). Devuelve el HTML del artefacto ya rehecho.
+ */
+export function saveSlideText(token: string, pieceId: string, slide: SlideTextOut, editReason?: string | null): Promise<{
+  ok: true; piece_id: string; slide_n: number; unchanged: boolean; text_edits: number;
+  artifact_url: string | null; html: string | null; artifact_refreshed: boolean;
+}> {
+  return req('/api/recompose-image', token, {
+    method: 'POST', body: { piece_id: pieceId, slide_text: slide, edit_reason: editReason ?? null },
+  });
 }
 
 /** 2026-10-20 — VOLVER A UNA IMAGEN ANTERIOR (0 = la última reemplazada). Sin generar: 0 USD. Se puede deshacer. */

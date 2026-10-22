@@ -4,7 +4,7 @@ import { CheckCircle2, XCircle, Archive, Wrench, ImagePlay, PenLine, Search, Und
 import { cn, Spinner } from '../../ui/components';
 import {
   saveVerdict, discardPiece, recomposeImage, renderArtifact, CalibrationError,
-  REJECT_REASONS, buildCriterion, fetchResearchCases, openResearchCase, fetchFixCatalog, fetchEmphasisColors, restorePreviousImage, undoLastChange,
+  REJECT_REASONS, buildCriterion, fetchResearchCases, openResearchCase, fetchFixCatalog, fetchEmphasisColors, restorePreviousImage, undoLastChange, saveSlideText,
   type PieceActionKey, type PieceActions, type SlotRelease, type Verdict, type ResearchCase,
 } from '../../services/calibrationInbox';
 import { savePieceEdit } from '../../services/challengedInbox';
@@ -13,6 +13,10 @@ import { overlayEditorSeed, overlayViewAfterApply, parseOverlayMarkup, shadowDef
 import { highlightPayload, HIGHLIGHT_NOTE_MAX, type HighlightInput } from '../../../api/_highlights';
 import { SCENE_SLOTS, slotDirective, SLOT_CHANGE_MODE, MODE_HELP, type SceneCast, type ImageHistoryEntry } from '../../../api/_sceneCast';
 import { fmtInZone } from './pieceUi';
+import {
+  carouselViewAfterSlideSave, coverNoteOf, slideTabLabel, slideTextDraftOf, slideTextPayload, CAROUSEL_SLIDE_HELP,
+  type CarouselTextView, type SlideTextDraft,
+} from '../../../api/_carouselText';
 
 /**
  * pieceActions.tsx — U-5 · LAS ACCIONES DE UNA PIEZA, EN UN SOLO SITIO.
@@ -554,7 +558,11 @@ export function PieceActionsBar({
   const [vigente, setVigente] = useState<{ title: string | null; body: string | null }>({ title: piece.title, body: piece.body });
   const [editTitle, setEditTitle] = useState('');
   const [editNote, setEditNote] = useState<null | { avisos: string[]; refrescado: boolean }>(null);
-  const [regenNote, setRegenNote] = useState<null | { compuesta: boolean; refrescado: boolean; posts: number; cambioDeModo?: string | null; restaurada?: boolean }>(null);
+  const [regenNote, setRegenNote] = useState<null | {
+    compuesta: boolean; refrescado: boolean; posts: number; cambioDeModo?: string | null; restaurada?: boolean;
+    // 2026-10-22 — carrusel: la lámina cuyo texto se guardó, y qué pasó con la portada al aplicar el texto de la imagen.
+    lamina?: { n: number; sinCambios: boolean } | null; portada?: boolean | string | null;
+  }>(null);
   // 2026-10-21 — qué deshizo el último Deshacer.
   const [undoNote, setUndoNote] = useState<null | { que: 'image' | 'title' | 'body'; refrescado: boolean }>(null);
   // BRIEF-IMG-01 fase 4 — por defecto se CORRIGE sobre la imagen actual: da continuidad a lo pedido.
@@ -580,6 +588,16 @@ export function PieceActionsBar({
   // corregir: sembrar el editor con él volvía a mandar el texto viejo (medido en 5b842958). Se guarda lo último aplicado
   // y se reemplaza por lo que la pieza tiene en la base en cuanto llega la lectura; si ya se escribió, no se pisa.
   const [overlayVigente, setOverlayVigente] = useState<ImageOverlayView | null>(piece.image_overlay ?? null);
+  // 2026-10-22 — CARRUSEL: las láminas con su texto (se leen al abrir el panel), la elegida y su borrador. La lámina 1
+  // es la portada y sigue el editor de siempre; las demás tienen el suyo (`slide_text`, 0 USD).
+  const [carouselView, setCarouselView] = useState<CarouselTextView | null>(null);
+  const [slideN, setSlideN] = useState(1);
+  const [slideDraft, setSlideDraft] = useState<SlideTextDraft>(slideTextDraftOf(null));
+  const laminaElegida = slideN > 1 ? carouselView?.slides.find((s) => s.n === slideN) ?? null : null;
+  const elegirLamina = (n: number) => {
+    setSlideN(n); setError(null);
+    if (n > 1) setSlideDraft(slideTextDraftOf(carouselView?.slides.find((s) => s.n === n) ?? null));
+  };
   const overlayTocado = useRef(false);
   const sembrarEditor = (view: ImageOverlayView | null) => {
     const s = overlayEditorSeed(view);
@@ -611,7 +629,8 @@ export function PieceActionsBar({
   const warning = spec ? slotWarning(spec.seals, piece.slot) : null;
   // 2026-10-19 — en la pestaña «Texto de la imagen» lo obligatorio es el titular, no la directriz.
   const enTextoImagen = panel === 'regen' && regenTab === 'text';
-  const faltaTexto = !!copy?.required && !note.trim() && !enTextoImagen || enTextoImagen && !overlayMarkup.trim();
+  const faltaTexto = !!copy?.required && !note.trim() && !enTextoImagen
+    || enTextoImagen && (laminaElegida ? !slideDraft.headline.trim() : !overlayMarkup.trim());
 
   const open = (p: PanelKey) => {
     setPanel(p); setError(null); setWarnings([]);
@@ -623,6 +642,7 @@ export function PieceActionsBar({
     if (p === 'regen') {
       // El editor abre con el texto que la imagen lleva HOY, con su énfasis marcado.
       setRegenTab('scene');
+      setSlideN(1);
       overlayTocado.current = false;
       sembrarEditor(overlayVigente);
       // Sin opciones (o si la lectura falla) el editor funciona igual, sin selector de color.
@@ -632,8 +652,9 @@ export function PieceActionsBar({
           setEmColors(r.options); setCast(r.cast ?? null); setHistory(r.history ?? []);
           setShadowOpt(r.shadow ?? null); setRuleColors(r.rule_options ?? []); setIdentityColors(r.identity_options ?? []);
           if (r.overlay !== undefined) { setOverlayVigente(r.overlay); if (!overlayTocado.current) sembrarEditor(r.overlay); }
+          setCarouselView(r.carousel ?? null);
         })
-        .catch(() => { setEmColors([]); setCast(null); setHistory([]); });
+        .catch(() => { setEmColors([]); setCast(null); setHistory([]); setCarouselView(null); });
     }
     if (p === 'approve') setHl({ copy: false, image: false, copyNote: '', imageNote: '' });
     if (p === 'fix') {
@@ -726,10 +747,28 @@ export function PieceActionsBar({
       const r = await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: '', overlay_override: override });
       setOverlayVigente(overlayViewAfterApply(override));
       onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: r.composed, refreshed: r.artifact_refreshed, posts: r.scheduled_posts_updated });
-      setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated });
+      setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated, portada: r.carousel_recomposed ?? null });
       setPanel(null);
     } catch (err) {
       setError(cardError(err, 'No se pudo recomponer el texto de la imagen.'));
+    } finally { setBusy(null); }
+  };
+
+  /** 2026-10-22 — el texto de una lámina 2..N del carrusel. Sin generar: se recompone sobre su foto (0 USD). */
+  const submitSlideText = async () => {
+    if (!laminaElegida || !carouselView) return;
+    const p = slideTextPayload(laminaElegida, slideDraft);
+    if (!p.ok) { setError({ message: p.error, detail: null }); return; }
+    if (!p.changed) { setError({ message: 'No hay cambios que guardar en esta lámina.', detail: null }); return; }
+    setBusy('recompose_image'); setError(null); setRegenNote(null);
+    try {
+      const r = await saveSlideText(token, piece.piece_id, p.value);
+      setCarouselView(carouselViewAfterSlideSave(carouselView, p.value));
+      onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: true, refreshed: r.artifact_refreshed, posts: 0 });
+      setRegenNote({ compuesta: true, refrescado: r.artifact_refreshed, posts: 0, lamina: { n: p.value.n, sinCambios: r.unchanged } });
+      setPanel(null);
+    } catch (err) {
+      setError(cardError(err, `No se pudo recomponer la lámina ${laminaElegida.n}.`));
     } finally { setBusy(null); }
   };
 
@@ -755,7 +794,7 @@ export function PieceActionsBar({
   };
 
   const submitRegen = async () => {
-    if (regenTab === 'text') return submitOverlay(false);
+    if (regenTab === 'text') return laminaElegida ? submitSlideText() : submitOverlay(false);
     setBusy('recompose_image'); setError(null); setRegenNote(null);
     try {
       const r = await recomposeImage(token, {
@@ -929,11 +968,15 @@ export function PieceActionsBar({
 
       {regenNote && (
         <div className="text-[11px] font-mono leading-snug text-violet-300/80 bg-violet-500/[0.06] border border-violet-500/20 rounded-xl px-3 py-2 space-y-0.5">
-          <p>{regenNote.restaurada
+          <p>{regenNote.lamina
+            ? (regenNote.lamina.sinCambios ? `La lámina ${regenNote.lamina.n} ya tenía ese texto: no se recompuso.`
+              : `Lámina ${regenNote.lamina.n} recompuesta con el texto nuevo, sobre su misma foto (0 USD).`)
+            : regenNote.restaurada
             ? 'Volvió la imagen anterior. La que estaba quedó en «Imágenes anteriores»: se puede volver a ella.'
             : regenNote.compuesta
               ? 'Imagen regenerada y compuesta.'
               : 'Escena regenerada, pero la composición falló: la pieza queda con la imagen limpia, sin titular ni franja.'}</p>
+          {(() => { const c = coverNoteOf(regenNote.portada); return c ? <p className={c.tone === 'alert' ? 'text-amber-300/80' : 'text-violet-300/70'}>{c.text}</p> : null; })()}
           {regenNote.cambioDeModo && <p className="text-amber-300/80">Se pintó la misma escena con el cambio: {regenNote.cambioDeModo}.</p>}
           {!regenNote.refrescado && <p className="text-amber-300/80">La imagen cambió, pero el artefacto no se pudo rehacer: la vista de arriba puede estar mostrando la anterior.</p>}
           {regenNote.posts > 0 && <p className="text-violet-300/60">{regenNote.posts} post pendiente de publicar actualizado con la imagen nueva.</p>}
@@ -1027,7 +1070,65 @@ export function PieceActionsBar({
               </div>
             )}
 
-            {panel === 'regen' && regenTab === 'text' && (
+            {/* 2026-10-22 — CARRUSEL: qué lámina se corrige. La 1 (portada) es el editor de siempre; las demás, el suyo. */}
+            {panel === 'regen' && regenTab === 'text' && carouselView && (
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Lámina del carrusel">
+                  <span className="text-[10px] text-zinc-400 mr-1">Lámina</span>
+                  {carouselView.slides.map((s) => (
+                    <button
+                      key={s.n}
+                      role="radio"
+                      aria-checked={slideN === s.n}
+                      disabled={!s.editable}
+                      title={s.editable ? (s.headline ?? '') : 'Sin imagen limpia guardada: su texto no se puede recomponer sin cambiarle la foto'}
+                      onClick={() => elegirLamina(s.n)}
+                      className={cn('px-2 py-0.5 rounded-lg text-[11px] border transition-colors disabled:opacity-40',
+                        slideN === s.n ? 'border-violet-400/70 text-violet-200 bg-violet-500/10' : 'border-zinc-700 text-zinc-400 hover:text-zinc-200')}
+                    >
+                      {slideTabLabel(s)}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-zinc-500 leading-snug">{CAROUSEL_SLIDE_HELP}</p>
+              </div>
+            )}
+
+            {panel === 'regen' && regenTab === 'text' && laminaElegida && (
+              <div className="space-y-1.5">
+                <input
+                  value={slideDraft.eyebrow}
+                  onChange={(e) => setSlideDraft({ ...slideDraft, eyebrow: e.target.value })}
+                  placeholder="Etiqueta (opcional)"
+                  aria-label={`Etiqueta de la lámina ${laminaElegida.n}`}
+                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
+                />
+                <textarea
+                  value={slideDraft.headline}
+                  onChange={(e) => setSlideDraft({ ...slideDraft, headline: e.target.value })}
+                  rows={2}
+                  aria-label={`Titular de la lámina ${laminaElegida.n}`}
+                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
+                />
+                <input
+                  value={slideDraft.subheadline}
+                  onChange={(e) => setSlideDraft({ ...slideDraft, subheadline: e.target.value })}
+                  placeholder="Bajada (opcional)"
+                  aria-label={`Bajada de la lámina ${laminaElegida.n}`}
+                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
+                />
+                <textarea
+                  value={slideDraft.steps}
+                  onChange={(e) => setSlideDraft({ ...slideDraft, steps: e.target.value })}
+                  rows={3}
+                  placeholder="Pasos (opcional): uno por línea; «!» al inicio = el crítico"
+                  aria-label={`Pasos de la lámina ${laminaElegida.n}`}
+                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
+                />
+              </div>
+            )}
+
+            {panel === 'regen' && regenTab === 'text' && !laminaElegida && (
               <div className="space-y-1.5" onChangeCapture={() => { overlayTocado.current = true; }} onClickCapture={() => { overlayTocado.current = true; }}>
                 <p className="text-[10px] text-zinc-400 leading-snug">{OVERLAY_EDITOR_HELP}</p>
                 <textarea

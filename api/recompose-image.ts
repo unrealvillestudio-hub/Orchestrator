@@ -11,9 +11,12 @@
  *   edit_reason?: string,          // en palabras de quien la pide, si se quiere registrar
  *   mode?: 'edit_from_current' | 'same_scene' | 'regenerate_full'   // BRIEF-IMG-01 fase 4 (2026-09-27); same_scene 2026-10-20
  *   restore_index?: number         // 2026-10-20 — volver a una imagen anterior (sin generar): ver `volverALaAnterior`
+ *   slide_text?: { n, headline?, subheadline?, eyebrow?, steps? }   // 2026-10-22 — el texto de la lámina n (2..N) de
+ *                                  // un carrusel, sin generar: ver `textoDeLaLamina` y `_carouselText.ts`
  * }
  * GET /api/recompose-image?piece_id= → { options (colores del resaltado), cast (En la escena), history (anteriores), overlay (texto vigente),
- *   shadow (la sombra de la marca), rule_options (colores del filete), identity_options (colores de la barra lateral) }
+ *   shadow (la sombra de la marca), rule_options (colores del filete), identity_options (colores de la barra lateral),
+ *   carousel (2026-10-22: las láminas con su texto, o null si la pieza no es un carrusel) }
  *
  * ─── LOS DOS MODOS (BRIEF-IMG-01 fase 4) ─────────────────────────────────────────────
  * `edit_from_current` CORRIGE SOBRE LA IMAGEN ACTUAL: el generador recibe la imagen limpia vigente
@@ -54,6 +57,7 @@ import { fetchWithTimeout } from './_fetchWithTimeout.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
 import { requireReviewer, guardPiece } from './_reviewScope.js';
 import { callEdgeFunction } from './_challengedShared.js';
+import { carouselTextViewOf, readSlideTextRequest } from './_carouselText.js';
 
 /**
  * Mismo techo que declara el motor (`SCENE_DIRECTIVE_MAX_CHARS` en content-run-stage). Se valida
@@ -87,6 +91,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     overlay_override?: unknown;
     // 2026-10-20 — volver a la imagen anterior número N (0 = la última que se reemplazó).
     restore_index?: unknown;
+    // 2026-10-22 — el texto de una lámina 2..N de un carrusel (la portada va por `overlay_override`).
+    slide_text?: unknown;
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
@@ -139,6 +145,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 2026-10-20 — VOLVER A LA IMAGEN ANTERIOR. Sin directriz ni generación: sólo dato (0 USD).
     if (body.restore_index !== undefined) return volverALaAnterior(res, pieceId, body.restore_index, session.sub || 'sam');
 
+    // 2026-10-22 — EL TEXTO DE UNA LÁMINA DEL CARRUSEL. Sin directriz ni generación (0 USD): el motor la recompone
+    // sobre su imagen limpia (`carousel_recompose` con `slides_text`).
+    if (body.slide_text !== undefined) return textoDeLaLamina(res, piece, body.slide_text, editReason, session.sub || 'sam');
+
     // SIN-IMAGEN-01 — la directriz se exige sólo si hay una imagen que corregir. Ver arriba.
     const tieneImagen = typeof piece.assets?.image?.url === 'string' && !!piece.assets.image.url;
 
@@ -185,6 +195,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ok: true, piece_id: pieceId, image_url: ef.body.image_url ?? null,
         visual_directive_domain: null, visual_directive_piece: null, mode_switched: null,
         composed: ef.body.composed === true, scheduled_posts_updated: ef.body.scheduled_posts_updated ?? 0,
+        // 2026-10-22 — en un carrusel, el motor recompone también la portada con este texto: `true`, o el motivo
+        // por el que no pudo (la pantalla lo dice). Ausente = la pieza no es un carrusel.
+        carousel_recomposed: ef.body.carousel_recomposed ?? null,
         artifact_url, html, artifact_refreshed: html !== null,
       });
     }
@@ -300,6 +313,8 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
       // 2026-10-20 — la sombra de la marca y los colores posibles del filete (ImageLab ≥ 1.9.0).
       shadow: shadowOptionOf(tokens, brandId), rule_options: ruleColorOptions(tokens, palette, brandId),
       identity_options: identityColorOptions(tokens, palette, brandId),
+      // 2026-10-22 — las láminas del carrusel con su texto: el editor ofrece el selector de lámina con esto.
+      carousel: carouselTextViewOf(piece),
     });
   } catch (err) {
     console.error(`[recompose-image] GET colores ${pieceId}: ${String(err)}`);
@@ -331,5 +346,47 @@ async function volverALaAnterior(res: VercelResponse, pieceId: string, raw: unkn
     ok: true, piece_id: pieceId, image_url: ef.body.image_url ?? null, restored: true,
     visual_directive_domain: null, visual_directive_piece: null, mode_switched: null,
     artifact_url, html, artifact_refreshed: html !== null,
+  });
+}
+
+/**
+ * 2026-10-22 — EL TEXTO DE UNA LÁMINA 2..N DE UN CARRUSEL. El motor mezcla el texto en la lámina, la recompone sobre
+ * su imagen limpia (sin generar) y deja una fila por campo en `intel.piece_edits` con quien lo pidió. Tiene que
+ * ACUSAR `slides_text_applied`: un motor anterior respondería «ok» recomponiendo con el texto viejo.
+ */
+async function textoDeLaLamina(res: VercelResponse, piece: any, raw: unknown, editReason: string, by: string) {
+  const pieceId = String(piece.id);
+  const vista = carouselTextViewOf(piece);
+  if (!vista) return res.status(409).json({ error: 'not_carousel', detail: 'la pieza no es un carrusel de dos o más láminas' });
+  const pedido = readSlideTextRequest(raw);
+  if (!pedido.ok) return res.status(400).json({ error: 'invalid slide_text', detail: pedido.error });
+  if (!vista.slides.some((s) => s.n === pedido.value.n)) {
+    return res.status(400).json({ error: 'invalid slide_text', detail: `la lámina ${pedido.value.n} no existe; el carrusel tiene ${vista.total}` });
+  }
+  const ef = await callEdgeFunction('content-run-stage', {
+    action: 'carousel_recompose', piece_id: pieceId, slides_text: [pedido.value],
+    edit_reason: editReason || null, edited_by: by,
+  });
+  if (!ef.body?.ok) {
+    return res.status(ef.status >= 400 ? ef.status : 422).json({
+      error: 'slide_text_failed', detail: ef.body?.error ?? 'el motor no recompuso la lámina',
+      server_detail: typeof ef.body?.error === 'string' ? ef.body.error : null,
+    });
+  }
+  if (ef.body.slides_text_applied !== true) {
+    return res.status(409).json({
+      error: 'slides_text_unsupported',
+      detail: 'el motor respondió sin aplicar el texto de la lámina: falta desplegar content-run-stage con slides_text',
+    });
+  }
+  let html: string | null = null;
+  let artifact_url: string | null = null;
+  try { const art = await ensureArtifact(pieceId); html = art.html; artifact_url = art.artifact_url; }
+  catch (err) { console.error(`[recompose-image] ${pieceId}: lámina recompuesta pero el artefacto NO se rehízo: ${String(err)}`); }
+  return res.status(200).json({
+    ok: true, piece_id: pieceId, slide_n: pedido.value.n, image_url: null,
+    visual_directive_domain: null, visual_directive_piece: null, mode_switched: null,
+    composed: true, unchanged: ef.body.unchanged === true, text_edits: Number(ef.body.text_edits ?? 0),
+    scheduled_posts_updated: 0, artifact_url, html, artifact_refreshed: html !== null,
   });
 }
