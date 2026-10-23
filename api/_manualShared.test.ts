@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   canonicalizeSignature, manualTextOf, manualImagesOf, buildManualItems, manualChannelKey,
   cleanPostLink, manualDrainRow, manualPasteOf,
-  ARTICLE_FORMAT, CAROUSEL_FORMAT, manualArticleOf, articleBodyHtml, articleBodyText,
+  ARTICLE_FORMAT, CAROUSEL_FORMAT, manualArticleOf, articleBodyHtml, articleBodyText, articleImagesOf, imagePlaceholder,
   type ManualPieceInput, type ManualSlotRow,
 } from './_manualShared.js';
 
@@ -207,6 +207,45 @@ describe('artículo — título, portada y cuerpo por separado', () => {
     }), MANUAL);
     expect(sinDatos.cover_url).toBeNull();
     expect(sinDatos.source_url).toBe(POST); // sin `source_piece`, el último párrafo del cuerpo
+  });
+
+  describe('2026-10-23 · las imágenes del cuerpo', () => {
+    const CON_IMG = ['Entrada.', '## Uno', 'Uno.', '![img-1]', '## Dos', 'Dos.', '![img-2]', '## Tres', 'Tres.', POST].join('\n\n');
+    const imgs = [
+      { n: 2, url: 'https://storage.example/2.webp', alt: 'La segunda', status: 'ok' },
+      { n: 1, url: 'https://storage.example/1.webp', alt: 'La primera <b>', status: 'ok' },
+    ];
+    const conImg = (inline: unknown) => piece({ format: ARTICLE_FORMAT }, { ...assets, copy: { ...assets!.copy, aife_filtered: CON_IMG }, inline_images: inline as never });
+
+    it('las imágenes salen en el orden de sus marcas, con su URL y su alt', () => {
+      expect(manualArticleOf(conImg(imgs), MANUAL).images).toEqual([
+        { n: 1, url: 'https://storage.example/1.webp', alt: 'La primera <b>' },
+        { n: 2, url: 'https://storage.example/2.webp', alt: 'La segunda' },
+      ]);
+    });
+
+    it('HTML y texto: cada marca es su lugar en texto («[Imagen N: alt]»), escapado; nunca la marca cruda', () => {
+      const a = manualArticleOf(conImg(imgs), MANUAL);
+      expect(a.body_html).toContain('<p><em>[Imagen 1: La primera &lt;b&gt;]</em></p><h2>Dos</h2>');
+      expect(a.body_html).not.toContain('![img-');
+      expect(a.body_text).toContain('[Imagen 2: La segunda]');
+      expect(a.body_text).not.toContain('![img-');
+    });
+
+    it('una marca sin imagen, con imagen no ok o con URL no http(s): su lugar sin alt y nada que descargar', () => {
+      const malas = [{ n: 1, url: 'javascript:alert(1)', alt: 'x', status: 'ok' }, { n: 2, url: 'https://s/2.webp', alt: 'y', status: 'failed' }];
+      const a = manualArticleOf(conImg(malas), MANUAL);
+      expect(a.images).toEqual([]);
+      expect(a.body_text).toContain('[Imagen 1]');
+      expect(articleImagesOf('Sin marcas', imgs as never)).toEqual([]);
+      expect(imagePlaceholder(3, '  ')).toBe('[Imagen 3]');
+    });
+
+    it('sin imágenes del cuerpo, el artículo es el de antes', () => {
+      const a = manualArticleOf(art(), MANUAL);
+      expect(a.images).toEqual([]);
+      expect(a.body_html).not.toContain('[Imagen');
+    });
   });
 
   it('buildManualItems añade `article` sólo a los artículos y no toca `text`', () => {

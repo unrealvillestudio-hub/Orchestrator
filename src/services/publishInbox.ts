@@ -275,6 +275,8 @@ export interface ManualArticle {
   body_html: string;
   body_text: string;
   source_url: string | null;
+  /** Las imágenes del cuerpo, en el orden de sus marcas. Opcional: un servidor anterior no las manda. */
+  images?: Array<{ n: number; url: string; alt: string }>;
 }
 
 export interface ManualQueueResult {

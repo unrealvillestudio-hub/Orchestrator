@@ -60,6 +60,8 @@ export interface ManualPieceInput {
     builder_meta?: { signature_closer?: { text?: string | null } | null } | null;
     /** Sólo en piezas derivadas de otra (p. ej. un artículo hecho a partir de un post del blog). */
     source_piece?: { piece_id?: string | null; post_url?: string | null; title?: string | null } | null;
+    /** Las imágenes del cuerpo (`![img-N]` en el texto). En un artículo derivado, las de su fuente. */
+    inline_images?: Array<{ n?: number | null; url?: string | null; alt?: string | null; status?: string | null }> | null;
   } | null;
 }
 
@@ -197,6 +199,39 @@ export interface ManualArticle {
   body_html: string;
   body_text: string;
   source_url: string | null;
+  /** Las imágenes del cuerpo, en el orden de sus marcas, para insertarlas a mano en el editor (2026-10-23). */
+  images: ManualArticleImage[];
+}
+
+/** Una imagen del cuerpo del artículo: su número (el de la marca `![img-N]`), la URL y su texto alternativo. */
+export interface ManualArticleImage { n: number; url: string; alt: string }
+
+/** La marca de una imagen del cuerpo: un párrafo `![img-N]`, la misma que escribe el carril. */
+const MARCA_IMAGEN = /^!\[img-(\d+)\]$/u;
+
+/** El lugar de la imagen N en el texto que se copia: «[Imagen N: descripción]». En el editor se reemplaza por la imagen. */
+export function imagePlaceholder(n: number, alt: string | null | undefined): string {
+  const a = String(alt ?? '').trim();
+  return a ? `[Imagen ${n}: ${a}]` : `[Imagen ${n}]`;
+}
+
+/**
+ * Las imágenes del cuerpo que el texto marca y que existen: `ok` (o sin estado) con URL http(s), en el orden de las
+ * marcas. Una marca sin imagen no entra: su lugar queda dicho en el texto, sin nada que descargar.
+ */
+export function articleImagesOf(md: string, inline: NonNullable<ManualPieceInput['assets']>['inline_images']): ManualArticleImage[] {
+  const lista = Array.isArray(inline) ? inline : [];
+  const out: ManualArticleImage[] = [];
+  for (const p of parrafosDe(md)) {
+    const m = MARCA_IMAGEN.exec(p);
+    if (!m) continue;
+    const n = Number(m[1]);
+    const e = lista.find((x) => Number(x?.n) === n);
+    const url = cleanPostLink(e?.url ?? null);
+    if (!e || !url || (e.status != null && e.status !== 'ok') || out.some((x) => x.n === n)) continue;
+    out.push({ n, url, alt: String(e.alt ?? '').trim() });
+  }
+  return out;
 }
 
 const SUBTITULO = /^##\s+(.*)$/u;
@@ -247,8 +282,14 @@ function parrafosDe(md: string): string[] {
  * `## x` → `<h2>`, `**x**` → `<strong>`, párrafo → `<p>` (saltos simples → `<br>`) y, en el párrafo
  * indicado por `parrafoEnlace` (el del post original), las URL sueltas → `<a href>`. Nada más.
  */
-export function articleBodyHtml(md: string, parrafoEnlace: number | null = null): string {
+export function articleBodyHtml(md: string, parrafoEnlace: number | null = null, imagenes: ManualArticleImage[] = []): string {
   return parrafosDe(md).map((p, i) => {
+    // 2026-10-23 — la marca de una imagen del cuerpo es su lugar, dicho en texto (escapado como todo).
+    const marca = MARCA_IMAGEN.exec(p);
+    if (marca) {
+      const n = Number(marca[1]);
+      return `<p><em>${escapeHtml(imagePlaceholder(n, imagenes.find((x) => x.n === n)?.alt))}</em></p>`;
+    }
     const enlazar = i === parrafoEnlace;
     const bloques: string[] = [];
     let lineas: string[] = [];
@@ -266,10 +307,14 @@ export function articleBodyHtml(md: string, parrafoEnlace: number | null = null)
   }).join('');
 }
 
-/** `markdown_min` → texto plano: sin `## ` al inicio de línea ni marcas de negrita. */
-export function articleBodyText(md: string): string {
+/** `markdown_min` → texto plano: sin `## ` al inicio de línea ni marcas de negrita; cada imagen, su lugar en texto. */
+export function articleBodyText(md: string, imagenes: ManualArticleImage[] = []): string {
   return md.split('\n')
-    .map((l) => l.replace(/^(\s*)##\s+/u, '$1').replace(/\*\*(.+?)\*\*/gu, '$1'))
+    .map((l) => {
+      const marca = MARCA_IMAGEN.exec(l.trim());
+      if (marca) { const n = Number(marca[1]); return imagePlaceholder(n, imagenes.find((x) => x.n === n)?.alt); }
+      return l.replace(/^(\s*)##\s+/u, '$1').replace(/\*\*(.+?)\*\*/gu, '$1');
+    })
     .join('\n');
 }
 
@@ -291,14 +336,16 @@ export function manualArticleOf(piece: ManualPieceInput, platformKey: string): M
   const ultimo = parrafoEnlace === null ? '' : parrafosSinFirma[parrafoEnlace];
   const enlaceDelCuerpo = cleanPostLink(ultimo.replace(PUNTUACION_FINAL, ''));
   const portada = assets.image?.url;
+  const images = articleImagesOf(cuerpo, assets.inline_images);
 
   return {
     title: String(assets.copy?.title ?? '').trim(),
     cover_url: cleanPostLink(portada),
     body_markdown: cuerpo,
-    body_html: articleBodyHtml(cuerpo, parrafoEnlace),
-    body_text: articleBodyText(cuerpo),
+    body_html: articleBodyHtml(cuerpo, parrafoEnlace, images),
+    body_text: articleBodyText(cuerpo, images),
     source_url: cleanPostLink(assets.source_piece?.post_url) ?? enlaceDelCuerpo,
+    images,
   };
 }
 
