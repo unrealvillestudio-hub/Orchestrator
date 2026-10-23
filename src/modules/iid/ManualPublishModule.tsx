@@ -297,6 +297,31 @@ function ArticleBlocks({ article, brandId, pieceId }: { article: ManualArticle; 
         <CopyRichButton html={article.body_html} text={article.body_text} label="Copiar cuerpo" />
       </div>
 
+      {(article.images?.length ?? 0) > 0 && (
+        <div className="space-y-1.5">
+          <BlockLabel>Imágenes del cuerpo</BlockLabel>
+          <p className="text-[11px] font-mono text-zinc-500">
+            En el cuerpo pegado, cada «[Imagen N: …]» marca su lugar: bórralo e inserta ahí la imagen con el botón + del editor.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {article.images!.map((im) => (
+              <div key={im.n} className="space-y-1.5">
+                <div className="w-full aspect-video bg-black rounded-lg border border-zinc-800 overflow-hidden">
+                  <img src={im.url} alt={im.alt || `Imagen ${im.n} del cuerpo`} loading="lazy" className="w-full h-full object-contain" />
+                </div>
+                <p className="text-[11px] text-zinc-400 break-words">
+                  <span className="font-mono text-zinc-500">Imagen {im.n}</span>{im.alt ? ` · ${im.alt}` : ''}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <DownloadButton url={im.url} base={fileBaseOf(brandId, pieceId, `imagen-${im.n}`)} />
+                  {im.alt && <CopyButton text={im.alt} label="Copiar texto alternativo" />}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {article.source_url && (
         <p className="text-[11px] font-mono text-zinc-500 break-all">
           Original:{' '}
