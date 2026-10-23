@@ -18,6 +18,7 @@
 
 import { CAROUSEL_FORMAT } from './_manualShared.js';
 import { readTextPlaceRequest, storedTextPlace, type TextPlace } from './_textPlace.js';
+import { textStyleOf, type TextStyle } from './_textStyleShape.js';
 
 /** El mismo techo que el motor (`CAROUSEL_HEADLINE_MAX`, `CAROUSEL_EYEBROW_MAX`, `CAROUSEL_SUBHEADLINE_MAX`). */
 export const SLIDE_HEADLINE_MAX = 140;
@@ -40,11 +41,15 @@ export interface CarouselSlideTextView {
   url: string | null;
   /** 2026-10-22 — la ubicación del texto guardada en la lámina (`_textPlace.ts`); la portada, la de la imagen. */
   text_place: TextPlace | null;
+  /** 2026-10-23 — lo elegido por bloque (`_textStyle.ts`). Sólo existe si hay algo elegido; la portada, el de la imagen. */
+  text_style?: TextStyle;
 }
 
 export interface CarouselTextView { total: number; slides: CarouselSlideTextView[] }
 
 const texto = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
+/** 2026-10-23 — `text_style` sólo cuando hay algo elegido: sin él, la lámina es la de siempre, clave por clave. */
+const withTextStyle = (raw: unknown): { text_style?: TextStyle } => { const ts = textStyleOf(raw); return ts ? { text_style: ts } : {}; };
 
 /**
  * Las láminas de un carrusel con su texto, en el orden en que se publican. PURO. `null` si la pieza no es un
@@ -74,6 +79,7 @@ export function carouselTextViewOf(piece: { format?: string | null; assets?: any
       url: typeof s.url === 'string' ? s.url : null,
       // La portada es la imagen de la pieza: su fila es la de `image.text_place`.
       text_place: storedTextPlace(i === 0 ? piece.assets?.image?.text_place : s.text_place),
+      ...withTextStyle(i === 0 ? piece.assets?.image?.overlay_override?.text_style : s.text_style),
     })),
   };
 }
@@ -104,6 +110,8 @@ export interface SlideTextOut {
   n: number; headline?: string; subheadline?: string | null; eyebrow?: string | null; steps?: SlideStep[] | null;
   /** 2026-10-22 — la ubicación del texto de la lámina (`_textPlace.ts`). Puede viajar sola. */
   text_place?: TextPlace | null;
+  /** 2026-10-23 — lo elegido por bloque (`_textStyle.ts`); `null` lo borra. Puede viajar solo. */
+  text_style?: TextStyle | null;
 }
 
 /**
@@ -144,7 +152,7 @@ export function readSlideTextRequest(raw: unknown): { ok: true; value: SlideText
   const n = Number(o.n);
   if (!Number.isInteger(n) || n < 1) return { ok: false, error: 'slide_text.n debe ser el número entero de la lámina' };
   if (n === 1) return { ok: false, error: 'la lámina 1 es la portada: su texto se corrige con overlay_override' };
-  const permitidos = ['n', 'headline', 'subheadline', 'eyebrow', 'steps', 'text_place'];
+  const permitidos = ['n', 'headline', 'subheadline', 'eyebrow', 'steps', 'text_place', 'text_style'];
   const ajenos = Object.keys(o).filter((k) => !permitidos.includes(k));
   if (ajenos.length) return { ok: false, error: `slide_text trae campos que esta vía no corrige: ${ajenos.join(', ')}` };
   const value: SlideTextOut = { n };
@@ -156,6 +164,11 @@ export function readSlideTextRequest(raw: unknown): { ok: true; value: SlideText
     const tp = readTextPlaceRequest(o.text_place);
     if (!tp.ok) return { ok: false, error: `slide_text.${tp.error}` };
     value.text_place = tp.value;
+  }
+  // 2026-10-23 — lo elegido por bloque: aquí sólo que sea un objeto; la forma y los tramos los valida el motor.
+  if ('text_style' in o) {
+    if (o.text_style != null && (typeof o.text_style !== 'object' || Array.isArray(o.text_style))) return { ok: false, error: 'slide_text.text_style debe ser un objeto { headline?, sub? } o null' };
+    value.text_style = (o.text_style ?? null) as TextStyle | null;
   }
   if (Object.keys(value).length < 2) return { ok: false, error: `la lámina ${n} no trae ningún campo que corregir` };
   return { ok: true, value };
@@ -172,6 +185,7 @@ export function carouselViewAfterSlideSave(view: CarouselTextView, out: SlideTex
       ...('eyebrow' in out ? { eyebrow: out.eyebrow ?? null } : {}),
       ...('steps' in out ? { steps: out.steps ?? [] } : {}),
       ...('text_place' in out ? { text_place: out.text_place ?? null } : {}),
+      ...('text_style' in out ? { text_style: out.text_style ?? undefined } : {}),
     })),
   };
 }

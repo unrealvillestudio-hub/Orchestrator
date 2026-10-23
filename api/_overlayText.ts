@@ -12,6 +12,8 @@
  * MULTIMARCA: cero marcas; los colores y la tipografía del resaltado son dato de cada marca en ImageLab.
  */
 
+import { textStyleOf, type TextStyle } from './_textStyleShape.js';
+
 export const OVERLAY_TEXT_MAX = 300;
 export const OVERLAY_EMPHASIS_MAX = 3;
 
@@ -31,7 +33,12 @@ export interface ImageOverlayView {
   rule_role: string | null;
   /** 2026-10-20 — el color de la barra lateral (franja de identidad) elegido por una persona; null = el de la marca. */
   identity_role: string | null;
+  /** 2026-10-23 — lo elegido por bloque (`_textStyle.ts`). Sólo existe si hay algo elegido. */
+  text_style?: TextStyle;
 }
+
+/** 2026-10-23 — `text_style` sólo cuando hay algo elegido: sin él, la vista es la de siempre, clave por clave. */
+const withTextStyle = (raw: unknown): { text_style?: TextStyle } => { const ts = textStyleOf(raw); return ts ? { text_style: ts } : {}; };
 
 /** Lo que la persona eligió para la imagen además del texto. Fuera del texto escrito, todo es lo de la marca. */
 const SIN_ELECCION = { emphasis_role: null, text_shadow: null, shadow_spans: [] as string[], rule_role: null, identity_role: null };
@@ -54,6 +61,7 @@ export function imageOverlayOf(assets: any): ImageOverlayView | null {
       shadow_spans: textos(ov.shadow_spans),
       rule_role: typeof ov.rule_role === 'string' && ov.rule_role ? ov.rule_role : null,
       identity_role: typeof ov.identity_role === 'string' && ov.identity_role ? ov.identity_role : null,
+      ...withTextStyle(ov.text_style),
     };
   }
   const o = img.overlay;
@@ -125,6 +133,8 @@ export function overlayEditorSeed(view: ImageOverlayView | null | undefined): {
 export interface OverlayOverrideOut {
   headline: string; subheadline: string | null; emphasis: string[]; emphasis_role?: string;
   text_shadow?: 'on' | 'off'; shadow_spans?: string[]; rule_role?: string; identity_role?: string;
+  /** 2026-10-23 — lo elegido por bloque (ImageLab ≥ 1.16.0). Viaja sólo si hay algo elegido. */
+  text_style?: TextStyle;
 }
 
 /**
@@ -138,6 +148,7 @@ export function overlayViewAfterApply(override: OverlayOverrideOut | null): Imag
     written: true, emphasis_role: override.emphasis_role ?? null,
     text_shadow: override.text_shadow ?? null, shadow_spans: [...(override.shadow_spans ?? [])], rule_role: override.rule_role ?? null,
     identity_role: override.identity_role ?? null,
+    ...withTextStyle(override.text_style),
   };
 }
 

@@ -35,6 +35,7 @@ import type { SceneCast, ImageHistoryEntry } from '../../api/_sceneCast';
 import type { HighlightFields } from '../../api/_highlights';
 import type { CarouselTextView, SlideTextOut } from '../../api/_carouselText';
 import type { TextPlace } from '../../api/_textPlace';
+import type { TextColorOptions } from '../../api/_textStyle';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
@@ -691,6 +692,8 @@ export function fetchEmphasisColors(token: string, pieceId: string): Promise<{
   carousel?: CarouselTextView | null;
   /** 2026-10-22 — la ubicación del texto guardada en la imagen de la pieza (null = la de la marca). */
   text_place?: TextPlace | null;
+  /** 2026-10-23 — los colores posibles del texto de cada bloque, con el de siempre de cada uno. */
+  text_colors?: TextColorOptions;
 }> {
   return req(`/api/recompose-image?piece_id=${encodeURIComponent(pieceId)}`, token);
 }
