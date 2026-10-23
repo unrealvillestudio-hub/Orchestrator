@@ -58,7 +58,7 @@ import { emphasisColorOptions, identityColorOptions, imageOverlayOf, ruleColorOp
 import { sceneCastOf, imageHistoryOf } from './_sceneCast.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
-import { requireReviewer, guardPiece } from './_reviewScope.js';
+import { requireReviewer, guardPiece, VISTAS_DE_PIEZA } from './_reviewScope.js';
 import { callEdgeFunction } from './_challengedShared.js';
 import { carouselTextViewOf, readSlideTextRequest } from './_carouselText.js';
 import { readTextPlaceRequest, textPlaceOfImage } from './_textPlace.js';
@@ -102,7 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
-  const session = await requireReviewer(req, res, extractToken(req, body));
+  const session = await requireReviewer(req, res, extractToken(req, body), VISTAS_DE_PIEZA);
   if (!session) return; // requireReviewer ya respondió
 
   const pieceId = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';
@@ -298,7 +298,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
  * del texto de la imagen al abrirse. Sin opciones, la pantalla no ofrece el selector y todo sigue como antes.
  */
 async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
-  const session = await requireReviewer(req, res, extractToken(req));
+  const session = await requireReviewer(req, res, extractToken(req), VISTAS_DE_PIEZA);
   if (!session) return;
   const pieceId = typeof req.query?.piece_id === 'string' ? req.query.piece_id.trim() : '';
   if (!pieceId) return res.status(400).json({ error: 'piece_id required' });

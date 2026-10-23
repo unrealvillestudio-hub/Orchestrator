@@ -38,7 +38,7 @@ import {
   insertResearchCase, fetchResearchCases, isOpenResearchCase, publicArtifactUrl,
   ResearchCasesMissing, ResearchCaseOpen, type ResearchCase,
 } from './_calibrationShared.js';
-import { requireReviewer, guardPiece, signerOf } from './_reviewScope.js';
+import { requireReviewer, guardPiece, signerOf, VISTAS_DE_PIEZA } from './_reviewScope.js';
 import { releaseSlotsForPiece, type SlotRelease } from './_publishSlots.js';
 
 /** El tope de la pregunta: el mismo CHECK de `research_cases.question`. */
@@ -54,7 +54,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 // ── GET · el estado ──────────────────────────────────────────────────────────────────
 async function leer(req: VercelRequest, res: VercelResponse) {
-  const session = await requireReviewer(req, res, extractToken(req));
+  const session = await requireReviewer(req, res, extractToken(req), VISTAS_DE_PIEZA);
   if (!session) return;
 
   const raw = Array.isArray(req.query.piece_id) ? req.query.piece_id[0] : req.query.piece_id;
@@ -86,7 +86,7 @@ async function investigar(req: VercelRequest, res: VercelResponse) {
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
-  const session = await requireReviewer(req, res, extractToken(req, body));
+  const session = await requireReviewer(req, res, extractToken(req, body), VISTAS_DE_PIEZA);
   if (!session) return;
 
   const pieceId = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';

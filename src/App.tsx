@@ -17,7 +17,7 @@ import PublishQueueModule from './modules/iid/PublishQueueModule';
 import ChallengedInboxModule from './modules/iid/ChallengedInboxModule';
 import EvaluatedHistoryModule from './modules/iid/EvaluatedHistoryModule';
 import type { IidSession } from './services/iidInbound';
-import { fetchReviewScope } from './services/calibrationInbox';
+import { fetchReviewScope, type ReviewAccess, type ReviewView } from './services/calibrationInbox';
 
 /**
  * La versión sale de `package.json` y el commit de la plataforma; los inyecta
@@ -393,32 +393,40 @@ function SessionControl({ session, onLogout }: { session: IidSession; onLogout: 
 // (`intel.operator_review_scope`), el mismo shell suma las cuatro bandejas de Sam —los MISMOS
 // módulos, no copias—, y el servidor sólo le sirve piezas de esas marcas. Sin marcas asignadas,
 // el shell es el de siempre.
+//
+// POR VISTA (2026-10-23): cada concesión dice qué vistas abre (`operator_review_scope.views`) y
+// el shell sólo pinta esas. Una bandeja sin ninguna vista concedida no aparece; Publicación pinta
+// sólo sus subpestañas concedidas. El servidor exige la misma vista en cada endpoint.
 type SeederView = 'capture' | 'calibrate' | 'calibration' | 'fixes' | 'challenged' | 'publish';
 
-const REVIEW_TABS: { id: SeederView; label: string; icon: typeof Sprout }[] = [
-  { id: 'calibration', label: 'Calibración', icon: ClipboardCheck },
-  { id: 'fixes',       label: 'Arreglos',    icon: Wrench },
-  { id: 'challenged',  label: 'Retenidas',   icon: ShieldQuestion },
-  { id: 'publish',     label: 'Publicación', icon: Send },
+const REVIEW_TABS: { id: SeederView; label: string; icon: typeof Sprout; vistas: ReviewView[] }[] = [
+  { id: 'calibration', label: 'Calibración', icon: ClipboardCheck, vistas: ['calibration'] },
+  { id: 'fixes',       label: 'Arreglos',    icon: Wrench,         vistas: ['fixes'] },
+  { id: 'challenged',  label: 'Retenidas',   icon: ShieldQuestion, vistas: ['challenged'] },
+  { id: 'publish',     label: 'Publicación', icon: Send,           vistas: ['publish_scheduled', 'publish_manual'] },
 ];
+
+/** ¿La sesión abre alguna de estas vistas? */
+const abre = (views: '*' | ReviewView[], vistas: ReviewView[]) => views === '*' || vistas.some((v) => views.includes(v));
 
 function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () => void }) {
   const [seederView, setSeederView] = useState<SeederView>('capture');
   // null = no revisa ninguna marca (o todavía no se sabe): el shell de siempre.
-  const [review, setReview] = useState<'*' | string[] | null>(null);
+  const [acceso, setAcceso] = useState<ReviewAccess | null>(null);
+  const review = acceso?.review ?? null;
 
   useEffect(() => {
     let alive = true;
     fetchReviewScope(session.session_token)
-      .then((r) => { if (alive) setReview(r); })
-      .catch(() => { if (alive) setReview(null); });
+      .then((r) => { if (alive) setAcceso(r); })
+      .catch(() => { if (alive) setAcceso(null); });
     return () => { alive = false; };
   }, [session.session_token]);
 
   const tabs: { id: SeederView; label: string; icon: typeof Sprout }[] = [
     { id: 'capture',   label: 'Capturar',    icon: Sprout },
     { id: 'calibrate', label: 'Calibrar voz', icon: Dna },
-    ...(review ? REVIEW_TABS : []),
+    ...(acceso ? REVIEW_TABS.filter((t) => abre(acceso.views, t.vistas)) : []),
   ];
 
   return (
@@ -476,7 +484,12 @@ function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () 
           {seederView === 'calibration' && <ApprovalCalibrationModule session={session} />}
           {seederView === 'fixes'       && <ApprovalCalibrationModule session={session} scope={FIX_SCOPE} />}
           {seederView === 'challenged'  && <ChallengedInboxModule session={session} />}
-          {seederView === 'publish'     && <PublishQueueModule session={session} />}
+          {seederView === 'publish'     && acceso && (
+            <PublishQueueModule session={session} subtabs={[
+              ...(abre(acceso.views, ['publish_scheduled']) ? ['scheduled' as const] : []),
+              ...(abre(acceso.views, ['publish_manual']) ? ['manual' as const] : []),
+            ]} />
+          )}
         </motion.div>
       </AnimatePresence>
 

@@ -53,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
 
-  const session = await requireReviewer(req, res, extractToken(req));
+  const session = await requireReviewer(req, res, extractToken(req), ['challenged']);
   if (!session) return; // requireReviewer ya respondió
 
   const limit  = intParam(req.query.limit, 20, 1, 200);

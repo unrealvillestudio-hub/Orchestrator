@@ -64,7 +64,7 @@ import { actionsFor,
 import { resolveFixRequest } from './_fixRequest.js';
 import { resolveHighlights, type HighlightFields } from './_highlights.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
-import { requireReviewer, guardPiece, signerOf } from './_reviewScope.js';
+import { requireReviewer, guardPiece, signerOf, VISTAS_DE_PIEZA } from './_reviewScope.js';
 import { releaseSlotsForPiece, type SlotRelease } from './_publishSlots.js';
 
 const VERDICTS: readonly CalibrationVerdict[] = ['approved', 'rejected', 'fixable'];
@@ -82,7 +82,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
-  const session = await requireReviewer(req, res, extractToken(req, body));
+  const session = await requireReviewer(req, res, extractToken(req, body), VISTAS_DE_PIEZA);
   if (!session) return; // requireReviewer ya respondió
 
   const pieceId = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';
@@ -287,7 +287,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 // ── GET · el catálogo de pills del panel Fixable (2026-10-19) ─────────────────────────────
 async function catalogo(req: VercelRequest, res: VercelResponse) {
-  const session = await requireReviewer(req, res, extractToken(req));
+  const session = await requireReviewer(req, res, extractToken(req), VISTAS_DE_PIEZA);
   if (!session) return;
   try {
     return res.status(200).json({ ok: true, fix_codes: await fetchFixRequestCodes() });

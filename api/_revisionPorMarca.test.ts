@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   TODAS, effectiveReviewScope, filterByReviewScope, inReviewScope, signerOf,
-  requireReviewer, guardPiece, type Reviewer,
+  requireReviewer, guardPiece, type Reviewer, brandsForViews, viewsOf, VISTAS_DE_PIEZA,
 } from './_reviewScope.js';
 
 /**
@@ -32,6 +32,31 @@ describe('effectiveReviewScope', () => {
   });
   it("con brand_scope '*' vale lo asignado, sin duplicados", () => {
     expect(effectiveReviewScope('seeder', ['*'], ['MarcaA', 'MarcaA', ' MarcaB '])).toEqual(['MarcaA', 'MarcaB']);
+  });
+});
+
+describe('vistas por concesión (2026-10-23)', () => {
+  const g = [
+    { brand_id: 'MarcaA', views: ['publish_manual'] },
+    { brand_id: 'MarcaB', views: null },
+    { brand_id: 'MarcaC', views: ['calibration', 'fixes'] },
+  ];
+  it('views NULL abre todas las vistas: el comportamiento de antes de la columna', () => {
+    expect(brandsForViews([{ brand_id: 'MarcaA' }], ['challenged'])).toEqual(['MarcaA']);
+    expect(brandsForViews(g, ['challenged'])).toEqual(['MarcaB']);
+  });
+  it('cada vista abre sólo las marcas que la conceden', () => {
+    expect(brandsForViews(g, ['publish_manual'])).toEqual(['MarcaA', 'MarcaB']);
+    expect(brandsForViews(g, ['fixes'])).toEqual(['MarcaB', 'MarcaC']);
+    expect(brandsForViews(g, undefined)).toEqual(['MarcaA', 'MarcaB', 'MarcaC']);
+    expect(brandsForViews(null, ['fixes'])).toBeNull();
+  });
+  it('las vistas que se pintan: unión dentro del techo; admin y una concesión sin views, todas', () => {
+    expect(viewsOf('admin', [], null)).toBe(TODAS);
+    expect(viewsOf('seeder', ['MarcaA'], g)).toEqual(['publish_manual']);
+    expect(viewsOf('seeder', ['MarcaA', 'MarcaC'], g)).toEqual(['calibration', 'fixes', 'publish_manual']);
+    expect(viewsOf('seeder', ['*'], g)).toBe(TODAS);
+    expect(viewsOf('seeder', ['MarcaZ'], g)).toEqual([]);
   });
 });
 
@@ -100,6 +125,21 @@ describe('requireReviewer y guardPiece', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await guardPiece(res, s!, 'cualquier-pieza')).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('una concesión sólo de publicación manual abre su endpoint y nada más (2026-10-23)', async () => {
+    const filas = [{ brand_id: 'MarcaA', views: ['publish_manual'] }];
+    fetchMock.mockResolvedValue(jsonResponse(200, filas));
+    const t = token({ sub: 'revisora', role: 'seeder', brand_scope: ['MarcaA'] });
+    const manual = await requireReviewer(req, fakeRes().res, t, ['publish_manual']);
+    expect(manual?.review).toEqual(['MarcaA']);
+    expect(manual?.views).toEqual(['publish_manual']);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('select=brand_id,views');
+    for (const vistas of [['publish_scheduled'], ['calibration', 'fixes'], ['challenged'], VISTAS_DE_PIEZA] as const) {
+      const { res, out } = fakeRes();
+      expect(await requireReviewer(req, res, t, vistas)).toBeNull();
+      expect(out.status).toBe(403);
+    }
   });
 
   it('un revisor entra con sus marcas asignadas, recortadas por su brand_scope', async () => {
@@ -171,6 +211,20 @@ describe('cada bandeja pasa por la puerta nueva', () => {
   }
   it('calibration-verdict firma con signerOf: un revisor no puede firmar como otro', () => {
     expect(sinComentarios(fuente('calibration-verdict.ts'))).toContain('signerOf(session, body.evaluated_by)');
+  });
+  const VISTA_DE = {
+    'calibration-queue.ts': "['calibration', 'fixes']", 'challenged-queue.ts': "['challenged']",
+    'publish-queue.ts': "['publish_scheduled']", 'manual-queue.ts': "['publish_manual']", 'manual-published.ts': "['publish_manual']",
+  } as Record<string, string>;
+  for (const f of [...LECTURAS, ...POR_PIEZA, ...POR_FILA, 'undo-change.ts', 'research-cases.ts']) {
+    it(`${f} exige su vista en requireReviewer`, () => {
+      const llamadas = [...sinComentarios(fuente(f)).matchAll(/requireReviewer\(req, res, extractToken\([^)]*\), ([^)]*)\)/g)].map((m) => m[1]);
+      expect(llamadas.length).toBeGreaterThan(0);
+      for (const v of llamadas) expect(v).toBe(VISTA_DE[f] ?? 'VISTAS_DE_PIEZA');
+    });
+  }
+  it('la publicación manual no es una vista de pieza: quien sólo publica a mano no edita ni juzga', () => {
+    expect(VISTAS_DE_PIEZA).not.toContain('publish_manual');
   });
   it('el Historial sigue siendo sólo de admin', () => {
     expect(sinComentarios(fuente('evaluated-history.ts'))).toContain('requireAdmin(');

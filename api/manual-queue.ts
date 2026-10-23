@@ -50,7 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
 
-  const session = await requireReviewer(req, res, extractToken(req));
+  const session = await requireReviewer(req, res, extractToken(req), ['publish_manual']);
   if (!session) return;
 
   const brand = strParam(req.query.brand);
