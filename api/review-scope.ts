@@ -5,7 +5,8 @@
  * respuesta NO es la seguridad: cada endpoint de las bandejas vuelve a comprobar el alcance por su
  * cuenta (`requireReviewer` + `guardPiece`). Esto sólo decide qué se pinta.
  *
- * Returns 200: { review: '*' | string[] } · 403 si no tiene marcas asignadas para revisar.
+ * Returns 200: { review: '*' | string[], views: '*' | Vista[] } · 403 si no tiene marcas asignadas para revisar.
+ * `views` dice qué pestañas pintar (2026-10-23); cada endpoint vuelve a exigir la suya.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, extractToken } from './_calibrationShared.js';
@@ -18,5 +19,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const session = await requireReviewer(req, res, extractToken(req));
   if (!session) return; // requireReviewer ya respondió
-  return res.status(200).json({ review: session.review });
+  return res.status(200).json({ review: session.review, views: session.views });
 }

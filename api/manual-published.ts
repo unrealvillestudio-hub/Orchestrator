@@ -53,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let body: { slot_id?: string; link?: string; session_token?: string } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* vacío */ }
 
-  const session = await requireReviewer(req, res, extractToken(req, body));
+  const session = await requireReviewer(req, res, extractToken(req, body), ['publish_manual']);
   if (!session) return;
 
   const slotId = typeof body.slot_id === 'string' ? body.slot_id.trim() : '';

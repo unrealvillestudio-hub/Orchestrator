@@ -593,14 +593,22 @@ export function fetchQueue(
   return req<QueueResult>(`/api/calibration-queue${qs ? `?${qs}` : ''}`, token);
 }
 
+/** Las vistas que una concesión puede abrir (mismo vocabulario que `api/_reviewScope.ts`). */
+export type ReviewView = 'calibration' | 'fixes' | 'challenged' | 'publish_scheduled' | 'publish_manual';
+/** Las marcas que la sesión revisa y las vistas que abre. `'*'` = todas. */
+export interface ReviewAccess { review: '*' | string[]; views: '*' | ReviewView[] }
+
 /**
- * Las marcas que la sesión puede revisar (`'*'` = todas, admin). `null` si no puede revisar ninguna
- * (403). Sólo decide qué pestañas se pintan: cada endpoint vuelve a comprobar el alcance.
+ * Las marcas que la sesión puede revisar (`'*'` = todas, admin) y las vistas que abre. `null` si no
+ * puede revisar ninguna (403). Sólo decide qué pestañas se pintan: cada endpoint vuelve a comprobar
+ * el alcance y la vista. Un servidor anterior a las vistas no manda `views`: entonces son todas.
  */
-export async function fetchReviewScope(token: string): Promise<'*' | string[] | null> {
+export async function fetchReviewScope(token: string): Promise<ReviewAccess | null> {
   try {
-    const out = await req<{ review: '*' | string[] }>('/api/review-scope', token);
-    return out.review === '*' || (Array.isArray(out.review) && out.review.length) ? out.review : null;
+    const out = await req<{ review: '*' | string[]; views?: '*' | ReviewView[] }>('/api/review-scope', token);
+    const review = out.review === '*' || (Array.isArray(out.review) && out.review.length) ? out.review : null;
+    if (!review) return null;
+    return { review, views: out.views === undefined ? '*' : out.views };
   } catch (err) {
     if (err instanceof CalibrationError && err.status === 403) return null;
     throw err;

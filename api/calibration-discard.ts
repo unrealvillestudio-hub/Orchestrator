@@ -27,7 +27,7 @@ import {
   discardPiece, PieceNotFound, AlreadyDiscarded,
 } from './_calibrationShared.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
-import { requireReviewer, guardPiece } from './_reviewScope.js';
+import { requireReviewer, guardPiece, VISTAS_DE_PIEZA } from './_reviewScope.js';
 import { releaseSlotsForPiece } from './_publishSlots.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -38,7 +38,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let body: { piece_id?: string; reason?: string; session_token?: string } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
-  const session = await requireReviewer(req, res, extractToken(req, body));
+  const session = await requireReviewer(req, res, extractToken(req, body), VISTAS_DE_PIEZA);
   if (!session) return; // requireReviewer ya respondió
 
   const pieceId = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';

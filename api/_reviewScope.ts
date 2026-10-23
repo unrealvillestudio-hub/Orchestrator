@@ -18,6 +18,13 @@
  *
  * FAIL-CLOSED. Sin la tabla, sin filas o con un error de lectura, un no-admin recibe 403. Un permiso
  * que no se pudo leer no se presume.
+ *
+ * TERCER EJE, POR VISTA (Sam, 2026-10-23: «Marisol puede ver IID Seeds y Publish/Manual; todas las
+ * demás vistas ocúltalas por ahora»). Cada concesión de `intel.operator_review_scope` declara en
+ * `views` qué vistas abre; `NULL` = todas, que es lo que había antes de esta columna. Cada endpoint
+ * pide las suyas a `requireReviewer`, así que ocultar una pestaña no es la seguridad: una vista no
+ * concedida responde 403 aunque alguien llame a su endpoint a mano. Las vistas son vocabulario del
+ * sistema (las bandejas), no de una persona ni de una marca.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
@@ -30,11 +37,40 @@ export const TODAS = '*' as const;
 export type ReviewScope = typeof TODAS | readonly string[];
 
 export interface Reviewer extends SessionUser {
-  /** Las marcas que esta sesión puede revisar. */
+  /** Las marcas que esta sesión puede revisar en las vistas que pidió el endpoint. */
   review: ReviewScope;
+  /** Las vistas que abre la sesión (para pintar pestañas). */
+  views: typeof TODAS | Vista[];
 }
 
 export const esAdmin = (role: string): boolean => ALLOWED_ROLES.includes(role);
+
+/** Las vistas que una concesión puede abrir. Mismo vocabulario que el CHECK de `operator_review_scope.views`. */
+export const VISTAS = ['calibration', 'fixes', 'challenged', 'publish_scheduled', 'publish_manual'] as const;
+export type Vista = (typeof VISTAS)[number];
+/** Lo que se hace sobre una pieza (editar, juzgar, recomponer, deshacer, previsualizar): lo usan las
+ *  bandejas que trabajan piezas, no la de publicación manual, que sólo marca franjas publicadas. */
+export const VISTAS_DE_PIEZA: readonly Vista[] = ['calibration', 'fixes', 'challenged', 'publish_scheduled'];
+
+/** Una fila de `intel.operator_review_scope`. `views` null (o ausente) = todas las vistas. */
+export interface Grant { brand_id: string; views?: readonly string[] | null }
+
+/** Las marcas de las concesiones que abren alguna de esas vistas. Sin vistas pedidas, todas. `null` si no
+ *  se pudieron leer: el fail-closed lo decide `effectiveReviewScope`. */
+export function brandsForViews(grants: readonly Grant[] | null, vistas?: readonly Vista[]): string[] | null {
+  if (!grants) return null;
+  return grants
+    .filter((g) => !vistas || g.views == null || g.views.some((v) => (vistas as readonly string[]).includes(v)))
+    .map((g) => g.brand_id);
+}
+
+/** Las vistas que abre la sesión, para pintar pestañas. Admin y toda concesión sin `views`: todas. */
+export function viewsOf(role: string, brandScope: readonly string[], grants: readonly Grant[] | null): typeof TODAS | Vista[] {
+  if (esAdmin(role)) return TODAS;
+  const enTecho = (grants ?? []).filter((g) => brandScope.includes(TODAS) || brandScope.includes(String(g.brand_id).trim()));
+  if (enTecho.some((g) => g.views == null)) return TODAS;
+  return VISTAS.filter((v) => enTecho.some((g) => (g.views ?? []).includes(v)));
+}
 
 /**
  * El alcance efectivo, sin red ni DB (se prueba en aislamiento). `null` = no puede revisar nada.
@@ -63,9 +99,10 @@ export function filterByReviewScope<T extends { brand_id: string }>(rows: T[], s
   return rows.filter((r) => scope.includes(r.brand_id));
 }
 
-/** Las marcas concedidas a `sub`. `null` ante cualquier fallo (tabla ausente incluida): fail-closed. */
-export async function fetchReviewGrants(sub: string): Promise<string[] | null> {
-  const url = `${SB_URL()}/rest/v1/operator_review_scope?operator_sub=eq.${encodeURIComponent(sub)}&select=brand_id`;
+/** Las concesiones de `sub`, con sus vistas. `null` ante cualquier fallo (tabla o columna ausente
+ *  incluidas): fail-closed. */
+export async function fetchReviewGrants(sub: string): Promise<Grant[] | null> {
+  const url = `${SB_URL()}/rest/v1/operator_review_scope?operator_sub=eq.${encodeURIComponent(sub)}&select=brand_id,views`;
   try {
     const res = await fetchWithTimeout('db', url, {
       headers: { apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': 'intel' },
@@ -74,8 +111,11 @@ export async function fetchReviewGrants(sub: string): Promise<string[] | null> {
       console.error(`[review-scope] lectura de intel.operator_review_scope falló: ${res.status}`);
       return null;
     }
-    const rows = (await res.json().catch(() => [])) as Array<{ brand_id?: unknown }>;
-    return Array.isArray(rows) ? rows.map((r) => String(r.brand_id ?? '')).filter(Boolean) : null;
+    const rows = (await res.json().catch(() => [])) as Array<{ brand_id?: unknown; views?: unknown }>;
+    if (!Array.isArray(rows)) return null;
+    return rows
+      .map((r) => ({ brand_id: String(r.brand_id ?? ''), views: Array.isArray(r.views) ? r.views.map(String) : null }))
+      .filter((r) => r.brand_id);
   } catch (err) {
     console.error('[review-scope] lectura de intel.operator_review_scope falló:', err instanceof Error ? err.message : err);
     return null;
@@ -84,10 +124,11 @@ export async function fetchReviewGrants(sub: string): Promise<string[] | null> {
 
 /**
  * La puerta de las bandejas. Mismas comprobaciones que `requireAdmin` y, para quien no es admin, el
- * alcance de revisión. Si algo falla, responde y devuelve null.
+ * alcance de revisión EN LAS VISTAS DEL ENDPOINT (`vistas`; sin ellas, cualquier concesión). Si algo
+ * falla, responde y devuelve null.
  */
 export async function requireReviewer(
-  req: VercelRequest, res: VercelResponse, token: string | undefined,
+  req: VercelRequest, res: VercelResponse, token: string | undefined, vistas?: readonly Vista[],
 ): Promise<Reviewer | null> {
   if (!SB_URL() || !SB_KEY()) {
     res.status(503).json({ error: 'config_missing', message: 'Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY en el runtime' });
@@ -99,13 +140,14 @@ export async function requireReviewer(
   }
   const session = verifyToken(token, JWT_SECRET());
   if (!session) { res.status(401).json({ error: 'sesión inválida o expirada, vuelve a entrar' }); return null; }
-  const granted = esAdmin(session.role) ? null : await fetchReviewGrants(session.sub);
-  const review = effectiveReviewScope(session.role, session.brand_scope, granted);
+  const grants = esAdmin(session.role) ? null : await fetchReviewGrants(session.sub);
+  const review = effectiveReviewScope(session.role, session.brand_scope, brandsForViews(grants, vistas));
   if (!review) {
-    res.status(403).json({ error: `forbidden: '${session.sub}' no tiene marcas asignadas para revisar` });
+    const donde = vistas ? ` en ${vistas.join(' / ')}` : '';
+    res.status(403).json({ error: `forbidden: '${session.sub}' no tiene marcas asignadas para revisar${donde}` });
     return null;
   }
-  return { ...session, review };
+  return { ...session, review, views: viewsOf(session.role, session.brand_scope, grants) };
 }
 
 /** 403 uniforme para una acción sobre una pieza de otra marca. */

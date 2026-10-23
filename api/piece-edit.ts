@@ -39,7 +39,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, extractToken } from './_calibrationShared.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
-import { requireReviewer, guardPiece } from './_reviewScope.js';
+import { requireReviewer, guardPiece, VISTAS_DE_PIEZA } from './_reviewScope.js';
 import { callEdgeFunction, parseBody } from './_challengedShared.js';
 
 /**
@@ -55,7 +55,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
   const body = parseBody(req);
-  const session = await requireReviewer(req, res, extractToken(req, body));
+  const session = await requireReviewer(req, res, extractToken(req, body), VISTAS_DE_PIEZA);
   if (!session) return; // requireReviewer ya respondió
 
   const piece_id = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';

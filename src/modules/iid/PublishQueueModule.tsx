@@ -43,20 +43,29 @@ const PAGE = 20;
  * Por eso es la única que entrega `slot` al componente de acciones: antes de sellar una
  * pieza, el diálogo repite esa fecha y avisa de que la franja se libera.
  */
-export default function PublishQueueModule({ session }: { session: IidSession }) {
+export type PublishSubTab = 'scheduled' | 'manual';
+
+/** `subtabs`: las subpestañas que la sesión puede abrir (2026-10-23). Sin el prop, las dos: el camino
+ *  de admin no cambia. Ocultar no es la seguridad: cada endpoint exige su vista. */
+export default function PublishQueueModule({ session, subtabs = ['scheduled', 'manual'] }: { session: IidSession; subtabs?: PublishSubTab[] }) {
   // Pestaña «Manual» (Sam, 2026-10-01): lo que se publica a mano vive DENTRO de Publicación.
   // `?view=publish&tab=manual` abre directo en ella.
-  const [tab, setTab] = useState<'scheduled' | 'manual'>(() => {
-    try { return new URLSearchParams(window.location.search).get('tab') === 'manual' ? 'manual' : 'scheduled'; }
-    catch { return 'scheduled'; }
+  const [tab, setTab] = useState<PublishSubTab>(() => {
+    let pedida: PublishSubTab = 'scheduled';
+    try { pedida = new URLSearchParams(window.location.search).get('tab') === 'manual' ? 'manual' : 'scheduled'; }
+    catch { /* sin URL: la de siempre */ }
+    return subtabs.includes(pedida) ? pedida : subtabs[0];
   });
+  const visible = subtabs.includes(tab) ? tab : subtabs[0];
   return (
     <div className="max-w-3xl mx-auto px-3 md:px-6 py-2">
-      <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-3 w-fit">
-        <SubTab label="Programadas" active={tab === 'scheduled'} onClick={() => setTab('scheduled')} />
-        <SubTab label="Manual" active={tab === 'manual'} onClick={() => setTab('manual')} />
-      </div>
-      {tab === 'manual' ? <ManualPublishModule session={session} /> : <ScheduledQueue session={session} />}
+      {subtabs.length > 1 && (
+        <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800 rounded-xl p-1 mb-3 w-fit">
+          <SubTab label="Programadas" active={visible === 'scheduled'} onClick={() => setTab('scheduled')} />
+          <SubTab label="Manual" active={visible === 'manual'} onClick={() => setTab('manual')} />
+        </div>
+      )}
+      {visible === 'manual' ? <ManualPublishModule session={session} /> : <ScheduledQueue session={session} />}
     </div>
   );
 }
