@@ -211,8 +211,8 @@ export default function ApprovalCalibrationModule(
           </div>
           <ul className="space-y-0.5">
             {(data?.urgent_channels ?? []).map((c: UrgentChannelInfo) => (
-              <li key={`${c.brand_id}/${c.platform}`} className="text-[11px] font-mono text-zinc-400">
-                <span className="text-zinc-300">{c.brand_id}/{c.platform}</span>
+              <li key={`${c.brand_id}/${c.platform}/${c.format ?? ''}`} className="text-[11px] font-mono text-zinc-400">
+                <span className="text-zinc-300">{c.brand_id}/{c.platform}{c.format ? ` · ${c.format}` : ''}</span>
                 {' · '}en {c.hours_left} h
                 {' · '}
                 {c.candidates === 0

@@ -77,6 +77,7 @@ import { fetchBrandLanguages, readingLanguageOf } from './_brandLanguage.js';
 import {
   fetchBrandTimezones, fetchNextFreeSlots, forecastFor, type ForecastSlot,
   urgentChannels, isUrgentPiece, URGENCY_HOURS_DEFAULT, URGENCY_HOURS_MAX, type UrgentChannel,
+  fetchPolicyFormats, pieceFitsUrgentLane,
 } from './_publishSlots.js';
 
 /**
@@ -270,7 +271,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Se lee sin filtro de marca para que by_brand sea global y estable aunque venga
     // filtro; los cortes se leen en runtime (nunca hay fechas de corte en este código).
-    const [allPieces, evaluated, cutoffsRaw, limits, closers, brandLangs, brandZones, freeSlots, abiertas, recurring] = await Promise.all([
+    const [allPieces, evaluated, cutoffsRaw, limits, closers, brandLangs, brandZones, freeSlotsRaw, abiertas, recurring, policiesRaw] = await Promise.all([
       fetchCalibrationPieces(),
       fetchEvaluatedIds(),
       fetchPipelineCutoffs(),
@@ -286,7 +287,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       states.some((e) => e === 'retenida' || e === 'sin_imagen') ? fetchPendingChallenges().catch(() => null) : Promise.resolve(null),
       // 2026-10-08 — las series recurrentes de los temas, UNA lectura. Falla en blando: ver la función.
       fetchRecurringFormats(),
+      // 2026-10-22 — CARRILES: qué formatos tienen franja propia en cada marca × canal. UNA lectura.
+      fetchPolicyFormats(),
     ]);
+    // Sin políticas no se sabe en qué carril cae cada pieza: la previsión y la urgencia se declaran
+    // SIN LEER (`slots_source: 'unavailable'`) en vez de dar una franja que puede ser del carril de
+    // otro formato. Es el mismo trato que una lectura de franjas caída, y por el mismo motivo.
+    const freeSlots = policiesRaw === null ? null : freeSlotsRaw;
+    const policies = policiesRaw ?? [];
     const cutoffs: PipelineCutoff[] = cutoffsRaw ?? [];
 
     // EL CORPUS YA NO EXCLUYE: ANOTA. (Regla de Sam, 2026-09-18.)
@@ -346,7 +354,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // interfaz pueda decir «este canal necesita 1 pieza» sin pedir nada más. Con `slots_source`
     // caído el mapa viene vacío y el filtro no esconde nada por una lectura fallida — lo dice.
     const urgentes = urgentChannels(freeSlots, urgencyHours);
-    if (urgency === 'urgent') scoped = scoped.filter((p) => isUrgentPiece(p, urgentes));
+    if (urgency === 'urgent') scoped = scoped.filter((p) => isUrgentPiece(p, urgentes, policies));
 
     // LO-CORREGIDO-01 — el alcance de la pestaña, con los demás transversales y ANTES de `by_brand`:
     // las pastillas de marca tienen que contar lo que esta pestaña daría, no lo que daría la bandeja
@@ -398,7 +406,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Filtro de marca (si vino) y orden.
     const inBrand = brand ? scoped.filter((p) => p.brand_id === brand) : scoped;
     const ordered = sortPieces(inBrand, order, (p) => {
-      const f = forecastFor(p, freeSlots, brandZones);
+      const f = forecastFor(p, freeSlots, brandZones, policies);
       const t = f ? Date.parse(f.slot_at) : NaN;
       return Number.isFinite(t) ? t : null;
     });
@@ -424,7 +432,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // PREVISIÓN, no compromiso. La pieza todavía no está aprobada, así que no tiene
       // franja: esto es dónde caería si se aprobara ahora, y otra pieza aprobada antes se
       // la lleva. Por eso NO se llama `slot` — el nombre distingue las dos cosas.
-      forecast_slot: forecastFor(p, freeSlots, brandZones),
+      forecast_slot: forecastFor(p, freeSlots, brandZones, policies),
       // EN QUÉ ESTADO DE PENDIENTE ESTÁ. Es lo que la tarjeta pinta para que seis situaciones
       // distintas no se lean iguales — que es el defecto que SIGN-01 corte D intentó resolver
       // escondiéndolas. Sale del mapa, resuelto arriba sobre TODO lo pendiente.
@@ -499,8 +507,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .map((c: UrgentChannel) => ({
           ...c,
           needs: 1,
-          candidates: perPiece.filter(
-            (p) => p.brand_id === c.brand_id && (p.platform ?? '') === c.platform).length,
+          // Por CARRIL (2026-10-22): las candidatas de la franja de artículos son los artículos.
+          candidates: perPiece.filter((p) => pieceFitsUrgentLane(p, c, policies)).length,
         })),
       platform: platform ?? '',
       // 2026-10-08 — el tipo pedido (`''` = todos) y cuántas piezas daría cada tipo con los demás
@@ -536,6 +544,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // PR-C — por qué la previsión puede venir `null`: «no hay franja libre» y «no se pudo
       // leer» son dos cosas distintas, y la primera es una afirmación sobre el canal.
       slots_source: freeSlots === null ? 'unavailable' : 'ok',
+      // 2026-10-22 — si la causa fue la lectura de carriles, se dice cuál de las dos lecturas cayó.
+      lanes_source: policiesRaw === null ? 'unavailable' : 'ok',
       ...(truncated ? { truncated: true } : {}),
     });
   } catch (err) {
