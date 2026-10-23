@@ -10,6 +10,8 @@ import {
 import { savePieceEdit } from '../../services/challengedInbox';
 import { effectiveFixImageMode, type FixRequestCode, type FixImageMode } from '../../../api/_fixRequest';
 import { overlayEditorSeed, overlayViewAfterApply, parseOverlayMarkup, shadowDefaultLabel, type ImageOverlayView, type EmphasisColorOption, type OverlayOverrideOut, type ShadowOption } from '../../../api/_overlayText';
+import { textStyleDraftOf, subMarkupOf, parseSubMarkup, textStylePayload, withBlock, SUB_EDITOR_HELP, type TextStyleDraft, type TextColorOptions } from '../../../api/_textStyle';
+import { TextBlockControls } from './TextStyleControls';
 import { highlightPayload, HIGHLIGHT_NOTE_MAX, type HighlightInput } from '../../../api/_highlights';
 import { SCENE_SLOTS, slotDirective, SLOT_CHANGE_MODE, MODE_HELP, type SceneCast, type ImageHistoryEntry } from '../../../api/_sceneCast';
 import { fmtInZone } from './pieceUi';
@@ -587,6 +589,11 @@ export function PieceActionsBar({
   const [identityColors, setIdentityColors] = useState<EmphasisColorOption[] | null>(null);
   const [shadowOpt, setShadowOpt] = useState<ShadowOption | null>(null);
   const [ruleColors, setRuleColors] = useState<EmphasisColorOption[] | null>(null);
+  // 2026-10-23 — LO ELEGIDO POR BLOQUE: el color del texto, la bajada aparte y el grosor de la sombra, con los colores de
+  // texto de la marca. `textDraft` es el de la imagen de la pieza (y la portada); `slideStyle`, el de la lámina elegida.
+  const [textColors, setTextColors] = useState<TextColorOptions | null>(null);
+  const [textDraft, setTextDraft] = useState<TextStyleDraft>(textStyleDraftOf(null));
+  const [slideStyle, setSlideStyle] = useState<TextStyleDraft>(textStyleDraftOf(null));
   // 2026-10-20 — EL TEXTO VIGENTE DE LA IMAGEN. `piece.image_overlay` es el de cuando cargó la bandeja y no cambia al
   // corregir: sembrar el editor con él volvía a mandar el texto viejo (medido en 5b842958). Se guarda lo último aplicado
   // y se reemplaza por lo que la pieza tiene en la base en cuanto llega la lectura; si ya se escribió, no se pisa.
@@ -604,13 +611,19 @@ export function PieceActionsBar({
   const placeActual = laminaElegida ? laminaElegida.text_place : placeVigente;
   const elegirLamina = (n: number) => {
     setSlideN(n); setError(null); setPlaceSel(null);
-    if (n > 1) setSlideDraft(slideTextDraftOf(carouselView?.slides.find((s) => s.n === n) ?? null));
+    if (n > 1) {
+      const lam = carouselView?.slides.find((s) => s.n === n) ?? null;
+      // 2026-10-23 — la bajada abre con su resaltado y sus tramos de sombra marcados; los controles, con lo elegido.
+      setSlideDraft({ ...slideTextDraftOf(lam), subheadline: subMarkupOf(lam?.subheadline ?? '', lam?.text_style) });
+      setSlideStyle(textStyleDraftOf(lam?.text_style));
+    }
   };
   const overlayTocado = useRef(false);
   const sembrarEditor = (view: ImageOverlayView | null) => {
     const s = overlayEditorSeed(view);
-    setOverlayMarkup(s.markup); setOverlaySub(s.sub); setOverlayRole(s.role);
+    setOverlayMarkup(s.markup); setOverlaySub(subMarkupOf(s.sub, view?.text_style)); setOverlayRole(s.role);
     setOverlayShadow(s.shadow); setOverlayRule(s.ruleRole); setOverlayIdentity(s.identityRole);
+    setTextDraft(textStyleDraftOf(view?.text_style));
   };
   // 2026-10-19 — las pills del fixable. El catálogo se lee la primera vez que se abre el panel.
   const [fixCatalog, setFixCatalog] = useState<FixRequestCode[] | null>(null);
@@ -660,6 +673,7 @@ export function PieceActionsBar({
         .then((r) => {
           setEmColors(r.options); setCast(r.cast ?? null); setHistory(r.history ?? []);
           setShadowOpt(r.shadow ?? null); setRuleColors(r.rule_options ?? []); setIdentityColors(r.identity_options ?? []);
+          setTextColors(r.text_colors ?? null);
           if (r.overlay !== undefined) { setOverlayVigente(r.overlay); if (!overlayTocado.current) sembrarEditor(r.overlay); }
           setCarouselView(r.carousel ?? null);
           setPlaceVigente(r.text_place ?? null);
@@ -744,12 +758,18 @@ export function PieceActionsBar({
     if (!clear) {
       const parsed = parseOverlayMarkup(overlayMarkup);
       if (!parsed.ok) { setError({ message: parsed.error, detail: null }); return; }
-      override = { headline: parsed.headline, subheadline: overlaySub.trim() || null, emphasis: parsed.emphasis,
+      // 2026-10-23 — la bajada con su resaltado y sus tramos de sombra, y lo elegido por bloque.
+      const subP = parseSubMarkup(overlaySub);
+      if (!subP.ok) { setError({ message: subP.error, detail: null }); return; }
+      const estilo = textStylePayload(textDraft, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans });
+      override = { headline: parsed.headline, subheadline: subP.sub, emphasis: parsed.emphasis,
         ...(overlayRole && parsed.emphasis.length ? { emphasis_role: overlayRole } : {}),
         // 2026-10-20 — la sombra (toda o por tramos) y el color del filete: viajan sólo si se eligieron.
         ...(overlayShadow ? { text_shadow: overlayShadow } : {}),
         ...(parsed.shadow_spans.length ? { shadow_spans: parsed.shadow_spans } : {}),
         ...(overlayRule ? { rule_role: overlayRule } : {}),
+        // 2026-10-23 — lo elegido por bloque: viaja sólo si se eligió algo.
+        ...(estilo ? { text_style: estilo } : {}),
         ...(overlayIdentity ? { identity_role: overlayIdentity } : {}) };
     }
     setBusy('recompose_image'); setError(null); setRegenNote(null);
@@ -771,12 +791,18 @@ export function PieceActionsBar({
   /** 2026-10-22 — el texto de una lámina 2..N del carrusel. Sin generar: se recompone sobre su foto (0 USD). */
   const submitSlideText = async () => {
     if (!laminaElegida || !carouselView) return;
-    const p = slideTextPayload(laminaElegida, slideDraft);
+    // 2026-10-23 — la bajada se escribe con marcas (*resaltado*, ~sombra~): viaja el texto plano y los tramos van en `text_style`.
+    const subP = parseSubMarkup(slideDraft.subheadline);
+    if (!subP.ok) { setError({ message: subP.error, detail: null }); return; }
+    const p = slideTextPayload(laminaElegida, { ...slideDraft, subheadline: subP.sub ?? '' });
     if (!p.ok) { setError({ message: p.error, detail: null }); return; }
     // 2026-10-22 — la ubicación elegida viaja con el texto de la lámina (sólo si cambió).
     const lugar = textPlaceToSend(placeSel, laminaElegida.text_place);
-    const value = lugar ? { ...p.value, text_place: lugar } : p.value;
-    if (!p.changed && !lugar) { setError({ message: 'No hay cambios que guardar en esta lámina.', detail: null }); return; }
+    // 2026-10-23 — lo elegido por bloque, sólo si cambió; en la lámina el color de la palabra clave va en el bloque del titular.
+    const estilo = textStylePayload(slideStyle, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans }, { emphasis_role_in_block: true });
+    const estiloCambia = JSON.stringify(estilo ?? null) !== JSON.stringify(laminaElegida.text_style ?? null);
+    const value = { ...p.value, ...(lugar ? { text_place: lugar } : {}), ...(estiloCambia ? { text_style: estilo } : {}) };
+    if (!p.changed && !lugar && !estiloCambia) { setError({ message: 'No hay cambios que guardar en esta lámina.', detail: null }); return; }
     setBusy('recompose_image'); setError(null); setRegenNote(null);
     try {
       const r = await saveSlideText(token, piece.piece_id, value);
@@ -1192,9 +1218,10 @@ export function PieceActionsBar({
                 <input
                   value={slideDraft.subheadline}
                   onChange={(e) => setSlideDraft({ ...slideDraft, subheadline: e.target.value })}
-                  placeholder="Bajada (opcional)"
+                  placeholder="Bajada (opcional): *así* resalta, ~así~ invierte la sombra"
                   aria-label={`Bajada de la lámina ${laminaElegida.n}`}
-                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
+                  title={SUB_EDITOR_HELP}
+                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
                 />
                 <textarea
                   value={slideDraft.steps}
@@ -1204,6 +1231,27 @@ export function PieceActionsBar({
                   aria-label={`Pasos de la lámina ${laminaElegida.n}`}
                   className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
                 />
+                {/* 2026-10-23 — lo elegido por bloque en la lámina: el título (con el color de su palabra clave) y la bajada. */}
+                <TextBlockControls
+                  title="Título"
+                  draft={slideStyle.headline}
+                  onChange={(patch) => setSlideStyle(withBlock(slideStyle, 'headline', patch))}
+                  textColors={textColors?.options}
+                  textDefault={textColors?.headline_default}
+                  emphasisColors={emColors}
+                  shadowOpt={shadowOpt}
+                />
+                {!!slideDraft.subheadline.trim() && (
+                  <TextBlockControls
+                    title="Bajada"
+                    draft={slideStyle.sub}
+                    onChange={(patch) => setSlideStyle(withBlock(slideStyle, 'sub', patch))}
+                    textColors={textColors?.options}
+                    textDefault={textColors?.sub_default}
+                    emphasisColors={slideDraft.subheadline.includes('*') ? emColors : null}
+                    shadowOpt={shadowOpt}
+                  />
+                )}
               </div>
             )}
 
@@ -1220,9 +1268,10 @@ export function PieceActionsBar({
                 <input
                   value={overlaySub}
                   onChange={(e) => setOverlaySub(e.target.value)}
-                  placeholder="Bajada (opcional)"
+                  placeholder="Bajada (opcional): *así* resalta, ~así~ invierte la sombra"
                   aria-label="Bajada de la imagen"
-                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
+                  title={SUB_EDITOR_HELP}
+                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
                 />
                 {/* 2026-10-19 — el color del resaltado: sólo los que la marca declara para él. */}
                 {!!emColors?.length && (
@@ -1265,6 +1314,29 @@ export function PieceActionsBar({
                       </button>
                     ))}
                   </div>
+                )}
+                {/* 2026-10-23 — el TÍTULO: su color y el grosor de la sombra (el modo es el «Sombra» de arriba, que rige todo el texto). */}
+                <TextBlockControls
+                  title="Título"
+                  draft={{ ...textDraft.headline, shadow: overlayShadow }}
+                  onChange={(patch) => setTextDraft(withBlock(textDraft, 'headline', { ...patch, shadow: null }))}
+                  textColors={textColors?.options}
+                  textDefault={textColors?.headline_default}
+                  shadowOpt={shadowOpt}
+                  showShadowMode={false}
+                />
+                {/* 2026-10-23 — la BAJADA, aparte: su color, el de su resaltado, su sombra y su grosor. */}
+                {!!overlaySub.trim() && (
+                  <TextBlockControls
+                    title="Bajada"
+                    draft={textDraft.sub}
+                    onChange={(patch) => setTextDraft(withBlock(textDraft, 'sub', patch))}
+                    textColors={textColors?.options}
+                    textDefault={textColors?.sub_default}
+                    emphasisColors={overlaySub.includes('*') ? emColors : null}
+                    shadowOpt={shadowOpt}
+                    inheritLabel="Como el título"
+                  />
                 )}
                 {/* 2026-10-20 — el color de la franja bajo el titular: su color o los accent de la marca. */}
                 {!!ruleColors?.length && (

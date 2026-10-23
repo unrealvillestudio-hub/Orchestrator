@@ -62,6 +62,7 @@ import { requireReviewer, guardPiece, VISTAS_DE_PIEZA } from './_reviewScope.js'
 import { callEdgeFunction } from './_challengedShared.js';
 import { carouselTextViewOf, readSlideTextRequest } from './_carouselText.js';
 import { readTextPlaceRequest, textPlaceOfImage } from './_textPlace.js';
+import { textColorOptions } from './_textStyle.js';
 
 /**
  * Mismo techo que declara el motor (`SCENE_DIRECTIVE_MAX_CHARS` en content-run-stage). Se valida
@@ -199,6 +200,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           detail: 'el motor recompuso la imagen pero no aplicó el texto escrito: falta desplegar content-run-stage con overlay_override (unrlvl-iid-functions#411)',
         });
       }
+      // 2026-10-23 — lo elegido por bloque (color del texto, bajada, grosor de la sombra): el motor lo acusa sólo si el
+      // compositor que compuso sabe de él (ImageLab ≥ 1.16.0). Sin acuse, la pantalla diría que se aplicó algo que no.
+      const conEstilo = conTexto && !!body.overlay_override && typeof body.overlay_override === 'object'
+        && !!(body.overlay_override as Record<string, unknown>).text_style;
+      if (conEstilo && ef.body.text_style_applied !== true) {
+        return res.status(409).json({
+          error: 'text_style_unsupported',
+          detail: 'el motor recompuso la imagen pero no aplicó el color del texto, la bajada ni el grosor de la sombra: falta desplegar content-run-stage (unrlvl-iid-functions#469) o ImageLab con el compositor 1.16.0 (ImageLab#79)',
+        });
+      }
       // Lo mismo con la ubicación: un motor anterior recompondría en el lugar de siempre y respondería «ok».
       if (conUbicacion && ef.body.text_place_applied !== true) {
         return res.status(409).json({
@@ -334,6 +345,8 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
       // 2026-10-20 — la sombra de la marca y los colores posibles del filete (ImageLab ≥ 1.9.0).
       shadow: shadowOptionOf(tokens, brandId), rule_options: ruleColorOptions(tokens, palette, brandId),
       identity_options: identityColorOptions(tokens, palette, brandId),
+      // 2026-10-23 — los colores posibles del texto de cada bloque (ImageLab ≥ 1.16.0), con el de siempre de cada uno.
+      text_colors: textColorOptions(tokens, palette, brandId),
       // 2026-10-22 — las láminas del carrusel con su texto: el editor ofrece el selector de lámina con esto.
       carousel: carouselTextViewOf(piece),
       // 2026-10-22 — la ubicación del texto que la imagen tiene guardada: el selector abre con ella.
@@ -401,6 +414,13 @@ async function textoDeLaLamina(res: VercelResponse, piece: any, raw: unknown, ed
     return res.status(409).json({
       error: 'slides_text_unsupported',
       detail: 'el motor respondió sin aplicar el texto de la lámina: falta desplegar content-run-stage con slides_text',
+    });
+  }
+  // 2026-10-23 — lo elegido por bloque en la lámina, igual que en la imagen de la pieza.
+  if (pedido.value.text_style && ef.body.text_style_applied !== true) {
+    return res.status(409).json({
+      error: 'text_style_unsupported',
+      detail: 'el motor recompuso la lámina pero no aplicó el color del texto, la bajada ni el grosor de la sombra: falta desplegar content-run-stage (unrlvl-iid-functions#469) o ImageLab con el compositor 1.16.0 (ImageLab#79)',
     });
   }
   let html: string | null = null;
