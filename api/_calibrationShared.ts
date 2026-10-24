@@ -42,6 +42,7 @@ import { manualImagesOf, isCarouselPiece, CAROUSEL_FORMAT } from './_manualShare
 import { canonicalizeSignature } from './_manualShared.js';
 // El bloque que la pestaña «Manual» entrega para pegar: la vista de un canal manual pinta ESE texto.
 import { manualPasteOf } from './_manualShared.js';
+import { manualArticleOf, ARTICLE_FORMAT, type ManualPieceInput } from './_manualShared.js';
 
 export const BUCKET = 'unrlvl-media';
 // Calibración = gate admin (igual que las aprobaciones legacy).
@@ -1333,6 +1334,7 @@ function mediaBlockOf(piece: ContentPiece): string {
  * si el canal lo publica, y título y medios en el orden del canal.
  */
 function buildPublishedHtml(piece: ContentPiece, provider: string, layout: ChannelLayout): string {
+  if (layout.text === 'manual_paste' && String(piece.format ?? '') === ARTICLE_FORMAT) return buildManualArticleHtml(piece);
   const assets = piece.assets ?? {};
   const published = publishedTextOf(piece, provider) ?? { text: '', source: 'empty' as const };
   // El formato editorial lo pinta el MISMO publicador que publica el maestro (ver
@@ -1368,6 +1370,40 @@ function buildPublishedHtml(piece: ContentPiece, provider: string, layout: Chann
       ${showMaster
         ? `<details class="master"><summary>Ver el texto maestro (etapa anterior a la adaptación)</summary><div class="mastertext">${esc(stripInlineImageMarks(master))}</div></details>`
         : ''}`;
+  return artifactShell(piece, inner);
+}
+
+/**
+ * ARTÍCULO EN UN CANAL MANUAL (2026-10-24). Sam: «Por qué en el preview en Calibration no se ven las imagenes
+ * internas del artículo?». Causa medida: la vista pintaba el formato sólo para los proveedores de marcado
+ * (`PROVIDERS_WITH_INLINE_EMPHASIS`), y el de un canal manual no lo es, así que el artículo se veía plano, con los
+ * `##` a la vista y sin sus imágenes. Pero un artículo no se pega como un post: la pestaña Manual entrega título,
+ * portada y cuerpo por separado, y el cuerpo con su formato y sus imágenes (`manualArticleOf`). La vista muestra
+ * eso mismo, con la MISMA función, y el texto alternativo de la portada (o que falta).
+ *
+ * El eje es el FORMATO (`ARTICLE_FORMAT`) en un canal cuya regla es `manual_paste`; ni una red ni una marca.
+ */
+function buildManualArticleHtml(piece: ContentPiece): string {
+  const assets = piece.assets ?? {};
+  const art = manualArticleOf({ id: piece.id, brand_id: piece.brand_id, platform: piece.platform, format: piece.format,
+    assets: assets as ManualPieceInput['assets'] }, String(piece.platform ?? ''));
+  const media = art.cover_url
+    ? `<div class="media"><img src="${esc(art.cover_url)}" alt="${esc(art.cover_alt ?? '')}" /></div>`
+    : '<div class="media media--none">Sin portada</div>';
+  const alt = !art.cover_url ? ''
+    : art.cover_alt
+      ? `<div class="textsrc">Texto alternativo de la portada: ${esc(art.cover_alt)}</div>`
+      : '<div class="textsrc textsrc--warn">⚠ La portada todavía no tiene texto alternativo.</div>';
+  const title = art.title
+    ? `<h1 class="title">${esc(art.title)}</h1>`
+    : '<div class="textsrc textsrc--warn">⚠ Sin título: el artículo publica uno y la pieza no lo trae.</div>';
+  const cuerpo = art.body_markdown ? editorialToHtml(art.body_markdown, esc, assets.inline_images) : '';
+  const inner = `    ${media}
+    <div class="body">
+      ${alt}
+      ${title}
+      <div class="text" data-rich>${cuerpo}</div>
+      ${cuerpo ? '' : `<div class="textsrc textsrc--warn">${PUBLISHED_SOURCE_WARNING.empty}</div>`}`;
   return artifactShell(piece, inner);
 }
 

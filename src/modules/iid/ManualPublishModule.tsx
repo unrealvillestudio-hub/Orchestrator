@@ -153,7 +153,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 }
 
 /**
- * Copia el cuerpo con formato: `text/html` (el editor conserva subtítulos y negritas) y `text/plain`
+ * Copia el cuerpo con formato: `text/html` (para que el editor conserve subtítulos, negritas, cita e imágenes) y `text/plain`
  * en el mismo elemento. Si el navegador no tiene `ClipboardItem` o lo rechaza, copia el texto plano.
  */
 function CopyRichButton({ html, text, label }: { html: string; text: string; label: string }) {
@@ -174,7 +174,7 @@ function CopyRichButton({ html, text, label }: { html: string; text: string; lab
     <button
       onClick={copiar}
       className={cn(BTN, ok ? BTN_OK : BTN_IDLE)}
-      title="Copia el cuerpo con subtítulos y negritas; si el navegador no lo permite, como texto plano"
+      title="Copia el cuerpo con su formato (subtítulos, negritas, cita e imágenes); si el navegador no lo permite, como texto plano"
     >
       {ok ? <Check size={13} /> : <Copy size={13} />}
       {ok ? 'Copiado' : label}
@@ -251,85 +251,124 @@ function DownloadButton({ url, base, label = 'Descargar' }: { url: string; base:
   );
 }
 
-/** Rótulo de cada bloque del artículo. */
-function BlockLabel({ children }: { children: React.ReactNode }) {
-  return <p className="text-[10px] font-mono uppercase tracking-wider text-zinc-500">{children}</p>;
+/** Un paso del artículo: número, qué se hace y lo que hace falta para hacerlo. */
+function Paso({ n, titulo, children }: { n: number; titulo: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[11px] font-semibold text-zinc-300">
+        <span className="inline-flex items-center justify-center w-5 h-5 mr-1.5 rounded-full bg-zinc-800 text-zinc-200 text-[10px] font-mono">{n}</span>
+        {titulo}
+      </p>
+      <div className="pl-6 space-y-1.5">{children}</div>
+    </div>
+  );
 }
 
-/** Artículo: tres bloques —Título, Portada, Cuerpo—, cada uno con su botón. */
+/** El texto alternativo de una imagen, a la vista y con su botón; si no lo hay, dicho. */
+function AltLine({ alt, falta }: { alt: string | null | undefined; falta: string }) {
+  return alt ? (
+    <div className="space-y-1">
+      <p className="text-[11px] text-zinc-400 break-words"><span className="font-mono text-zinc-500">Texto alternativo · </span>{alt}</p>
+      <CopyButton text={alt} label="Copiar texto alternativo" />
+    </div>
+  ) : (
+    <p className="text-[11px] font-mono text-amber-300/80">{falta}</p>
+  );
+}
+
+/**
+ * Artículo, en pasos (Sam, 2026-10-24: «muy sencillo para el operador mediante pasos muy sencillos y completos…
+ * copiar y pegar, el body con sus imágenes y enrichments del texto. Solo agregar el alt»). El título, la portada y
+ * el cuerpo van por separado porque el editor de artículos los pide en campos distintos. El cuerpo se copia con sus
+ * subtítulos, negritas, citas e imágenes; si el editor no trae alguna imagen al pegar, la tarjeta da el respaldo.
+ */
 function ArticleBlocks({ article, brandId, pieceId }: { article: ManualArticle; brandId: string; pieceId: string }) {
+  const imagenes = article.images ?? [];
+  const conImagenes = imagenes.length > 0;
   return (
     <div className="space-y-4">
-      <div className="space-y-1.5">
-        <BlockLabel>Título</BlockLabel>
+      <Paso n={1} titulo="Título: cópialo y pégalo en el título del artículo.">
         {article.title ? (
           <p className="text-[15px] font-semibold text-zinc-100 bg-[#050508] border border-zinc-800 rounded-xl px-3 py-2 break-words">{article.title}</p>
         ) : (
           <p className="text-[11px] font-mono text-amber-300/80">Este artículo no tiene título.</p>
         )}
         {article.title && <CopyButton text={article.title} label="Copiar título" />}
-      </div>
+      </Paso>
 
-      <div className="space-y-1.5">
-        <BlockLabel>Portada</BlockLabel>
+      <Paso n={2} titulo="Portada: descárgala, súbela como imagen de portada y pega su texto alternativo.">
         {article.cover_url ? (
           <>
             <div className="w-full max-w-xl aspect-video bg-black rounded-lg border border-zinc-800 overflow-hidden">
-              <img src={article.cover_url} alt="Portada del artículo" loading="lazy" className="w-full h-full object-contain" />
+              <img src={article.cover_url} alt={article.cover_alt || 'Portada del artículo'} loading="lazy" className="w-full h-full object-contain" />
             </div>
             <DownloadButton url={article.cover_url} base={fileBaseOf(brandId, pieceId, 'portada')} />
+            <AltLine alt={article.cover_alt} falta="La portada todavía no tiene texto alternativo: el carril lo escribe solo en unos minutos. Recarga la lista." />
           </>
         ) : (
           <p className="text-[11px] font-mono text-amber-300/80">Este artículo no tiene portada.</p>
         )}
-      </div>
+      </Paso>
 
-      <div className="space-y-1.5">
-        <BlockLabel>Cuerpo</BlockLabel>
-        {/* `body_html` lo arma el server escapando TODO antes de interpretar `##`, `**` y la URL del
-            original (`api/_manualShared.ts → articleBodyHtml`, con sus pruebas de escape). */}
+      <Paso n={3} titulo={conImagenes
+        ? 'Cuerpo: cópialo y pégalo en el artículo. Lleva los subtítulos, las negritas, la cita y las imágenes en su sitio.'
+        : 'Cuerpo: cópialo y pégalo en el artículo. Lleva los subtítulos, las negritas y la cita.'}>
+        {/* `body_html` lo arma el server escapando TODO antes de interpretar `##`, `**`, `>`, las imágenes y la URL
+            del original (`api/_manualShared.ts → articleBodyHtml`, con sus pruebas de escape). */}
         <div
           className="font-body text-[13px] leading-relaxed text-zinc-200 bg-[#050508] border border-zinc-800 rounded-xl p-3 max-h-[60vh] overflow-y-auto break-words
             [&_h2]:text-[15px] [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_h2]:mt-4 [&_h2]:mb-2 [&_h2:first-child]:mt-0
-            [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:text-zinc-50 [&_a]:underline [&_a]:text-zinc-300 [&_a:hover]:text-zinc-100"
+            [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:text-zinc-50 [&_a]:underline [&_a]:text-zinc-300 [&_a:hover]:text-zinc-100
+            [&_blockquote]:border-l-2 [&_blockquote]:border-zinc-600 [&_blockquote]:pl-3 [&_blockquote]:my-3 [&_blockquote]:italic [&_blockquote]:text-zinc-300
+            [&_img]:w-full [&_img]:max-w-xl [&_img]:rounded-lg [&_img]:border [&_img]:border-zinc-800"
           dangerouslySetInnerHTML={{ __html: article.body_html || '—' }}
         />
         <CopyRichButton html={article.body_html} text={article.body_text} label="Copiar cuerpo" />
-      </div>
+      </Paso>
 
-      {(article.images?.length ?? 0) > 0 && (
-        <div className="space-y-1.5">
-          <BlockLabel>Imágenes del cuerpo</BlockLabel>
-          <p className="text-[11px] font-mono text-zinc-500">
-            En el cuerpo pegado, cada «[Imagen N: …]» marca su lugar: bórralo e inserta ahí la imagen con el botón + del editor.
-          </p>
+      {conImagenes && (
+        <Paso n={4} titulo="Imágenes del cuerpo: en el artículo, selecciona cada una y pega su texto alternativo.">
           <div className="grid gap-3 sm:grid-cols-2">
-            {article.images!.map((im) => (
+            {imagenes.map((im) => (
               <div key={im.n} className="space-y-1.5">
                 <div className="w-full aspect-video bg-black rounded-lg border border-zinc-800 overflow-hidden">
                   <img src={im.url} alt={im.alt || `Imagen ${im.n} del cuerpo`} loading="lazy" className="w-full h-full object-contain" />
                 </div>
-                <p className="text-[11px] text-zinc-400 break-words">
-                  <span className="font-mono text-zinc-500">Imagen {im.n}</span>{im.alt ? ` · ${im.alt}` : ''}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <DownloadButton url={im.url} base={fileBaseOf(brandId, pieceId, `imagen-${im.n}`)} />
-                  {im.alt && <CopyButton text={im.alt} label="Copiar texto alternativo" />}
-                </div>
+                <p className="text-[10px] font-mono text-zinc-500">Imagen {im.n}</p>
+                <AltLine alt={im.alt} falta="Esta imagen no tiene texto alternativo." />
               </div>
             ))}
           </div>
-        </div>
+          <details className="text-[11px] text-zinc-500">
+            <summary className="cursor-pointer hover:text-zinc-300">¿Alguna imagen no apareció al pegar?</summary>
+            <div className="mt-2 space-y-2">
+              <p>
+                Copia el cuerpo con marcas: cada «[Imagen N: …]» dice dónde va cada imagen. Pégalo, borra la marca,
+                inserta ahí la imagen descargada y pega su texto alternativo.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {article.body_html_marked && (
+                  <CopyRichButton html={article.body_html_marked} text={article.body_text} label="Copiar cuerpo con marcas" />
+                )}
+                {imagenes.map((im) => (
+                  <DownloadButton key={im.n} url={im.url} base={fileBaseOf(brandId, pieceId, `imagen-${im.n}`)} label={`Descargar imagen ${im.n}`} />
+                ))}
+              </div>
+            </div>
+          </details>
+        </Paso>
       )}
 
-      {article.source_url && (
-        <p className="text-[11px] font-mono text-zinc-500 break-all">
-          Original:{' '}
-          <a href={article.source_url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-200 underline">
-            {article.source_url}
-          </a>
-        </p>
-      )}
+      <Paso n={conImagenes ? 5 : 4} titulo="Publica el artículo, copia su link y pégalo abajo.">
+        {article.source_url && (
+          <p className="text-[11px] font-mono text-zinc-500 break-all">
+            El artículo enlaza al original:{' '}
+            <a href={article.source_url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-zinc-200 underline">
+              {article.source_url}
+            </a>
+          </p>
+        )}
+      </Paso>
     </div>
   );
 }

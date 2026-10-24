@@ -55,7 +55,8 @@ export interface ManualPieceInput {
   assets?: {
     copy?: { title?: string | null; aife_filtered?: string | null; raw?: string | null } | null;
     social?: { adapted?: unknown } | null;
-    image?: { url?: string | null } | null;
+    /** `alt`/`alt_for`: el texto alternativo de la portada y la foto que describe (carril, bloque COVER-ALT, 2026-10-24). */
+    image?: { url?: string | null; clean_url?: string | null; alt?: string | null; alt_for?: string | null } | null;
     carousel?: { slides?: Array<{ n?: number | null; url?: string | null }> | null } | null;
     builder_meta?: { signature_closer?: { text?: string | null } | null } | null;
     /** Sólo en piezas derivadas de otra (p. ej. un artículo hecho a partir de un post del blog). */
@@ -188,7 +189,11 @@ export const ARTICLE_FORMAT = 'article';
  *   cover_url      — la portada 16:9 compuesta; `null` si la pieza no tiene una URL http(s).
  *   body_markdown  — el cuerpo (`markdown_min`) sin título, con la firma canónica una vez al final.
  *   body_html      — el mismo cuerpo en HTML mínimo y SEGURO (ver `articleBodyHtml`): es lo que el
- *                    editor conserva como subtítulos al pegar.
+ *                    editor conserva como subtítulos al pegar. Desde el 2026-10-24 lleva las imágenes del
+ *                    cuerpo en su sitio (`<img>` con su alt) y las citas (`<blockquote>`).
+ *   body_html_marked — el mismo HTML con cada imagen dicha en texto («[Imagen N: alt]»): el respaldo si el
+ *                    editor no trae las imágenes al pegar, para insertarlas a mano en su sitio.
+ *   cover_alt      — el texto alternativo de la portada, si el carril ya lo escribió para ESTA foto.
  *   body_text      — el mismo cuerpo en texto plano, para portapapeles sin HTML.
  *   source_url     — el post original del blog; `null` si no hay un enlace http(s) válido.
  */
@@ -197,8 +202,10 @@ export interface ManualArticle {
   cover_url: string | null;
   body_markdown: string;
   body_html: string;
+  body_html_marked: string;
   body_text: string;
   source_url: string | null;
+  cover_alt: string | null;
   /** Las imágenes del cuerpo, en el orden de sus marcas, para insertarlas a mano en el editor (2026-10-23). */
   images: ManualArticleImage[];
 }
@@ -213,6 +220,23 @@ const MARCA_IMAGEN = /^!\[img-(\d+)\]$/u;
 export function imagePlaceholder(n: number, alt: string | null | undefined): string {
   const a = String(alt ?? '').trim();
   return a ? `[Imagen ${n}: ${a}]` : `[Imagen ${n}]`;
+}
+
+/**
+ * El texto alternativo de la portada, si el carril ya lo escribió para ESTA foto; si no, `null`. COPIA de
+ * `coverAltImageUrl` + `coverAltOf` del bloque COVER-ALT de `unrlvl-iid-functions/content-run-stage` (2026-10-24):
+ * el alt describe la foto limpia (`clean_url`; sin ella, `url`) y sólo vale si `alt_for` es esa foto. Si una foto
+ * nueva lo invalidó, la pestaña dice que falta en vez de ofrecer el de otra foto. Si la regla cambia allá, cambia aquí.
+ */
+export function coverAltOf(image: unknown): string | null {
+  const im = (image && typeof image === 'object') ? image as Record<string, unknown> : {};
+  let url: string | null = null;
+  for (const k of ['clean_url', 'url']) {
+    const v = typeof im[k] === 'string' ? String(im[k]).trim() : '';
+    if (/^https:\/\//iu.test(v)) { url = v; break; }
+  }
+  const alt = typeof im.alt === 'string' ? im.alt.trim() : '';
+  return url && alt && im.alt_for === url ? alt : null;
 }
 
 /**
@@ -235,6 +259,8 @@ export function articleImagesOf(md: string, inline: NonNullable<ManualPieceInput
 }
 
 const SUBTITULO = /^##\s+(.*)$/u;
+// Una cita: un párrafo cuyas líneas empiezan TODAS con `>`. Misma regla que `blocksOf` de `_calibrationShared.ts`.
+const LINEA_DE_CITA = /^>\s?/u;
 // Un enlace termina en el primer espacio o comilla; la puntuación de cierre de frase no es parte de él.
 const URL_SUELTA = /https?:\/\/[^\s<>"'`]+/gu;
 const PUNTUACION_FINAL = /[.,;:!?)\]]+$/u;
@@ -278,19 +304,35 @@ function parrafosDe(md: string): string[] {
 }
 
 /**
- * `markdown_min` → HTML mínimo y seguro. Primero se escapa todo; después, y sólo sobre lo escapado:
- * `## x` → `<h2>`, `**x**` → `<strong>`, párrafo → `<p>` (saltos simples → `<br>`) y, en el párrafo
- * indicado por `parrafoEnlace` (el del post original), las URL sueltas → `<a href>`. Nada más.
+ * Cómo sale cada marca de imagen del cuerpo en el HTML:
+ *   'imagen' — la imagen en su sitio, `<img>` con su URL http(s) y su alt; una marca sin imagen no deja nada,
+ *              como en el publicador (Sam, 2026-10-24: «copiar y pegar, el body con sus imágenes»);
+ *   'marca'  — su lugar dicho en texto («[Imagen N: alt]»), el respaldo para insertarla a mano.
  */
-export function articleBodyHtml(md: string, parrafoEnlace: number | null = null, imagenes: ManualArticleImage[] = []): string {
+export type ArticleImageMode = 'imagen' | 'marca';
+
+/**
+ * `markdown_min` → HTML mínimo y seguro. Primero se escapa todo; después, y sólo sobre lo escapado:
+ * `## x` → `<h2>`, `**x**` → `<strong>`, una cita (`> x`) → `<blockquote>`, párrafo → `<p>` (saltos simples →
+ * `<br>`), cada marca de imagen según `modo` y, en el párrafo indicado por `parrafoEnlace` (el del post original),
+ * las URL sueltas → `<a href>`. Nada más.
+ */
+export function articleBodyHtml(md: string, parrafoEnlace: number | null = null, imagenes: ManualArticleImage[] = [],
+  modo: ArticleImageMode = 'imagen'): string {
   return parrafosDe(md).map((p, i) => {
-    // 2026-10-23 — la marca de una imagen del cuerpo es su lugar, dicho en texto (escapado como todo).
     const marca = MARCA_IMAGEN.exec(p);
     if (marca) {
       const n = Number(marca[1]);
-      return `<p><em>${escapeHtml(imagePlaceholder(n, imagenes.find((x) => x.n === n)?.alt))}</em></p>`;
+      const im = imagenes.find((x) => x.n === n);
+      if (modo === 'imagen') return im ? `<p><img src="${escapeHtml(im.url)}" alt="${escapeHtml(im.alt)}"></p>` : '';
+      // 2026-10-23 — la marca de una imagen del cuerpo es su lugar, dicho en texto (escapado como todo).
+      return `<p><em>${escapeHtml(imagePlaceholder(n, im?.alt))}</em></p>`;
     }
     const enlazar = i === parrafoEnlace;
+    const lineasDeCita = p.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lineasDeCita.length && lineasDeCita.every((l) => LINEA_DE_CITA.test(l))) {
+      return `<blockquote>${lineasDeCita.map((l) => lineaHtml(l.replace(LINEA_DE_CITA, ''), enlazar)).join('<br>')}</blockquote>`;
+    }
     const bloques: string[] = [];
     let lineas: string[] = [];
     const cerrar = () => {
@@ -307,13 +349,13 @@ export function articleBodyHtml(md: string, parrafoEnlace: number | null = null,
   }).join('');
 }
 
-/** `markdown_min` → texto plano: sin `## ` al inicio de línea ni marcas de negrita; cada imagen, su lugar en texto. */
+/** `markdown_min` → texto plano: sin `## ` ni `> ` al inicio de línea ni marcas de negrita; cada imagen, su lugar en texto. */
 export function articleBodyText(md: string, imagenes: ManualArticleImage[] = []): string {
   return md.split('\n')
     .map((l) => {
       const marca = MARCA_IMAGEN.exec(l.trim());
       if (marca) { const n = Number(marca[1]); return imagePlaceholder(n, imagenes.find((x) => x.n === n)?.alt); }
-      return l.replace(/^(\s*)##\s+/u, '$1').replace(/\*\*(.+?)\*\*/gu, '$1');
+      return l.replace(/^(\s*)##\s+/u, '$1').replace(/^(\s*)>\s?/u, '$1').replace(/\*\*(.+?)\*\*/gu, '$1');
     })
     .join('\n');
 }
@@ -342,9 +384,11 @@ export function manualArticleOf(piece: ManualPieceInput, platformKey: string): M
     title: String(assets.copy?.title ?? '').trim(),
     cover_url: cleanPostLink(portada),
     body_markdown: cuerpo,
-    body_html: articleBodyHtml(cuerpo, parrafoEnlace, images),
+    body_html: articleBodyHtml(cuerpo, parrafoEnlace, images, 'imagen'),
+    body_html_marked: articleBodyHtml(cuerpo, parrafoEnlace, images, 'marca'),
     body_text: articleBodyText(cuerpo, images),
     source_url: cleanPostLink(assets.source_piece?.post_url) ?? enlaceDelCuerpo,
+    cover_alt: coverAltOf(assets.image),
     images,
   };
 }
