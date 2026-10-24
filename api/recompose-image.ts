@@ -62,6 +62,7 @@ import { requireReviewer, guardPiece, VISTAS_DE_PIEZA } from './_reviewScope.js'
 import { callEdgeFunction } from './_challengedShared.js';
 import { carouselTextViewOf, readSlideTextRequest } from './_carouselText.js';
 import { readTextPlaceRequest, textPlaceOfImage } from './_textPlace.js';
+import { readTextColumnRequest, textColumnOfImage } from './_textColumn.js';
 import { textColorOptions } from './_textStyle.js';
 
 /**
@@ -100,6 +101,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     slide_text?: unknown;
     // 2026-10-22 — la ubicación del texto de la imagen: 'top' | 'bottom' | 'auto' | null (ver `_textPlace.ts`).
     text_place?: unknown;
+    // 2026-10-24 — la columna del texto de la imagen: 'left' | 'center' | 'right' | null (ver `_textColumn.ts`).
+    text_column?: unknown;
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
@@ -164,7 +167,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const conUbicacion = Object.prototype.hasOwnProperty.call(body, 'text_place');
     const ubicacion = conUbicacion ? readTextPlaceRequest(body.text_place) : null;
     if (ubicacion && !ubicacion.ok) return res.status(400).json({ error: 'invalid text_place', detail: ubicacion.error });
-    if (tieneImagen && !directive && !conTexto && !conUbicacion) {
+    // 2026-10-24 — LA COLUMNA DEL TEXTO: el mismo trato que la ubicación.
+    const conColumna = Object.prototype.hasOwnProperty.call(body, 'text_column');
+    const columna = conColumna ? readTextColumnRequest(body.text_column) : null;
+    if (columna && !columna.ok) return res.status(400).json({ error: 'invalid text_column', detail: columna.error });
+    if (tieneImagen && !directive && !conTexto && !conUbicacion && !conColumna) {
       return res.status(400).json({
         error: 'visual_directive required',
         detail: 'regenerar sin directriz devuelve el mismo defecto y cobra una generación por no cambiar nada. '
@@ -175,7 +182,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 2026-10-19 — EL TEXTO DE LA IMAGEN, SIN TOCAR LA ESCENA. Con `overlay_override` en el cuerpo no hay
     // directriz ni generación: se recompone sobre la escena limpia que ya existe (0 USD). El motor valida el
     // texto antes de componer; aquí sólo se exige que haya una imagen sobre la que escribir.
-    if (conTexto || conUbicacion) {
+    if (conTexto || conUbicacion || conColumna) {
       if (!tieneImagen) {
         return res.status(409).json({ error: 'no_image', detail: 'la pieza no tiene imagen: primero hay que generarla, después se escribe su texto' });
       }
@@ -184,6 +191,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Cada clave viaja sólo si se pidió: su ausencia no toca lo guardado en la pieza.
         ...(conTexto ? { overlay_override: body.overlay_override ?? null } : {}),
         ...(ubicacion && ubicacion.ok ? { text_place: ubicacion.value } : {}),
+        ...(columna && columna.ok ? { text_column: columna.value } : {}),
         edit_reason: editReason || null, edited_by: session.sub || 'sam',
       });
       if (!ef.body?.ok) {
@@ -217,6 +225,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           detail: 'el motor recompuso la imagen pero no aplicó la ubicación del texto: falta desplegar content-run-stage con text_place',
         });
       }
+      // 2026-10-24 — la columna, igual: el motor la acusa sólo si el compositor que compuso sabe de ella (ImageLab ≥ 1.17.0).
+      if (conColumna && ef.body.text_column_applied !== true) {
+        return res.status(409).json({
+          error: 'text_column_unsupported',
+          detail: 'el motor recompuso la imagen pero no aplicó la columna del texto: falta desplegar content-run-stage con text_column o ImageLab con el compositor 1.17.0',
+        });
+      }
       let html: string | null = null;
       let artifact_url: string | null = null;
       try { const art = await ensureArtifact(pieceId); html = art.html; artifact_url = art.artifact_url; }
@@ -230,6 +245,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         carousel_recomposed: ef.body.carousel_recomposed ?? null,
         // 2026-10-22 — la ubicación que quedó guardada (o null: la de la marca).
         text_place: ef.body.text_place ?? null,
+        // 2026-10-24 — la columna que quedó guardada (o null: la de la marca).
+        text_column: ef.body.text_column ?? null,
         artifact_url, html, artifact_refreshed: html !== null,
       });
     }
@@ -351,6 +368,8 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
       carousel: carouselTextViewOf(piece),
       // 2026-10-22 — la ubicación del texto que la imagen tiene guardada: el selector abre con ella.
       text_place: textPlaceOfImage(piece.assets),
+      // 2026-10-24 — la columna del texto guardada en la imagen.
+      text_column: textColumnOfImage(piece.assets),
     });
   } catch (err) {
     console.error(`[recompose-image] GET colores ${pieceId}: ${String(err)}`);
@@ -417,6 +436,13 @@ async function textoDeLaLamina(res: VercelResponse, piece: any, raw: unknown, ed
     });
   }
   // 2026-10-23 — lo elegido por bloque en la lámina, igual que en la imagen de la pieza.
+  // 2026-10-24 — la columna de la lámina, igual que en la imagen de la pieza.
+  if ('text_column' in pedido.value && ef.body.text_column_applied !== true) {
+    return res.status(409).json({
+      error: 'text_column_unsupported',
+      detail: 'el motor recompuso la lámina pero no aplicó la columna del texto: falta desplegar content-run-stage con text_column o ImageLab con el compositor 1.17.0',
+    });
+  }
   if (pedido.value.text_style && ef.body.text_style_applied !== true) {
     return res.status(409).json({
       error: 'text_style_unsupported',

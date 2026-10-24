@@ -18,6 +18,7 @@
 
 import { CAROUSEL_FORMAT } from './_manualShared.js';
 import { readTextPlaceRequest, storedTextPlace, type TextPlace } from './_textPlace.js';
+import { readTextColumnRequest, storedTextColumn, type TextColumn } from './_textColumn.js';
 import { textStyleOf, type TextStyle } from './_textStyleShape.js';
 
 /** El mismo techo que el motor (`CAROUSEL_HEADLINE_MAX`, `CAROUSEL_EYEBROW_MAX`, `CAROUSEL_SUBHEADLINE_MAX`). */
@@ -41,6 +42,8 @@ export interface CarouselSlideTextView {
   url: string | null;
   /** 2026-10-22 — la ubicación del texto guardada en la lámina (`_textPlace.ts`); la portada, la de la imagen. */
   text_place: TextPlace | null;
+  /** 2026-10-24 — la columna del texto guardada en la lámina (`_textColumn.ts`); la portada, la de la imagen. */
+  text_column: TextColumn | null;
   /** 2026-10-23 — lo elegido por bloque (`_textStyle.ts`). Sólo existe si hay algo elegido; la portada, el de la imagen. */
   text_style?: TextStyle;
 }
@@ -79,6 +82,7 @@ export function carouselTextViewOf(piece: { format?: string | null; assets?: any
       url: typeof s.url === 'string' ? s.url : null,
       // La portada es la imagen de la pieza: su fila es la de `image.text_place`.
       text_place: storedTextPlace(i === 0 ? piece.assets?.image?.text_place : s.text_place),
+      text_column: storedTextColumn(i === 0 ? piece.assets?.image?.text_column : s.text_column),
       ...withTextStyle(i === 0 ? piece.assets?.image?.overlay_override?.text_style : s.text_style),
     })),
   };
@@ -110,6 +114,8 @@ export interface SlideTextOut {
   n: number; headline?: string; subheadline?: string | null; eyebrow?: string | null; steps?: SlideStep[] | null;
   /** 2026-10-22 — la ubicación del texto de la lámina (`_textPlace.ts`). Puede viajar sola. */
   text_place?: TextPlace | null;
+  /** 2026-10-24 — la columna del texto de la lámina (`_textColumn.ts`). Puede viajar sola. */
+  text_column?: TextColumn | null;
   /** 2026-10-23 — lo elegido por bloque (`_textStyle.ts`); `null` lo borra. Puede viajar solo. */
   text_style?: TextStyle | null;
 }
@@ -152,7 +158,7 @@ export function readSlideTextRequest(raw: unknown): { ok: true; value: SlideText
   const n = Number(o.n);
   if (!Number.isInteger(n) || n < 1) return { ok: false, error: 'slide_text.n debe ser el número entero de la lámina' };
   if (n === 1) return { ok: false, error: 'la lámina 1 es la portada: su texto se corrige con overlay_override' };
-  const permitidos = ['n', 'headline', 'subheadline', 'eyebrow', 'steps', 'text_place', 'text_style'];
+  const permitidos = ['n', 'headline', 'subheadline', 'eyebrow', 'steps', 'text_place', 'text_column', 'text_style'];
   const ajenos = Object.keys(o).filter((k) => !permitidos.includes(k));
   if (ajenos.length) return { ok: false, error: `slide_text trae campos que esta vía no corrige: ${ajenos.join(', ')}` };
   const value: SlideTextOut = { n };
@@ -164,6 +170,11 @@ export function readSlideTextRequest(raw: unknown): { ok: true; value: SlideText
     const tp = readTextPlaceRequest(o.text_place);
     if (!tp.ok) return { ok: false, error: `slide_text.${tp.error}` };
     value.text_place = tp.value;
+  }
+  if ('text_column' in o) {
+    const tc = readTextColumnRequest(o.text_column);
+    if (!tc.ok) return { ok: false, error: `slide_text.${tc.error}` };
+    value.text_column = tc.value;
   }
   // 2026-10-23 — lo elegido por bloque: aquí sólo que sea un objeto; la forma y los tramos los valida el motor.
   if ('text_style' in o) {
@@ -185,6 +196,7 @@ export function carouselViewAfterSlideSave(view: CarouselTextView, out: SlideTex
       ...('eyebrow' in out ? { eyebrow: out.eyebrow ?? null } : {}),
       ...('steps' in out ? { steps: out.steps ?? [] } : {}),
       ...('text_place' in out ? { text_place: out.text_place ?? null } : {}),
+      ...('text_column' in out ? { text_column: out.text_column ?? null } : {}),
       ...('text_style' in out ? { text_style: out.text_style ?? undefined } : {}),
     })),
   };
