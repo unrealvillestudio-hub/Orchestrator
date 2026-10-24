@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   canonicalizeSignature, manualTextOf, manualImagesOf, buildManualItems, manualChannelKey,
   cleanPostLink, manualDrainRow, manualPasteOf,
-  ARTICLE_FORMAT, CAROUSEL_FORMAT, manualArticleOf, articleBodyHtml, articleBodyText, articleImagesOf, imagePlaceholder,
+  ARTICLE_FORMAT, CAROUSEL_FORMAT, manualArticleOf, articleBodyHtml, articleBodyText, articleImagesOf, imagePlaceholder, coverAltOf,
   type ManualPieceInput, type ManualSlotRow,
 } from './_manualShared.js';
 
@@ -193,6 +193,24 @@ describe('artículo — título, portada y cuerpo por separado', () => {
       .toBe('<p>Original: <a href="https://b.example/y">https://b.example/y</a>.</p>');
   });
 
+  it('2026-10-24 · la cita sale como cita en el HTML y sin `> ` en el texto plano', () => {
+    expect(articleBodyHtml('Antes.\n\n> Lo que **no** se ve\n> también cuenta.\n\nDespués.'))
+      .toBe('<p>Antes.</p><blockquote>Lo que <strong>no</strong> se ve<br>también cuenta.</blockquote><p>Después.</p>');
+    expect(articleBodyHtml('> <script>x</script>')).toBe('<blockquote>&lt;script&gt;x&lt;/script&gt;</blockquote>');
+    expect(articleBodyHtml('Uno > dos')).toBe('<p>Uno &gt; dos</p>');
+    expect(articleBodyText('> Cita.\n\nTexto.')).toBe('Cita.\n\nTexto.');
+  });
+
+  it('2026-10-24 · el alt de la portada: sólo el escrito para ESTA foto', () => {
+    const conAlt = (image: Record<string, unknown>) => manualArticleOf(piece({ format: ARTICLE_FORMAT }, { ...assets, image: image as never }), MANUAL);
+    const LIMPIA = 'https://storage.example/limpia.png';
+    expect(conAlt({ url: 'https://storage.example/portada.png', clean_url: LIMPIA, alt: ' Un invernadero ', alt_for: LIMPIA }).cover_alt).toBe('Un invernadero');
+    expect(conAlt({ url: 'https://storage.example/portada.png', clean_url: 'https://storage.example/otra.png', alt: 'Viejo', alt_for: LIMPIA }).cover_alt).toBeNull();
+    expect(conAlt({ url: 'https://storage.example/portada.png' }).cover_alt).toBeNull();
+    expect(coverAltOf({ url: 'https://s/p.png', alt: 'x', alt_for: 'https://s/p.png' })).toBe('x');
+    expect(coverAltOf({ url: 'http://s/p.png', alt: 'x', alt_for: 'http://s/p.png' })).toBeNull();
+  });
+
   it('texto plano: sin `## ` ni marcas de negrita', () => {
     expect(articleBodyText('## Sub\n\nTexto **fuerte**.')).toBe('Sub\n\nTexto fuerte.');
     expect(manualArticleOf(art(), MANUAL).body_text).not.toMatch(/##|\*\*/u);
@@ -224,12 +242,26 @@ describe('artículo — título, portada y cuerpo por separado', () => {
       ]);
     });
 
-    it('HTML y texto: cada marca es su lugar en texto («[Imagen N: alt]»), escapado; nunca la marca cruda', () => {
+    it('2026-10-24 · el HTML lleva cada imagen en su sitio, con su alt escapado; nunca la marca cruda', () => {
       const a = manualArticleOf(conImg(imgs), MANUAL);
-      expect(a.body_html).toContain('<p><em>[Imagen 1: La primera &lt;b&gt;]</em></p><h2>Dos</h2>');
+      expect(a.body_html).toContain('<p>Uno.</p><p><img src="https://storage.example/1.webp" alt="La primera &lt;b&gt;"></p><h2>Dos</h2>');
+      expect(a.body_html).toContain('<p><img src="https://storage.example/2.webp" alt="La segunda"></p><h2>Tres</h2>');
       expect(a.body_html).not.toContain('![img-');
+      expect(a.body_html).not.toContain('[Imagen');
+    });
+
+    it('el respaldo (HTML con marcas) y el texto plano dicen el lugar de cada imagen («[Imagen N: alt]»)', () => {
+      const a = manualArticleOf(conImg(imgs), MANUAL);
+      expect(a.body_html_marked).toContain('<p><em>[Imagen 1: La primera &lt;b&gt;]</em></p><h2>Dos</h2>');
+      expect(a.body_html_marked).not.toContain('<img');
       expect(a.body_text).toContain('[Imagen 2: La segunda]');
       expect(a.body_text).not.toContain('![img-');
+    });
+
+    it('una marca sin imagen no deja nada en el HTML, como en el publicador', () => {
+      const a = manualArticleOf(conImg([imgs[0]]), MANUAL);
+      expect(a.body_html).toContain('<p>Uno.</p><h2>Dos</h2>');
+      expect(a.body_html_marked).toContain('<p><em>[Imagen 1]</em></p>');
     });
 
     it('una marca sin imagen, con imagen no ok o con URL no http(s): su lugar sin alt y nada que descargar', () => {

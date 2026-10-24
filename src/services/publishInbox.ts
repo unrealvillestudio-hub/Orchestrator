@@ -271,10 +271,14 @@ export interface ManualArticle {
   title: string;
   cover_url: string | null;
   body_markdown: string;
-  /** HTML mínimo y escapado en el server: sólo `<p>`, `<br>`, `<h2>`, `<strong>` y `<a href>` http(s). */
+  /** HTML mínimo y escapado en el server: `<p>`, `<br>`, `<h2>`, `<strong>`, `<blockquote>`, `<img>` y `<a href>` http(s). */
   body_html: string;
+  /** El mismo HTML con cada imagen dicha en texto. Opcional: un servidor anterior no lo manda. */
+  body_html_marked?: string;
   body_text: string;
   source_url: string | null;
+  /** El texto alternativo de la portada. Opcional: un servidor anterior no lo manda. */
+  cover_alt?: string | null;
   /** Las imágenes del cuerpo, en el orden de sus marcas. Opcional: un servidor anterior no las manda. */
   images?: Array<{ n: number; url: string; alt: string }>;
 }
