@@ -35,6 +35,7 @@ import type { SceneCast, ImageHistoryEntry } from '../../api/_sceneCast';
 import type { HighlightFields } from '../../api/_highlights';
 import type { CarouselTextView, SlideTextOut } from '../../api/_carouselText';
 import type { TextPlace } from '../../api/_textPlace';
+import type { TextColumn } from '../../api/_textColumn';
 import type { TextColorOptions } from '../../api/_textStyle';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
@@ -648,6 +649,8 @@ export function recomposeImage(
     overlay_override?: OverlayOverrideOut | null;
     // 2026-10-22 — la ubicación del texto de la imagen (`api/_textPlace.ts`). Sola o con el texto; no regenera.
     text_place?: TextPlace | null;
+    // 2026-10-24 — la columna del texto de la imagen (`api/_textColumn.ts`). Sola o con el texto; no regenera.
+    text_column?: TextColumn | null;
   },
 ): Promise<{
   ok: true; piece_id: string; image_url: string | null; composed: boolean;
@@ -659,6 +662,8 @@ export function recomposeImage(
   carousel_recomposed?: boolean | string | null;
   /** 2026-10-22 — la ubicación del texto que quedó guardada (null = la de la marca). */
   text_place?: TextPlace | null;
+  /** 2026-10-24 — la columna del texto que quedó guardada (null = la de la marca). */
+  text_column?: TextColumn | null;
   artifact_url: string | null; html: string | null; artifact_refreshed: boolean;
 }> {
   return req('/api/recompose-image', token, {
@@ -672,6 +677,7 @@ export function recomposeImage(
       ...('overlay_override' in input ? { overlay_override: input.overlay_override ?? null } : {}),
       // 2026-10-22 — ídem con la ubicación del texto.
       ...('text_place' in input ? { text_place: input.text_place ?? null } : {}),
+      ...('text_column' in input ? { text_column: input.text_column ?? null } : {}),
     },
   });
 }
@@ -692,6 +698,8 @@ export function fetchEmphasisColors(token: string, pieceId: string): Promise<{
   carousel?: CarouselTextView | null;
   /** 2026-10-22 — la ubicación del texto guardada en la imagen de la pieza (null = la de la marca). */
   text_place?: TextPlace | null;
+  /** 2026-10-24 — la columna del texto guardada en la imagen de la pieza (null = la de la marca). */
+  text_column?: TextColumn | null;
   /** 2026-10-23 — los colores posibles del texto de cada bloque, con el de siempre de cada uno. */
   text_colors?: TextColorOptions;
 }> {

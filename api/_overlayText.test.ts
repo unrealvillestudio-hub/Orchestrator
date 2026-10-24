@@ -59,8 +59,9 @@ describe('el cableado', () => {
   const MOD = sinComentarios(readFileSync(new URL('../src/modules/iid/pieceActions.tsx', import.meta.url), 'utf8'));
   it('con texto de la imagen no se regenera la escena ni se pide directriz', () => {
     // 2026-10-22 — la ubicación del texto (`_textPlace.ts`) va por la misma rama sin generar.
-    expect(API).toContain('if (tieneImagen && !directive && !conTexto && !conUbicacion) {');
-    const i = API.indexOf('if (conTexto || conUbicacion) {');
+    // 2026-10-24 — la columna del texto (`_textColumn.ts`) se suma a lo que no exige directriz.
+    expect(API).toContain('if (tieneImagen && !directive && !conTexto && !conUbicacion && !conColumna) {');
+    const i = API.indexOf('if (conTexto || conUbicacion || conColumna) {');
     expect(i).toBeGreaterThan(0);
     expect(i).toBeLessThan(API.indexOf("regenerate_image: true"), 'la rama del texto sale antes de la que regenera');
     expect(API.slice(i, i + 900)).toContain('regenerate_image: false');
