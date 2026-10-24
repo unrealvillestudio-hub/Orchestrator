@@ -416,6 +416,12 @@ export interface ManualItem {
   format: string | null;
   text: string;
   images: string[];
+  /**
+   * 2026-10-24 — el texto alternativo de la foto de un post de una sola imagen, si el carril ya lo escribió para ESA
+   * foto (`coverAltOf`). `null` en un carrusel (sus láminas no tienen alt propio) y cuando falta. Sam, sobre mostrarlo
+   * también en los posts: «lo correcto».
+   */
+  image_alt: string | null;
   /** Sólo cuando `format === ARTICLE_FORMAT`: título, portada y cuerpo por separado. */
   article?: ManualArticle;
 }
@@ -449,6 +455,7 @@ export function buildManualItems(
       format: piece.format ?? null,
       text: manualTextOf(piece, s.platform_key),
       images: manualImagesOf(piece),
+      image_alt: isCarouselPiece(piece) ? null : coverAltOf(piece.assets?.image),
       ...(String(piece.format ?? '') === ARTICLE_FORMAT ? { article: manualArticleOf(piece, s.platform_key) } : {}),
     });
   }

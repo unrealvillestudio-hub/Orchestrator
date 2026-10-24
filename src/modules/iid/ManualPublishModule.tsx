@@ -441,6 +441,9 @@ function ManualCard({ item, token, onPublished }: {
                 ))}
               </div>
               <CopyButton text={item.images.join('\n')} label={varias ? 'Copiar URLs' : 'Copiar URL'} />
+              {/* 2026-10-24 — el alt de la foto, para pegarlo al subirla. Sólo en un post de una imagen y sólo si lo hay: un
+                  canal que no lo pide no muestra un aviso en cada tarjeta. */}
+              {!varias && item.image_alt && <AltLine alt={item.image_alt} falta="" />}
             </div>
           ) : (
             <p className="text-[11px] font-mono text-amber-300/80">Esta pieza no tiene imagen.</p>

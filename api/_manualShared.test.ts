@@ -280,6 +280,23 @@ describe('artículo — título, portada y cuerpo por separado', () => {
     });
   });
 
+  it('2026-10-24 · buildManualItems lleva el alt de la foto de un post; un carrusel, no', () => {
+    const now = new Date('2026-10-22T12:00:00Z');
+    const LIMPIA = 'https://storage.example/limpia.png';
+    const slots: ManualSlotRow[] = [
+      { id: 's-1', brand_id: BRAND, platform_key: MANUAL, slot_at: '2026-10-22T10:00:00Z', status: 'manual_pending', piece_id: 'p-1' },
+      { id: 's-2', brand_id: BRAND, platform_key: MANUAL, slot_at: '2026-10-22T11:00:00Z', status: 'manual_pending', piece_id: 'p-2' },
+    ];
+    const conAlt = { ...assets, image: { url: 'https://storage.example/portada.png', clean_url: LIMPIA, alt: 'Una foto', alt_for: LIMPIA } } as never;
+    const pieces = new Map<string, ManualPieceInput>([
+      ['p-1', piece({ id: 'p-1', format: 'post' }, conAlt)],
+      ['p-2', piece({ id: 'p-2', format: CAROUSEL_FORMAT }, { ...(conAlt as object), carousel: { slides: [
+        { n: 1, url: 'https://storage.example/l1.png' }, { n: 2, url: 'https://storage.example/l2.png' }] } } as never)],
+    ]);
+    const items = buildManualItems(slots, new Set([manualChannelKey(BRAND, MANUAL)]), pieces, null, now);
+    expect(items.map((x) => x.image_alt)).toEqual(['Una foto', null]);
+  });
+
   it('buildManualItems añade `article` sólo a los artículos y no toca `text`', () => {
     const now = new Date('2026-10-22T12:00:00Z');
     const slots: ManualSlotRow[] = [
