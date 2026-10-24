@@ -262,6 +262,8 @@ export interface ManualItem {
   format: string | null;
   text: string;
   images: string[];
+  /** 2026-10-24 — el texto alternativo de la foto de un post de una sola imagen. Opcional: un servidor anterior no lo manda. */
+  image_alt?: string | null;
   /** Sólo en artículos: título, portada y cuerpo por separado (copia de `api/_manualShared.ts`). */
   article?: ManualArticle;
 }
