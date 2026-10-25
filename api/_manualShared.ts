@@ -489,6 +489,74 @@ export function cleanPostLink(v: unknown): string | null {
 export const MARKABLE_SLOT_STATUSES = ['manual_pending', 'reserved'] as const;
 
 /**
+ * EL VOCABULARIO DE `public.scheduled_posts.platform`, que lo declara el CANAL.
+ *
+ * La columna usa el identificador DEL PROVEEDOR (`INSTAGRAM`, no `meta_ig`), y el drenaje lo saca de
+ * `config.provider_platform` justamente para que no sea una transformación del código. Medido el
+ * 2026-10-25: los canales manuales no declaran esa clave — la declaran sólo los de meta, porque
+ * hasta hoy eran los únicos que escribían el libro. Que hasta hoy sólo meta la declare NO la
+ * convierte en una clave de meta.
+ *
+ * Cuando falta, se asienta con la clave del canal en mayúsculas y se DICE. Las dos alternativas son
+ * peores: bloquear el asiento perdería el registro de una publicación que sí ocurrió, y degradar en
+ * silencio dejaría dos vocabularios en la misma columna sin que nadie se enterara.
+ */
+export function bookPlatformOf(config: unknown, platformKey: string): { value: string; declared: boolean } {
+  const cfg = (config && typeof config === 'object') ? config as Record<string, unknown> : {};
+  const declared = typeof cfg.provider_platform === 'string' ? cfg.provider_platform.trim() : '';
+  if (declared) return { value: declared, declared: true };
+  return { value: String(platformKey ?? '').trim().toUpperCase(), declared: false };
+}
+
+/**
+ * LA FILA DEL LIBRO de una publicación a mano.
+ *
+ * `public.scheduled_posts` es el libro que manda sobre estado final (`CAPABILITIES` v1.14) y la
+ * fuente contra la que resuelve `publication-reconciler`. Medido el 2026-10-25 sobre 30 días: de 129
+ * piezas publicadas, 95 tenían su fila y 34 no — 31 de blog y 3 de los canales manuales. Las 34 SÍ
+ * tenían franja, así que el reconciliador no las declaraba inexplicadas: no las veía, y respondía
+ * `OK` sobre dos tercios de lo que ocurre. Un punto ciego que contesta `OK` es peor que un `HALT`.
+ *
+ * LA CAUSA: la fila se escribía sólo donde alguien la iba a LEER. El drenaje la escribe porque
+ * SocialLab la drena (`status=eq.pending_publish`); una publicación a mano no tiene publicador que
+ * la lea, así que nadie la escribía. La fila no es el recado: es el ASIENTO de la publicación.
+ *
+ * MISMA PRUEBA Y MISMO INSTANTE que `manualDrainRow` — el `link` y `at` que recibe este endpoint. Si
+ * los dos registros no salieran del mismo par de valores, «cuándo se publicó» tendría dos respuestas.
+ *
+ * EL ESTADO ES `published`, nunca `pending_publish`: ése es el estado que SocialLab DRENA, y aquí la
+ * publicación ya ocurrió — la hizo Sam a mano. Escribirlo pondría la pieza en la cola de un
+ * publicador de redes y saldría dos veces, que es exactamente lo que `channel_not_manual` impide
+ * unas líneas más arriba.
+ *
+ * `copy_text` es NOT NULL, así que hay escalón hasta el `piece_id`: el libro guarda lo que identifica
+ * la publicación, no el texto entero, que vive en la pieza.
+ */
+export function manualBookRow(
+  slot: { brand_id: string; platform_key: string; slot_at: string; piece_id: string },
+  piece: ManualPieceInput | null,
+  config: unknown,
+  link: string, at: string,
+) {
+  const title = String(piece?.assets?.copy?.title ?? '').trim();
+  const cover = cleanPostLink(piece?.assets?.image?.url ?? null);
+  return {
+    piece_id: slot.piece_id,
+    brand_id: slot.brand_id,
+    platform: bookPlatformOf(config, slot.platform_key).value,
+    copy_text: title || slot.piece_id,
+    image_url: cover,
+    status: 'published',
+    // La hora para la que ESTABA programada, y la real. Que las dos estén y se puedan comparar es
+    // lo que permite medir el retraso de un canal manual sin reconstruirlo.
+    scheduled_at: slot.slot_at || at,
+    published_at: at,
+    platform_post_id: link,
+    source_lab: 'orchestrator_manual',
+  };
+}
+
+/**
  * La fila de bitácora de una publicación a mano. Mismo desenlace que el drenaje (`PUBLISHED`)
  * para que el resto del carril —acuses, cobertura, conteos— la lea igual; el `detail` dice que
  * fue a mano.
