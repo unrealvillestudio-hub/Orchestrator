@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   canonicalizeSignature, manualTextOf, manualImagesOf, buildManualItems, manualChannelKey,
-  cleanPostLink, manualDrainRow, manualPasteOf,
+  cleanPostLink, manualDrainRow, manualPasteOf, manualBookRow, bookPlatformOf,
   ARTICLE_FORMAT, CAROUSEL_FORMAT, manualArticleOf, articleBodyHtml, articleBodyText, articleImagesOf, imagePlaceholder, coverAltOf,
   type ManualPieceInput, type ManualSlotRow,
 } from './_manualShared.js';
@@ -113,6 +113,101 @@ describe('«Publicada» — el link es la prueba', () => {
     expect(row.published_at).toBe('2026-10-01T10:00:00Z');
     expect(row.slot_id).toBe('s-1');
     expect(row.piece_id).toBe('p-1');
+  });
+});
+
+// EL LIBRO (2026-10-25). `public.scheduled_posts` es el libro que manda sobre estado final y la
+// fuente contra la que resuelve `publication-reconciler`. Este endpoint dejaba cuatro rastros y no
+// este: medido ese dia, 3 publicaciones manuales en 30 dias sin fila, y CON franja — asi que el
+// reconciliador no las declaraba inexplicadas, no las veia, y respondia OK.
+describe('el libro de publicaciones — toda publicacion asienta su fila', () => {
+  const SLOT = { brand_id: BRAND, platform_key: MANUAL, slot_at: '2026-10-01T00:00:00Z', piece_id: 'p-1' };
+  const AT = '2026-10-01T10:04:00Z';
+  const LINK = 'https://surface.example/p/1';
+  const PIEZA = piece({}, { copy: { title: 'El titulo' }, image: { url: 'https://cdn.example/foto.webp' } });
+
+  it('el vocabulario de platform lo declara el canal, no lo transforma el codigo', () => {
+    // Es el caso de meta: platform_key `meta_ig`, vocabulario del proveedor `INSTAGRAM`. Si esto
+    // transformara la clave, saldria META_IG y el valor no seria el que usa el resto de la columna.
+    const r = bookPlatformOf({ provider_platform: 'INSTAGRAM' }, 'meta_ig');
+    expect(r).toEqual({ value: 'INSTAGRAM', declared: true });
+  });
+
+  it('sin la clave sembrada se asienta igual, con la del canal, y se declara el respaldo', () => {
+    // Bloquear el asiento perderia el registro de una publicacion que SI ocurrio. Se asienta, y se dice.
+    for (const cfg of [{}, null, undefined, { provider_platform: '' }, { provider_platform: '  ' }]) {
+      expect(bookPlatformOf(cfg, MANUAL)).toEqual({ value: MANUAL.toUpperCase(), declared: false });
+    }
+  });
+
+  it('nace published, nunca pending_publish: ese es el estado que SocialLab drena', () => {
+    const fila = manualBookRow(SLOT, PIEZA, {}, LINK, AT);
+    expect(fila.status).toBe('published');
+    expect(fila.status).not.toBe('pending_publish');
+  });
+
+  it('la prueba y el instante son los MISMOS que los de la bitacora', () => {
+    const libro = manualBookRow(SLOT, PIEZA, {}, LINK, AT);
+    const bitacora = manualDrainRow({ id: 's-1', ...SLOT }, LINK, 'run-1', AT);
+    // Si los dos registros no salieran del mismo par de valores, «cuando se publico» tendria dos
+    // respuestas, y la pregunta se hace sobre los dos.
+    expect(libro.platform_post_id).toBe(bitacora.platform_post_id);
+    expect(libro.published_at).toBe(bitacora.published_at);
+  });
+
+  it('las dos fechas estan y son distintas: la programada y la real', () => {
+    const fila = manualBookRow(SLOT, PIEZA, {}, LINK, AT);
+    expect(fila.scheduled_at).toBe(SLOT.slot_at);
+    expect(fila.published_at).toBe(AT);
+    expect(fila.scheduled_at).not.toBe(fila.published_at);
+  });
+
+  it('copy_text es NOT NULL, asi que hay escalon hasta el piece_id', () => {
+    expect(manualBookRow(SLOT, PIEZA, {}, LINK, AT).copy_text).toBe('El titulo');
+    for (const pz of [null, piece(), piece({}, { copy: { title: '   ' } })]) {
+      const fila = manualBookRow(SLOT, pz, {}, LINK, AT);
+      expect(typeof fila.copy_text).toBe('string');
+      expect(fila.copy_text.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('el cuerpo del articulo NO entra en el libro', () => {
+    // El libro guarda lo que identifica la publicacion. El texto vive en la pieza, que es su sitio.
+    const larga = piece({}, { copy: { title: 'T', aife_filtered: 'x'.repeat(4000) } });
+    expect(manualBookRow(SLOT, larga, {}, LINK, AT).copy_text).toBe('T');
+  });
+
+  it('image_url solo acepta http(s)', () => {
+    expect(manualBookRow(SLOT, PIEZA, {}, LINK, AT).image_url).toBe('https://cdn.example/foto.webp');
+    for (const u of ['', 'no-es-url', 'javascript:alert(1)', 'data:image/png;base64,AA', null]) {
+      const pz = piece({}, { copy: { title: 'T' }, image: { url: u as string | null } });
+      expect(manualBookRow(SLOT, pz, {}, LINK, AT).image_url).toBeNull();
+    }
+  });
+
+  it('solo columnas que existen en public.scheduled_posts', () => {
+    // Medido el 2026-10-25 contra information_schema. Una columna inventada no falla al construir la
+    // fila: falla en el INSERT, con la pieza ya publicada, y el asiento se pierde en un warning.
+    const COLUMNAS = new Set(['id', 'brand_id', 'platform', 'copy_text', 'image_url', 'status',
+      'scheduled_at', 'published_at', 'source_lab', 'orchestrator_stage_label', 'platform_post_id',
+      'error_message', 'created_at', 'updated_at', 'piece_id', 'media_type', 'media_urls']);
+    for (const k of Object.keys(manualBookRow(SLOT, PIEZA, {}, LINK, AT))) {
+      expect(COLUMNAS.has(k), `columna inexistente: ${k}`).toBe(true);
+    }
+  });
+
+  it('la fila es identificable por source_lab, que es como se revierte', () => {
+    expect(manualBookRow(SLOT, PIEZA, {}, LINK, AT).source_lab).toBe('orchestrator_manual');
+  });
+
+  it('ni una marca ni una plataforma reales en el ayudante', () => {
+    const fila = manualBookRow(SLOT, PIEZA, {}, LINK, AT);
+    // Lo unico que sale de aqui son los valores que entraron: la marca de la franja y la clave del
+    // canal. Si el ayudante nombrara una marca, este JSON la traeria sin que nadie la pasara.
+    const texto = JSON.stringify(fila);
+    for (const m of ['NeuroneSCF', 'ForumPHs', 'LucienSael', 'UnrealvilleStudio']) {
+      expect(texto).not.toContain(m);
+    }
   });
 });
 
