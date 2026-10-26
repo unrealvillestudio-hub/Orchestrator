@@ -8,6 +8,23 @@
   --color-bg:     #050508;
 }
 
+/* El logotipo de la app: >Orchestrator. Bloque de logotipo de la marca copiado de BP v1.6 `logotype.css_complete` (el
+   mismo que sirve unrealvillestudio.com, medido el 2026-10-26): Bebas Neue, chevron cian que parpadea, nombre en
+   chalk y movimiento reducido. Sam, 2026-10-26. */
+@keyframes prompt-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+.lt-logotype { font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.04em; line-height: 1; white-space: nowrap; }
+.lt-un { color: #F2F0EC; }
+.lt-chevron { color: #00FFD1; animation: prompt-blink 1.1s step-end infinite; display: inline-block;
+  transform: scaleY(1.45) scaleX(0.72); transform-origin: center; letter-spacing: 0; margin-right: 0.02em; }
+/* Tamaño del logotipo de un lab: el de pie de la marca (size-footer, 28px). */
+.lt-logotype.size-lab { font-size: 28px; }
+/* Bebas Neue no tiene minúsculas: se dibujan como mayúsculas más bajas, a 0.72em (la proporción de «studio» en la
+   marca), con el espaciado compensado (0.04 / 0.72) para que el aire entre letras sea igual en altas y bajas. */
+.lt-minuscula { font-size: 0.72em; letter-spacing: 0.0556em; }
+@media (prefers-reduced-motion: reduce) {
+  .lt-chevron { animation: none; }
+}
+
 /* ── LO QUE EL TELEFONO SE QUEDA ABAJO ──────────────────────────────────────────────────────────
  *
  * EL CASO, reportado por Sam el 2026-09-22 con una captura: los botones «Anterior» y «Siguiente»
