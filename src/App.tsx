@@ -18,6 +18,7 @@ import ChallengedInboxModule from './modules/iid/ChallengedInboxModule';
 import EvaluatedHistoryModule from './modules/iid/EvaluatedHistoryModule';
 import type { IidSession } from './services/iidInbound';
 import { fetchReviewScope, type ReviewAccess, type ReviewView } from './services/calibrationInbox';
+import { tramosDeCaja } from './logotipo';
 
 /**
  * La versión sale de `package.json` y el commit de la plataforma; los inyecta
@@ -118,16 +119,18 @@ function initialView(): View {
   return 'hub';
 }
 
+/** El logotipo de la app: «>Orchestrator» con el bloque de logotipo de la marca (BP v1.6, el mismo de
+ *  unrealvillestudio.com): Bebas Neue, chevron cian que parpadea y nombre en chalk (Sam, 2026-10-26). Sustituye al
+ *  lockup «UV · UNREALVILLE · Orchestrator». Regla de todos los labs: unrlvl-context → ecosystem.json → labs._logotipo. */
 const Logo = () => (
-  <div className="flex items-center gap-2.5">
-    <div className="w-7 h-7 bg-accent rounded-lg flex items-center justify-center text-black text-[10px] font-black font-display tracking-tighter">
-      UV
-    </div>
-    <div className="flex flex-col leading-none">
-      <span className="text-[13px] font-display font-bold text-accent tracking-tight">UNREALVILLE</span>
-      <span className="text-[9px] font-mono text-zinc-600 uppercase tracking-widest">Orchestrator</span>
-    </div>
-  </div>
+  <span className="lt-logotype size-lab" aria-label=">Orchestrator">
+    <span className="lt-chevron" aria-hidden>&gt;</span>
+    <span className="lt-un" aria-hidden>
+      {tramosDeCaja('Orchestrator').map((t, i) => t.minuscula
+        ? <span key={i} className="lt-minuscula">{t.texto}</span>
+        : <span key={i}>{t.texto}</span>)}
+    </span>
+  </span>
 );
 
 export default function App() {
