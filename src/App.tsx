@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send, ShieldQuestion, Archive, Wrench, MoreHorizontal, X } from 'lucide-react';
+import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send, ShieldQuestion, Archive, Wrench, MoreHorizontal, X, Image as ImageIcon } from 'lucide-react';
 import { useFlowStore } from './store/useFlowStore';
 import { cn, GlowDot } from './ui/components';
 import HubModule from './modules/hub/HubModule';
@@ -16,6 +16,7 @@ import ApprovalCalibrationModule, { type CalibrationScope } from './modules/iid/
 import PublishQueueModule from './modules/iid/PublishQueueModule';
 import ChallengedInboxModule from './modules/iid/ChallengedInboxModule';
 import EvaluatedHistoryModule from './modules/iid/EvaluatedHistoryModule';
+import MediaTrayModule from './modules/iid/MediaTrayModule';
 import type { IidSession } from './services/iidInbound';
 import { fetchReviewScope, type ReviewAccess, type ReviewView } from './services/calibrationInbox';
 import { tramosDeCaja } from './logotipo';
@@ -28,7 +29,7 @@ declare const __APP_VERSION__: string;
 declare const __APP_COMMIT__: string;
 const BUILD_TAG = __APP_COMMIT__ ? `v${__APP_VERSION__} · ${__APP_COMMIT__}` : `v${__APP_VERSION__}`;
 
-type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" | "calibration" | "fixes" | "challenged" | "publish" | "history";
+type View = "hub" | "planner" | "executor" | "launchpad" | "monitor" | "intel" | "calibration" | "fixes" | "challenged" | "publish" | "media" | "history";
 
 /**
  * LO-CORREGIDO-01 — EL CIRCUITO DE ARREGLOS, EN SU PROPIA PESTAÑA.
@@ -84,6 +85,10 @@ const NAV_ITEMS = [
   // CALIB-01-E — las retenidas van junto a la calibración, que es donde Sam ya mira.
   { id: "challenged" as View,  label: "Retenidas",    icon: ShieldQuestion },
   { id: "publish" as View,     label: "Publicación",  icon: Send },
+  // LA BANDEJA DE MEDIOS (2026-10-27) — va junto a Publicación porque decide lo mismo: qué sale.
+  // La diferencia es QUÉ sale: ahí una pieza, aquí un archivo que subió un agente y que no forma
+  // parte de ninguna publicación hasta que Sam lo promueva.
+  { id: "media" as View,       label: "Medios",       icon: ImageIcon },
   // BRIEF-02 — el historial va DESPUÉS de las tres bandejas: es donde se mira lo que ya
   // pasó por ellas, no una cuarta cosa que decidir.
   { id: "history" as View,     label: "Historial",    icon: Archive },
@@ -113,6 +118,8 @@ function initialView(): View {
     // Deep-link del email de RETENIDA y del digest → la bandeja de arbitraje.
     if (v === 'challenged') return 'challenged';
     if (v === 'publish') return 'publish';
+    // Deep-link de la bandeja de medios: el aviso de que hay algo esperando lleva aquí.
+    if (v === 'media') return 'media';
     // Deep-link al historial: sirve para mandarle a alguien una pieza ya evaluada.
     if (v === 'history') return 'history';
   } catch { /* SSR / entorno sin window */ }
@@ -165,6 +172,7 @@ export default function App() {
     fixes:       "Arreglos",
     challenged:  "Retenidas",
     publish:     "Publicación",
+    media:       "Medios en espera",
     history:     "Historial",
   };
 
@@ -274,6 +282,7 @@ export default function App() {
           {view === "fixes"       && <ApprovalCalibrationModule session={session} scope={FIX_SCOPE} />}
           {view === "challenged"  && <ChallengedInboxModule session={session} />}
           {view === "publish"     && <PublishQueueModule session={session} />}
+          {view === "media"       && <MediaTrayModule session={session} />}
           {view === "history"     && <EvaluatedHistoryModule session={session} />}
         </motion.div>
       </AnimatePresence>
@@ -400,13 +409,14 @@ function SessionControl({ session, onLogout }: { session: IidSession; onLogout: 
 // POR VISTA (2026-10-23): cada concesión dice qué vistas abre (`operator_review_scope.views`) y
 // el shell sólo pinta esas. Una bandeja sin ninguna vista concedida no aparece; Publicación pinta
 // sólo sus subpestañas concedidas. El servidor exige la misma vista en cada endpoint.
-type SeederView = 'capture' | 'calibrate' | 'calibration' | 'fixes' | 'challenged' | 'publish';
+type SeederView = 'capture' | 'calibrate' | 'calibration' | 'fixes' | 'challenged' | 'publish' | 'media';
 
 const REVIEW_TABS: { id: SeederView; label: string; icon: typeof Sprout; vistas: ReviewView[] }[] = [
   { id: 'calibration', label: 'Calibración', icon: ClipboardCheck, vistas: ['calibration'] },
   { id: 'fixes',       label: 'Arreglos',    icon: Wrench,         vistas: ['fixes'] },
   { id: 'challenged',  label: 'Retenidas',   icon: ShieldQuestion, vistas: ['challenged'] },
   { id: 'publish',     label: 'Publicación', icon: Send,           vistas: ['publish_scheduled', 'publish_manual'] },
+  { id: 'media',       label: 'Medios',      icon: ImageIcon,      vistas: ['media_promotion'] },
 ];
 
 /** ¿La sesión abre alguna de estas vistas? */
@@ -487,6 +497,7 @@ function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () 
           {seederView === 'calibration' && <ApprovalCalibrationModule session={session} />}
           {seederView === 'fixes'       && <ApprovalCalibrationModule session={session} scope={FIX_SCOPE} />}
           {seederView === 'challenged'  && <ChallengedInboxModule session={session} />}
+          {seederView === 'media'       && <MediaTrayModule session={session} />}
           {seederView === 'publish'     && acceso && (
             <PublishQueueModule session={session} subtabs={[
               ...(abre(acceso.views, ['publish_scheduled']) ? ['scheduled' as const] : []),

@@ -20,6 +20,12 @@
     },
     "api/approve-job.ts": {
       "maxDuration": 30
+    },
+    "api/media-tray.ts": {
+      "maxDuration": 20
+    },
+    "api/media-decide.ts": {
+      "maxDuration": 30
     }
   }
 }
