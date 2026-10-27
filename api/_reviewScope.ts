@@ -46,7 +46,11 @@ export interface Reviewer extends SessionUser {
 export const esAdmin = (role: string): boolean => ALLOWED_ROLES.includes(role);
 
 /** Las vistas que una concesión puede abrir. Mismo vocabulario que el CHECK de `operator_review_scope.views`. */
-export const VISTAS = ['calibration', 'fixes', 'challenged', 'publish_scheduled', 'publish_manual'] as const;
+export const VISTAS = ['calibration', 'fixes', 'challenged', 'publish_scheduled', 'publish_manual',
+  // LA BANDEJA DE MEDIOS (2026-10-27). Única vía por la que un objeto sale de la zona de entrada del
+  // bucket, y exige una persona. Se nombra por la FUNCIÓN —promover un medio—, no por la
+  // herramienta que hoy sube los archivos: el día que la ocupe otra cosa, la vista sigue valiendo.
+  'media_promotion'] as const;
 export type Vista = (typeof VISTAS)[number];
 /** Lo que se hace sobre una pieza (editar, juzgar, recomponer, deshacer, previsualizar): lo usan las
  *  bandejas que trabajan piezas, no la de publicación manual, que sólo marca franjas publicadas. */

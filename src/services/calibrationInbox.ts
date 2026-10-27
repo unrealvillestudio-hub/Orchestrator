@@ -596,7 +596,8 @@ export function fetchQueue(
 }
 
 /** Las vistas que una concesión puede abrir (mismo vocabulario que `api/_reviewScope.ts`). */
-export type ReviewView = 'calibration' | 'fixes' | 'challenged' | 'publish_scheduled' | 'publish_manual';
+export type ReviewView = 'calibration' | 'fixes' | 'challenged' | 'publish_scheduled' | 'publish_manual'
+  | 'media_promotion';
 /** Las marcas que la sesión revisa y las vistas que abre. `'*'` = todas. */
 export interface ReviewAccess { review: '*' | string[]; views: '*' | ReviewView[] }
 
