@@ -20,6 +20,8 @@ import MediaTrayModule from './modules/iid/MediaTrayModule';
 import type { IidSession } from './services/iidInbound';
 import { fetchReviewScope, type ReviewAccess, type ReviewView } from './services/calibrationInbox';
 import { tramosDeCaja } from './logotipo';
+import { ZoomControl, useZoom } from './ui/ZoomControl';
+import { ZOOM_VIEWS } from './ui/zoom';
 
 /**
  * La versión sale de `package.json` y el commit de la plataforma; los inyecta
@@ -142,6 +144,9 @@ const Logo = () => (
 
 export default function App() {
   const [view, setView] = useState<View>(initialView);
+  // 2026-10-28 — el zoom de las bandejas donde se corrige: personal, recordado en este navegador (`ui/zoom.ts`).
+  const [zoom, setZoom] = useZoom();
+  const conZoom = ZOOM_VIEWS.has(view);
   const [session, setSession] = useState<IidSession | null>(null);
   const [masAbierto, setMasAbierto] = useState(false);
   const { activePlan, completedFlows, isInterpreting } = useFlowStore();
@@ -259,6 +264,7 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          style={conZoom ? { zoom } : undefined}
         >
           {view === "hub" && (
             <HubModule onPlanReady={() => setView("planner")} />
@@ -286,6 +292,7 @@ export default function App() {
           {view === "history"     && <EvaluatedHistoryModule session={session} />}
         </motion.div>
       </AnimatePresence>
+      {conZoom && <ZoomControl zoom={zoom} onChange={setZoom} />}
 
       {/* ── BARRA DE BANDEJAS (teléfono) ── al alcance del pulgar. Mismo `--pie-fijo` que el pie de
           escritorio (ver index.css): el contenido reserva exactamente lo que esta barra ocupa. */}
@@ -424,6 +431,8 @@ const abre = (views: '*' | ReviewView[], vistas: ReviewView[]) => views === '*' 
 
 function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () => void }) {
   const [seederView, setSeederView] = useState<SeederView>('capture');
+  const [zoom, setZoom] = useZoom();
+  const conZoom = ZOOM_VIEWS.has(seederView);
   // null = no revisa ninguna marca (o todavía no se sabe): el shell de siempre.
   const [acceso, setAcceso] = useState<ReviewAccess | null>(null);
   const review = acceso?.review ?? null;
@@ -491,6 +500,7 @@ function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () 
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          style={conZoom ? { zoom } : undefined}
         >
           {seederView === 'capture'     && <IidSeedsUnified session={session} onGoCalibrate={() => setSeederView('calibrate')} />}
           {seederView === 'calibrate'   && <CalibrationConsole session={session} />}
@@ -506,6 +516,7 @@ function SeederShell({ session, onLogout }: { session: IidSession; onLogout: () 
           )}
         </motion.div>
       </AnimatePresence>
+      {conZoom && <ZoomControl zoom={zoom} onChange={setZoom} />}
 
       <footer className="fixed bottom-0 left-0 right-0 min-h-7 border-t border-zinc-800/40 px-5 flex items-center justify-between bg-[#050508]/80 backdrop-blur-sm z-50 pie-sobre-la-barra">
         <div className="flex items-center gap-1.5 text-[9px] font-mono text-zinc-800 uppercase tracking-widest">

@@ -485,6 +485,31 @@ export function cleanPostLink(v: unknown): string | null {
   }
 }
 
+/**
+ * ¿EL ENLACE ES DE LA PLATAFORMA DE LA FRANJA? (2026-10-28)
+ *
+ * `cleanPostLink` sólo comprueba que sea `https://`. Medido el 2026-10-28 en `intel.brand_publish_drain_log`:
+ * 5 franjas de TikTok se marcaron con la dirección de la IMAGEN de la pieza (Storage) y 2 de LinkedIn con el
+ * enlace corto `lnkd.in`; el Círculo rechazó después las de TikTok y ninguna llegó al grupo. Los dominios de
+ * cada plataforma son DATO (`intel.platform_link_domains`): el de la plataforma y sus formas cortas. Vale el
+ * dominio o un subdominio suyo (`vm.tiktok.com`), nunca un dominio que sólo termina igual (`nolinkedin.com`).
+ */
+export function linkOfPlatform(link: string, domains: readonly string[]): { ok: true } | { ok: false; host: string } {
+  let host = '';
+  try { host = new URL(link).hostname.toLowerCase(); } catch { return { ok: false, host: '' }; }
+  const ok = domains.some((d) => {
+    const dom = String(d).toLowerCase();
+    return host === dom || host.endsWith(`.${dom}`);
+  });
+  return ok ? { ok: true } : { ok: false, host };
+}
+
+/** El mensaje para quien pegó un enlace de otro dominio: qué pegó y qué se espera. */
+export function wrongPlatformDetail(host: string, platformKey: string, domains: readonly string[]): string {
+  const de = host ? `es de «${host}»` : 'no es un enlace válido';
+  return `Este enlace ${de}, no de ${platformKey} (${domains.join(' o ')}). Pega el link del post publicado, no el de la imagen ni el de otra red.`;
+}
+
 /** Estados de franja que se pueden marcar publicadas a mano: tienen pieza y no salieron. */
 export const MARKABLE_SLOT_STATUSES = ['manual_pending', 'reserved'] as const;
 
