@@ -91,3 +91,27 @@ export function verificarCuerpo(texto: string): { html: string; avisos: string[]
   }
   return { html: inlineMarksToHtml(esc), avisos };
 }
+
+/**
+ * LA SOMBRA QUE DE VERDAD LLEVA CADA TROZO (Sam, 2026-10-28, pieza 23698205: «la sombra solo se aplica a la primera
+ * línea en la bajada»). `~así~` no pone sombra: la INVIERTE respecto del bloque. Con «Con sombra», lo marcado sale sin
+ * ella; con «Sin sombra», sale con ella. Medido en `intel.piece_edits` de esa pieza: la bajada tenía «Sin sombra» con
+ * `~El contrato sí~` (sólo ese tramo con sombra); al pasarla a «Con sombra», el tramo quedó como el único sin sombra.
+ * `null` = la de la marca: depende del fondo, y la vista previa no lo puede saber. PURO.
+ */
+export type ModoSombra = 'on' | 'off' | null;
+
+export function sombraEfectiva(t: Pick<TramoVisto, 'sombra'>, modo: ModoSombra): boolean | null {
+  if (modo === 'on') return !t.sombra;
+  if (modo === 'off') return t.sombra;
+  return null;
+}
+
+/** Lo que conviene saber de los tramos con `~` según la sombra del bloque; nada si no hay tramos o no se sabe. PURO. */
+export function avisoSombra(modo: ModoSombra, shadow_spans: readonly string[]): string | null {
+  if (!shadow_spans.length || modo === null) return null;
+  const lista = shadow_spans.map((t) => `«${t}»`).join(', ');
+  return modo === 'on'
+    ? `Con «Con sombra», lo marcado con ~ sale SIN sombra: ${lista}. Si lo quiere con sombra, quite las ~.`
+    : `Con «Sin sombra», lo marcado con ~ es lo único que sale CON sombra: ${lista}.`;
+}

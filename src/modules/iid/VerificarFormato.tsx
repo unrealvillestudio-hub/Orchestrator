@@ -3,15 +3,17 @@
  * envío, lo deja escrito de una sola manera y enseña cómo va a salir. La regla vive en `api/_verificarFormato.ts`.
  */
 import { useEffect, useState, type ReactNode } from 'react';
-import { verificarCuerpo, verificarTextoImagen, type TramoVisto } from '../../../api/_verificarFormato';
+import { avisoSombra, sombraEfectiva, verificarCuerpo, verificarTextoImagen, type ModoSombra, type TramoVisto } from '../../../api/_verificarFormato';
 
 const BOTON = 'px-2.5 py-0.5 rounded-lg border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 text-[11px] shrink-0';
 
 /** Un campo del texto de la imagen (titular o bajada) con su botón y la vista previa debajo. */
-export function CampoConVerificacion({ children, valor, bloque, onCambio, colorResaltado }: {
+export function CampoConVerificacion({ children, valor, bloque, onCambio, colorResaltado, sombra = null }: {
   children: ReactNode; valor: string; bloque: 'titular' | 'bajada'; onCambio: (v: string) => void; colorResaltado?: string | null;
+  /** 2026-10-28 — la sombra elegida para el bloque: con ella la vista previa dice qué trozo lleva sombra de verdad. */
+  sombra?: ModoSombra;
 }) {
-  const [visto, setVisto] = useState<{ tramos: TramoVisto[]; cambios: string[]; vacio: boolean } | { error: string } | null>(null);
+  const [visto, setVisto] = useState<{ tramos: TramoVisto[]; cambios: string[]; vacio: boolean; sombras: string[] } | { error: string } | null>(null);
   const [verificado, setVerificado] = useState<string | null>(null);
   // Lo que se ve tiene que ser lo que hay escrito: si el campo cambia después de verificar, la vista previa se va.
   useEffect(() => { if (verificado !== null && valor !== verificado) { setVisto(null); setVerificado(null); } }, [valor, verificado]);
@@ -19,7 +21,7 @@ export function CampoConVerificacion({ children, valor, bloque, onCambio, colorR
     const r = verificarTextoImagen(valor, bloque);
     if (!r.ok) { setVisto({ error: r.error }); setVerificado(valor); return; }
     if (r.markup !== valor) onCambio(r.markup);
-    setVisto({ tramos: r.tramos, cambios: r.cambios, vacio: !r.text });
+    setVisto({ tramos: r.tramos, cambios: r.cambios, vacio: !r.text, sombras: r.shadow_spans });
     setVerificado(r.markup);
   };
   return (
@@ -39,12 +41,16 @@ export function CampoConVerificacion({ children, valor, bloque, onCambio, colorR
             <p className="text-sm text-zinc-100 whitespace-pre-wrap leading-snug">
               {visto.tramos.map((t, i) => (
                 <span key={i}
-                  title={[t.resaltado && 'resaltado', t.cursiva && 'cursiva', t.sombra && 'sombra al revés'].filter(Boolean).join(' · ') || undefined}
+                  title={[t.resaltado && 'resaltado', t.cursiva && 'cursiva',
+                    sombraEfectiva(t, sombra) === true ? 'con sombra' : sombraEfectiva(t, sombra) === false ? (t.sombra ? 'sin sombra (~)' : 'sin sombra') : t.sombra && 'sombra al revés',
+                  ].filter(Boolean).join(' · ') || undefined}
                   className={t.resaltado ? 'font-semibold' : undefined}
                   style={{
                     ...(t.resaltado ? { color: colorResaltado || '#c4b5fd' } : {}),
                     ...(t.cursiva ? { fontStyle: 'italic' } : {}),
-                    ...(t.sombra ? { textDecoration: 'underline dotted', textUnderlineOffset: '3px' } : {}),
+                    // 2026-10-28 — la sombra que de verdad lleva el trozo; sin saberla (la de la marca), el tramo ~ subrayado.
+                    ...(sombraEfectiva(t, sombra) === true ? { textShadow: '0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.8)' } : {}),
+                    ...(sombraEfectiva(t, sombra) === null && t.sombra ? { textDecoration: 'underline dotted', textUnderlineOffset: '3px' } : {}),
                   }}>
                   {t.text}
                 </span>
@@ -52,6 +58,7 @@ export function CampoConVerificacion({ children, valor, bloque, onCambio, colorR
             </p>
           )}
           {visto.cambios.map((c) => <p key={c} className="text-[10px] text-amber-300/90">{c}</p>)}
+          {(() => { const a = avisoSombra(sombra, visto.sombras); return a ? <p className="text-[10px] text-amber-300/90">{a}</p> : null; })()}
         </div>
       )}
     </div>

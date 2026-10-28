@@ -1299,7 +1299,7 @@ export function PieceActionsBar({
                   aria-label={`Titular de la lámina ${laminaElegida.n}`}
                   className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
                 />
-                <CampoConVerificacion valor={slideDraft.subheadline} bloque="bajada"
+                <CampoConVerificacion valor={slideDraft.subheadline} bloque="bajada" sombra={slideStyle.sub.shadow ?? slideStyle.headline.shadow}
                   onCambio={(v) => setSlideDraft({ ...slideDraft, subheadline: v })}>
                   <textarea
                     value={slideDraft.subheadline}
@@ -1346,7 +1346,7 @@ export function PieceActionsBar({
             {panel === 'regen' && regenTab === 'text' && !laminaElegida && (
               <div className="space-y-1.5" onChangeCapture={() => { overlayTocado.current = true; }} onClickCapture={() => { overlayTocado.current = true; }}>
                 <p className="text-[10px] text-zinc-400 leading-snug">{OVERLAY_EDITOR_HELP}</p>
-                <CampoConVerificacion valor={overlayMarkup} bloque="titular"
+                <CampoConVerificacion valor={overlayMarkup} bloque="titular" sombra={overlayShadow}
                   colorResaltado={(emColors ?? []).find((c) => (overlayRole ? c.role === overlayRole : c.is_default))?.hex ?? null}
                   onCambio={(v) => { overlayTocado.current = true; setOverlayMarkup(v); }}>
                   <textarea
@@ -1357,7 +1357,7 @@ export function PieceActionsBar({
                     className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
                   />
                 </CampoConVerificacion>
-                <CampoConVerificacion valor={overlaySub} bloque="bajada"
+                <CampoConVerificacion valor={overlaySub} bloque="bajada" sombra={textDraft.sub.shadow ?? overlayShadow}
                   onCambio={(v) => { overlayTocado.current = true; setOverlaySub(v); }}>
                   <textarea
                     value={overlaySub}
