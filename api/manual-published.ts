@@ -23,9 +23,14 @@
  * Sólo canales cuyo `publication_path` es manual. Una franja de un canal del drenaje no se marca
  * desde aquí: el drenaje la publicaría igual y saldría dos veces.
  *
+ * EL ENLACE TIENE QUE SER DE LA PLATAFORMA DE LA FRANJA (2026-10-28). Se comprueba ANTES de escribir nada,
+ * contra los dominios de `intel.platform_link_domains` (`linkOfPlatform`): el 27-oct se marcaron 5 franjas de
+ * TikTok con la dirección de la imagen de la pieza, y nada lo paró.
+ *
  * POST /api/manual-published   { slot_id, link }
  *   Auth: admin JWT. 200 { ok, slot_id, piece_id, published_at, warnings[] }
- *   400 link inválido · 404 franja inexistente · 409 la franja ya no está pendiente o no es manual.
+ *   400 link inválido o de otra plataforma (`link_wrong_platform`) · 404 franja inexistente ·
+ *   409 la franja ya no está pendiente, no es manual, o su plataforma no declara dominios.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -34,7 +39,7 @@ import { applyCors, extractToken, SB_URL, SB_KEY } from './_calibrationShared.js
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
 import { requireReviewer, inReviewScope, denyOutOfScope } from './_reviewScope.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
-import { bookPlatformOf, cleanPostLink, manualBookRow, manualDrainRow, MARKABLE_SLOT_STATUSES } from './_manualShared.js';
+import { bookPlatformOf, cleanPostLink, linkOfPlatform, manualBookRow, manualDrainRow, MARKABLE_SLOT_STATUSES, wrongPlatformDetail } from './_manualShared.js';
 import type { ManualPieceInput } from './_manualShared.js';
 
 type Schema = 'intel' | 'content' | 'alerting' | 'public';
@@ -89,6 +94,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       + `&publication_path=eq.manual&select=brand_id,config&limit=1`);
     if (!manual.length) {
       return res.status(409).json({ error: 'channel_not_manual', detail: 'Este canal lo publica el drenaje; marcarlo a mano lo publicaría dos veces.' });
+    }
+
+    // El enlace, de la plataforma de la franja: se comprueba antes de escribir nada.
+    const dominios = (await rest<Array<{ domain: string }>>('intel',
+      `platform_link_domains?platform_key=eq.${encodeURIComponent(slot.platform_key)}&select=domain`)).map((d) => d.domain);
+    if (!dominios.length) {
+      return res.status(409).json({ error: 'platform_without_link_domain',
+        detail: `La plataforma «${slot.platform_key}» no declara sus dominios (intel.platform_link_domains): no se puede comprobar el enlace.` });
+    }
+    const delEnlace = linkOfPlatform(link, dominios);
+    if (!delEnlace.ok) {
+      return res.status(400).json({ error: 'link_wrong_platform', detail: wrongPlatformDetail(delEnlace.host, slot.platform_key, dominios) });
     }
 
     const at = new Date().toISOString();

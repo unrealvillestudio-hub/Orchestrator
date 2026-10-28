@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   canonicalizeSignature, manualTextOf, manualImagesOf, buildManualItems, manualChannelKey,
-  cleanPostLink, manualDrainRow, manualPasteOf, manualBookRow, bookPlatformOf,
+  cleanPostLink, manualDrainRow, manualPasteOf, manualBookRow, bookPlatformOf, linkOfPlatform, wrongPlatformDetail,
   ARTICLE_FORMAT, CAROUSEL_FORMAT, manualArticleOf, articleBodyHtml, articleBodyText, articleImagesOf, imagePlaceholder, coverAltOf,
   type ManualPieceInput, type ManualSlotRow,
 } from './_manualShared.js';
@@ -407,5 +407,31 @@ describe('artículo — título, portada y cuerpo por separado', () => {
     expect(a.text).toBe(manualPasteOf(pieces.get('p-a')!, MANUAL).text);
     expect(p.article).toBeUndefined();
     expect(p.text).toBe(`El título del artículo\n\n${CUERPO}\n\n${SIG}`);
+  });
+});
+
+describe('linkOfPlatform — el enlace es de la plataforma de la franja (2026-10-28)', () => {
+  const DOMS = ['surface.example', 'srf.example'];
+  it('vale el dominio, un subdominio suyo y la forma corta declarada', () => {
+    expect(linkOfPlatform('https://surface.example/p/1', DOMS)).toEqual({ ok: true });
+    expect(linkOfPlatform('https://vm.surface.example/abc', DOMS)).toEqual({ ok: true });
+    expect(linkOfPlatform('https://SRF.example/p/x', DOMS)).toEqual({ ok: true });
+  });
+  it('rechaza la imagen de la pieza en Storage, otra red y un dominio que sólo termina igual', () => {
+    expect(linkOfPlatform('https://proyecto.supabase.co/storage/v1/object/public/m/a-compuesta.png', DOMS))
+      .toEqual({ ok: false, host: 'proyecto.supabase.co' });
+    expect(linkOfPlatform('https://other.example/p/1', DOMS)).toEqual({ ok: false, host: 'other.example' });
+    expect(linkOfPlatform('https://notsurface.example/p/1', DOMS)).toEqual({ ok: false, host: 'notsurface.example' });
+    expect(linkOfPlatform('https://surface.example.evil.example/p/1', DOMS).ok).toBe(false);
+  });
+  it('sin dominios declarados nada vale', () => {
+    expect(linkOfPlatform('https://surface.example/p/1', []).ok).toBe(false);
+  });
+  it('el mensaje dice qué se pegó y qué se espera', () => {
+    const d = wrongPlatformDetail('proyecto.supabase.co', MANUAL, DOMS);
+    expect(d).toContain('«proyecto.supabase.co»');
+    expect(d).toContain(MANUAL);
+    expect(d).toContain('surface.example o srf.example');
+    expect(d).toContain('no el de la imagen');
   });
 });
