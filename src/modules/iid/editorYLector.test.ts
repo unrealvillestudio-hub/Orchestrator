@@ -46,7 +46,10 @@ describe('el lector en voz alta', () => {
   it('sale fuera de «Detalles» en Calibración/Arreglos y en Publicación', () => {
     // Una sola vez y sin envoltorio que lo esconda en el teléfono.
     expect(CALIB.match(/<SpeechReader /g)?.length).toBe(1);
-    expect(CALIB).toMatch(/\{readable && <SpeechReader piece=\{readable\} suggestedLang=\{piece\.reading_language\} \/>\}\n\s*<PieceActionsBar/);
+    // 2026-10-28 — la tarjeta por zonas: la lectura va justo después del texto, y debajo las correcciones del texto.
+    expect(CALIB).toContain('const lector = readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />;');
+    expect(CALIB).toMatch(/reader=\{lector\}/);
+    expect(PUBLISH).toMatch(/reader=\{lector\}/);
     expect(PUBLISH.match(/<SpeechReader /g)?.length).toBe(1);
     expect(PUBLISH).not.toMatch(/hidden md:block"><SpeechReader/);
   });

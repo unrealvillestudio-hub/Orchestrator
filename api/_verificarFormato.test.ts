@@ -85,3 +85,11 @@ describe('el cableado', () => {
     expect(MOD).toContain('<VerificarCuerpo valor={note} />');
   });
 });
+
+describe('la bajada con líneas aparte (Sam, 2026-10-28)', () => {
+  it('conserva los saltos, recorta cada línea y no deja líneas vacías', () => {
+    const r = verificarTextoImagen('El administrador no responde.\n\n  *_El contrato sí_* .', 'bajada');
+    expect(r.ok && r.text).toBe('El administrador no responde.\nEl contrato sí.');
+    expect(r.ok && r.markup).toBe('El administrador no responde.\n*_El contrato sí_*.');
+  });
+});

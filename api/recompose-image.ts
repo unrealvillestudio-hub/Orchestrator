@@ -64,7 +64,7 @@ import { carouselTextViewOf, readSlideTextRequest } from './_carouselText.js';
 import { readTextPlaceRequest, textPlaceOfImage } from './_textPlace.js';
 import { readTextColumnRequest, textColumnOfImage } from './_textColumn.js';
 import { readTextScaleRequest, textScaleOfImage } from './_textScale.js';
-import { textColorOptions } from './_textStyle.js';
+import { subBreaksOf, textColorOptions } from './_textStyle.js';
 import { textStyleWantsItalic } from './_textStyleShape.js';
 
 /**
@@ -246,6 +246,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(409).json({
           error: 'text_column_unsupported',
           detail: 'el motor recompuso la imagen pero no aplicó la columna del texto: falta desplegar content-run-stage con text_column o ImageLab con el compositor 1.17.0',
+        });
+      }
+      // 2026-10-28 — la bajada con líneas aparte: el motor la acusa sólo si el compositor que compuso las respeta (ImageLab ≥ 1.20.0).
+      const subConSaltos = conTexto && !!body.overlay_override && typeof body.overlay_override === 'object'
+        && subBreaksOf((body.overlay_override as Record<string, unknown>).subheadline).includes('\n');
+      if (subConSaltos && ef.body.text_sub_breaks_applied !== true) {
+        return res.status(409).json({
+          error: 'text_sub_breaks_unsupported',
+          detail: 'el motor recompuso la imagen pero no respetó las líneas aparte de la bajada: falta desplegar content-run-stage con los saltos de la bajada o ImageLab con el compositor 1.20.0',
         });
       }
       // 2026-10-28 — el tamaño, igual: el motor lo acusa sólo si el compositor que compuso sabe de él (ImageLab ≥ 1.19.0).
@@ -474,6 +483,13 @@ async function textoDeLaLamina(res: VercelResponse, piece: any, raw: unknown, ed
     return res.status(409).json({
       error: 'text_italic_unsupported',
       detail: 'el motor recompuso la lámina pero no aplicó la cursiva: falta desplegar content-run-stage con italic_spans o ImageLab con el compositor 1.18.0',
+    });
+  }
+  // 2026-10-28 — la bajada con líneas aparte, igual (ImageLab ≥ 1.20.0).
+  if (subBreaksOf(pedido.value.subheadline).includes('\n') && ef.body.text_sub_breaks_applied !== true) {
+    return res.status(409).json({
+      error: 'text_sub_breaks_unsupported',
+      detail: 'el motor recompuso la lámina pero no respetó las líneas aparte de la bajada: falta desplegar content-run-stage con los saltos de la bajada o ImageLab con el compositor 1.20.0',
     });
   }
   if (pedido.value.text_style && ef.body.text_style_applied !== true) {

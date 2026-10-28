@@ -70,7 +70,7 @@ export function verificarTextoImagen(markup: string, bloque: 'titular' | 'bajada
   const keep = (xs: string[]) => xs.filter((t) => text.includes(t));
   const emphasis = keep(p.emphasis), shadow_spans = keep(p.shadow_spans), italic_spans = keep(p.italic_spans);
   const limpio = overlayMarkupOf(text, emphasis, shadow_spans, italic_spans);
-  const escrito = String(markup ?? '').replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean).join(bloque === 'titular' ? '\n' : ' ');
+  const escrito = String(markup ?? '').replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean).join('\n');
   if (limpio !== escrito && !cambios.length) cambios.push('Las marcas quedaron pegadas al texto que marcan.');
   return { ok: true, markup: limpio, text, emphasis, shadow_spans, italic_spans,
     tramos: tramosDe(text, emphasis, shadow_spans, italic_spans), cambios };

@@ -92,9 +92,13 @@ export function subMarkupOf(sub: string | null | undefined, ts: TextStyle | null
   return overlayMarkupOf(sub ?? '', ts?.sub?.emphasis ?? [], ts?.sub?.shadow_spans ?? [], ts?.sub?.italic_spans ?? []);
 }
 
-/** Del marcado de la bajada a su texto y sus tramos. Una sola línea: los saltos se leen como espacios. PURO. */
+/**
+ * Del marcado de la bajada a su texto y sus tramos. PURO. 2026-10-28 — la bajada conserva sus líneas aparte (Sam: «en la
+ * bajada quisiera poder poner una línea aparte entre una oración y otra»), como el titular: cada línea recortada, sin
+ * líneas vacías (`subBreaksOf`). Un tramo marcado no cruza un salto: cada línea se lee por separado.
+ */
 export function parseSubMarkup(markup: string): { ok: true; sub: string | null; emphasis: string[]; shadow_spans: string[]; italic_spans: string[] } | { ok: false; error: string } {
-  const plano = String(markup ?? '').replace(/\s+/g, ' ').trim();
+  const plano = subBreaksOf(markup);
   if (!plano) return { ok: true, sub: null, emphasis: [], shadow_spans: [], italic_spans: [] };
   const p = parseOverlayMarkup(plano);
   if (!p.ok) return { ok: false, error: `En la bajada: ${p.error}` };
@@ -137,5 +141,10 @@ export function withBlock(draft: TextStyleDraft, which: 'headline' | 'sub', patc
   return { ...draft, [which]: { ...(draft[which] ?? BLOCK_VACIO), ...patch } };
 }
 
+/** La bajada con sus líneas aparte: cada línea recortada, sin líneas vacías. La misma regla que el carril. PURO. */
+export function subBreaksOf(raw: unknown): string {
+  return String(raw ?? '').replace(/\r\n?/g, '\n').split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
+}
+
 /** La ayuda del editor de la bajada. */
-export const SUB_EDITOR_HELP = 'Bajada: *así* resalta, ~así~ invierte la sombra y _así_ pone (o quita) la cursiva en ese tramo, como en el titular.';
+export const SUB_EDITOR_HELP = 'Bajada: Enter = línea aparte. *así* resalta, ~así~ invierte la sombra y _así_ pone (o quita) la cursiva en ese tramo, como en el titular.';
