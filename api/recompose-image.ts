@@ -63,6 +63,7 @@ import { callEdgeFunction } from './_challengedShared.js';
 import { carouselTextViewOf, readSlideTextRequest } from './_carouselText.js';
 import { readTextPlaceRequest, textPlaceOfImage } from './_textPlace.js';
 import { readTextColumnRequest, textColumnOfImage } from './_textColumn.js';
+import { readTextScaleRequest, textScaleOfImage } from './_textScale.js';
 import { textColorOptions } from './_textStyle.js';
 import { textStyleWantsItalic } from './_textStyleShape.js';
 
@@ -104,6 +105,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     text_place?: unknown;
     // 2026-10-24 — la columna del texto de la imagen: 'left' | 'center' | 'right' | null (ver `_textColumn.ts`).
     text_column?: unknown;
+    // 2026-10-28 — el tamaño del texto de la imagen: un número de 0,7 a 1,3 o null (ver `_textScale.ts`).
+    text_scale?: unknown;
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
@@ -172,7 +175,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const conColumna = Object.prototype.hasOwnProperty.call(body, 'text_column');
     const columna = conColumna ? readTextColumnRequest(body.text_column) : null;
     if (columna && !columna.ok) return res.status(400).json({ error: 'invalid text_column', detail: columna.error });
-    if (tieneImagen && !directive && !conTexto && !conUbicacion && !conColumna) {
+    // 2026-10-28 — EL TAMAÑO DEL TEXTO: el mismo trato que la columna.
+    const conTamano = Object.prototype.hasOwnProperty.call(body, 'text_scale');
+    const tamano = conTamano ? readTextScaleRequest(body.text_scale) : null;
+    if (tamano && !tamano.ok) return res.status(400).json({ error: 'invalid text_scale', detail: tamano.error });
+    if (tieneImagen && !directive && !conTexto && !conUbicacion && !conColumna && !conTamano) {
       return res.status(400).json({
         error: 'visual_directive required',
         detail: 'regenerar sin directriz devuelve el mismo defecto y cobra una generación por no cambiar nada. '
@@ -183,7 +190,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 2026-10-19 — EL TEXTO DE LA IMAGEN, SIN TOCAR LA ESCENA. Con `overlay_override` en el cuerpo no hay
     // directriz ni generación: se recompone sobre la escena limpia que ya existe (0 USD). El motor valida el
     // texto antes de componer; aquí sólo se exige que haya una imagen sobre la que escribir.
-    if (conTexto || conUbicacion || conColumna) {
+    if (conTexto || conUbicacion || conColumna || conTamano) {
       if (!tieneImagen) {
         return res.status(409).json({ error: 'no_image', detail: 'la pieza no tiene imagen: primero hay que generarla, después se escribe su texto' });
       }
@@ -193,6 +200,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ...(conTexto ? { overlay_override: body.overlay_override ?? null } : {}),
         ...(ubicacion && ubicacion.ok ? { text_place: ubicacion.value } : {}),
         ...(columna && columna.ok ? { text_column: columna.value } : {}),
+        ...(tamano && tamano.ok ? { text_scale: tamano.value } : {}),
         edit_reason: editReason || null, edited_by: session.sub || 'sam',
       });
       if (!ef.body?.ok) {
@@ -240,6 +248,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           detail: 'el motor recompuso la imagen pero no aplicó la columna del texto: falta desplegar content-run-stage con text_column o ImageLab con el compositor 1.17.0',
         });
       }
+      // 2026-10-28 — el tamaño, igual: el motor lo acusa sólo si el compositor que compuso sabe de él (ImageLab ≥ 1.19.0).
+      if (conTamano && ef.body.text_scale_applied !== true) {
+        return res.status(409).json({
+          error: 'text_scale_unsupported',
+          detail: 'el motor recompuso la imagen pero no aplicó el tamaño del texto: falta desplegar content-run-stage con text_scale o ImageLab con el compositor 1.19.0',
+        });
+      }
       let html: string | null = null;
       let artifact_url: string | null = null;
       try { const art = await ensureArtifact(pieceId); html = art.html; artifact_url = art.artifact_url; }
@@ -255,6 +270,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         text_place: ef.body.text_place ?? null,
         // 2026-10-24 — la columna que quedó guardada (o null: la de la marca).
         text_column: ef.body.text_column ?? null,
+        // 2026-10-28 — el tamaño del texto que quedó guardado (o null: el de la marca).
+        text_scale: ef.body.text_scale ?? null,
         artifact_url, html, artifact_refreshed: html !== null,
       });
     }
@@ -378,6 +395,8 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
       text_place: textPlaceOfImage(piece.assets),
       // 2026-10-24 — la columna del texto guardada en la imagen.
       text_column: textColumnOfImage(piece.assets),
+      // 2026-10-28 — el tamaño del texto guardado en la imagen (null = el de la marca).
+      text_scale: textScaleOfImage(piece.assets),
     });
   } catch (err) {
     console.error(`[recompose-image] GET colores ${pieceId}: ${String(err)}`);

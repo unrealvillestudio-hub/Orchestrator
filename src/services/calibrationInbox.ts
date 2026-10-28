@@ -652,6 +652,8 @@ export function recomposeImage(
     text_place?: TextPlace | null;
     // 2026-10-24 — la columna del texto de la imagen (`api/_textColumn.ts`). Sola o con el texto; no regenera.
     text_column?: TextColumn | null;
+    // 2026-10-28 — el tamaño del texto de la imagen (`api/_textScale.ts`). Solo o con el texto; no regenera.
+    text_scale?: number | null;
   },
 ): Promise<{
   ok: true; piece_id: string; image_url: string | null; composed: boolean;
@@ -665,6 +667,8 @@ export function recomposeImage(
   text_place?: TextPlace | null;
   /** 2026-10-24 — la columna del texto que quedó guardada (null = la de la marca). */
   text_column?: TextColumn | null;
+  /** 2026-10-28 — el tamaño del texto que quedó guardado (null = el de la marca). */
+  text_scale?: number | null;
   artifact_url: string | null; html: string | null; artifact_refreshed: boolean;
 }> {
   return req('/api/recompose-image', token, {
@@ -679,6 +683,7 @@ export function recomposeImage(
       // 2026-10-22 — ídem con la ubicación del texto.
       ...('text_place' in input ? { text_place: input.text_place ?? null } : {}),
       ...('text_column' in input ? { text_column: input.text_column ?? null } : {}),
+      ...('text_scale' in input ? { text_scale: input.text_scale ?? null } : {}),
     },
   });
 }
@@ -701,6 +706,8 @@ export function fetchEmphasisColors(token: string, pieceId: string): Promise<{
   text_place?: TextPlace | null;
   /** 2026-10-24 — la columna del texto guardada en la imagen de la pieza (null = la de la marca). */
   text_column?: TextColumn | null;
+  /** 2026-10-28 — el tamaño del texto guardado en la imagen de la pieza (null = el de la marca). */
+  text_scale?: number | null;
   /** 2026-10-23 — los colores posibles del texto de cada bloque, con el de siempre de cada uno. */
   text_colors?: TextColorOptions;
 }> {

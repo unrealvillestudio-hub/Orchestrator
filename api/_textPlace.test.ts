@@ -88,7 +88,7 @@ describe('el cableado', () => {
     expect(API).toContain("const conUbicacion = Object.prototype.hasOwnProperty.call(body, 'text_place');");
     expect(API).toContain("if (ubicacion && !ubicacion.ok) return res.status(400).json({ error: 'invalid text_place', detail: ubicacion.error });");
     // 2026-10-24 — la columna del texto entra por la misma rama sin generar.
-    const i = API.indexOf('if (conTexto || conUbicacion || conColumna) {');
+    const i = API.indexOf('if (conTexto || conUbicacion || conColumna || conTamano) {');
     expect(i).toBeGreaterThan(0);
     expect(i).toBeLessThan(API.indexOf('regenerate_image: true'));
     const rama = API.slice(i, API.indexOf("const modeRaw"));
@@ -112,7 +112,8 @@ describe('el cableado', () => {
     const cuerpo = MOD.slice(i, MOD.indexOf('const submitRegen', i));
     // 2026-10-24 — «Recomponer» manda la fila, la columna o las dos, cada una sólo si se eligió.
     expect(cuerpo).toContain("const pedido = { ...(placeSel ? { text_place: placeSel } : {}), ...(colSel ? { text_column: colSel } : {}) };");
-    expect(cuerpo).toContain("await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: '', ...pedido })");
+    // 2026-10-28 — y el tamaño del texto de la imagen, sólo si se movió el deslizador.
+    expect(cuerpo).toContain("await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: '', ...pedido,");
     expect(cuerpo).toContain('await saveSlideText(token, piece.piece_id, out)');
     expect(cuerpo, 'la lámina 2..N por su vía; la portada, por la imagen').toContain('if (laminaElegida && carouselView) {');
     expect(cuerpo).toContain('onRegenerated?.({ html: r.html');

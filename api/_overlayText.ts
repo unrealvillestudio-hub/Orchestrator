@@ -98,12 +98,16 @@ export function overlayMarkupOf(headline: string | null, emphasis: readonly stri
     }
     return out;
   };
-  const marcas: Array<{ at: number; mark: string; close: boolean }> = [];
-  for (const [a, b] of rangos(emphasis)) marcas.push({ at: a, mark: '*', close: false }, { at: b, mark: '*', close: true });
-  for (const [a, b] of rangos(shadowSpans)) marcas.push({ at: a, mark: '~', close: false }, { at: b, mark: '~', close: true });
-  for (const [a, b] of rangos(italicSpans)) marcas.push({ at: a, mark: '_', close: false }, { at: b, mark: '_', close: true });
-  // En la misma posición, primero se cierra y después se abre.
-  marcas.sort((x, y) => x.at - y.at || Number(y.close) - Number(x.close));
+  const marcas: Array<{ at: number; mark: string; close: boolean; a: number; b: number; k: number }> = [];
+  const poner = (terms: readonly string[], mark: string, k: number) => {
+    for (const [a, b] of rangos(terms)) marcas.push({ at: a, mark, close: false, a, b, k }, { at: b, mark, close: true, a, b, k });
+  };
+  poner(emphasis, '*', 0); poner(shadowSpans, '~', 1); poner(italicSpans, '_', 2);
+  // En la misma posición, primero se cierra y después se abre. 2026-10-28 — y las marcas se ANIDAN, no se cruzan: se
+  // cierra primero la que se abrió último, y se abre primero la que cierra último. Sam lo vio en la pieza 23698205: la
+  // bajada `*_El contrato sí_*` volvía al editor como `*_El contrato sí*_`, que se lee como un error de quien escribe.
+  marcas.sort((x, y) => x.at - y.at || Number(y.close) - Number(x.close)
+    || (x.close ? (y.a - x.a) || (y.k - x.k) : (y.b - x.b) || (x.k - y.k)));
   let out = '';
   let pos = 0;
   for (const m of marcas) { out += h.slice(pos, m.at) + m.mark; pos = m.at; }
