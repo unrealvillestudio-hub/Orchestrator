@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { tramosDe, verificarCuerpo, verificarTextoImagen } from './_verificarFormato';
+import { avisoSombra, sombraEfectiva, tramosDe, verificarCuerpo, verificarTextoImagen } from './_verificarFormato';
 import { overlayMarkupOf } from './_overlayText';
 import { subMarkupOf } from './_textStyle';
 
@@ -91,5 +91,29 @@ describe('la bajada con líneas aparte (Sam, 2026-10-28)', () => {
     const r = verificarTextoImagen('El administrador no responde.\n\n  *_El contrato sí_* .', 'bajada');
     expect(r.ok && r.text).toBe('El administrador no responde.\nEl contrato sí.');
     expect(r.ok && r.markup).toBe('El administrador no responde.\n*_El contrato sí_*.');
+  });
+});
+
+describe('la sombra que de verdad lleva cada trozo (Sam, 2026-10-28, pieza 23698205)', () => {
+  it('~así~ invierte la sombra del bloque: con «Con sombra» sale sin ella, con «Sin sombra» sale con ella', () => {
+    expect(sombraEfectiva({ sombra: true }, 'on')).toBe(false);
+    expect(sombraEfectiva({ sombra: false }, 'on')).toBe(true);
+    expect(sombraEfectiva({ sombra: true }, 'off')).toBe(true);
+    expect(sombraEfectiva({ sombra: false }, 'off')).toBe(false);
+    expect(sombraEfectiva({ sombra: true }, null)).toBeNull();
+  });
+
+  it('el caso de la pieza: «Con sombra» y ~El contrato sí~ avisa que ese tramo sale sin sombra', () => {
+    expect(avisoSombra('on', ['El contrato sí'])).toBe('Con «Con sombra», lo marcado con ~ sale SIN sombra: «El contrato sí». Si lo quiere con sombra, quite las ~.');
+    expect(avisoSombra('off', ['El contrato sí'])).toMatch(/lo único que sale CON sombra/);
+    expect(avisoSombra(null, ['x'])).toBeNull();
+    expect(avisoSombra('on', [])).toBeNull();
+  });
+
+  it('el editor le pasa a cada campo la sombra de su bloque', () => {
+    const MOD = readFileSync(new URL('../src/modules/iid/pieceActions.tsx', import.meta.url), 'utf8');
+    expect(MOD).toContain('bloque="titular" sombra={overlayShadow}');
+    expect(MOD).toContain('bloque="bajada" sombra={textDraft.sub.shadow ?? overlayShadow}');
+    expect(MOD).toContain('bloque="bajada" sombra={slideStyle.sub.shadow ?? slideStyle.headline.shadow}');
   });
 });
