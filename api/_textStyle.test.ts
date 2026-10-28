@@ -116,10 +116,11 @@ describe('el cableado', () => {
     expect((API.match(/error: 'text_style_unsupported'/g) ?? []).length).toBe(2);
   });
   it('el editor manda la bajada plana con sus tramos en text_style, en la imagen y en la lámina', () => {
-    expect(MOD).toContain('const subP = parseSubMarkup(overlaySub);');
-    expect(MOD).toContain('override = { headline: parsed.headline, subheadline: subP.sub, emphasis: parsed.emphasis,');
+    // 2026-10-28 — se lee con «Verificar formato» (`_verificarFormato.ts`), que usa `parseSubMarkup` y deja el texto limpio.
+    expect(MOD).toContain("const subP = verificarTextoImagen(overlaySub, 'bajada');");
+    expect(MOD).toContain('override = { headline: parsed.text, subheadline: subP.text || null, emphasis: parsed.emphasis,');
     expect(MOD).toContain('...(estilo ? { text_style: estilo } : {}),');
-    expect(MOD).toContain("const p = slideTextPayload(laminaElegida, { ...slideDraft, subheadline: subP.sub ?? '' });");
+    expect(MOD).toContain("const p = slideTextPayload(laminaElegida, { ...slideDraft, subheadline: subP.text });");
     expect(MOD).toContain('...(estiloCambia ? { text_style: estilo } : {})');
   });
   it('sin marcas en el código', () => {

@@ -9,20 +9,21 @@ import {
 } from '../../services/calibrationInbox';
 import { savePieceEdit } from '../../services/challengedInbox';
 import { effectiveFixImageMode, type FixRequestCode, type FixImageMode } from '../../../api/_fixRequest';
-import { overlayEditorSeed, overlayViewAfterApply, parseOverlayMarkup, shadowDefaultLabel, type ImageOverlayView, type EmphasisColorOption, type OverlayOverrideOut, type ShadowOption } from '../../../api/_overlayText';
-import { textStyleDraftOf, subMarkupOf, parseSubMarkup, textStylePayload, withBlock, SUB_EDITOR_HELP, type TextStyleDraft, type TextColorOptions } from '../../../api/_textStyle';
+import { overlayEditorSeed, overlayViewAfterApply, shadowDefaultLabel, type ImageOverlayView, type EmphasisColorOption, type OverlayOverrideOut, type ShadowOption } from '../../../api/_overlayText';
+import { textStyleDraftOf, subMarkupOf, textStylePayload, withBlock, SUB_EDITOR_HELP, type TextStyleDraft, type TextColorOptions } from '../../../api/_textStyle';
 import { TextBlockControls } from './TextStyleControls';
 import { highlightPayload, HIGHLIGHT_NOTE_MAX, type HighlightInput } from '../../../api/_highlights';
 import { SCENE_SLOTS, slotDirective, SLOT_CHANGE_MODE, MODE_HELP, type SceneCast, type ImageHistoryEntry } from '../../../api/_sceneCast';
 import { fmtInZone } from './pieceUi';
-import { alternarCursiva, CURSIVA_AYUDA } from './cursiva';
-import { BotonCursiva } from './BotonCursiva';
+import { CampoConVerificacion, VerificarCuerpo } from './VerificarFormato';
+import { verificarTextoImagen } from '../../../api/_verificarFormato';
 import {
   carouselViewAfterSlideSave, coverNoteOf, slideTabLabel, slideTextDraftOf, slideTextPayload, CAROUSEL_SLIDE_HELP,
   type CarouselTextView, type SlideTextDraft,
 } from '../../../api/_carouselText';
 import { TEXT_PLACE_CHOICES, TEXT_PLACE_HELP, textPlaceLabel, textPlaceNoteOf, textPlaceToSend, type TextPlace } from '../../../api/_textPlace';
 import { TEXT_COLUMN_CHOICES, TEXT_COLUMN_HELP, textColumnLabel, textColumnToSend, textLayoutNoteOf, type TextColumn } from '../../../api/_textColumn';
+import { TEXT_SCALE_HELP, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, clampTextScale, textScaleLabel, textScaleToSend } from '../../../api/_textScale';
 
 /**
  * pieceActions.tsx — U-5 · LAS ACCIONES DE UNA PIEZA, EN UN SOLO SITIO.
@@ -416,12 +417,8 @@ export const OVERLAY_EDITOR_FOOT =
   'No regenera la escena: recompone el texto sobre la imagen limpia que ya existe (0 USD). La pieza sigue en la bandeja.';
 export const OVERLAY_EDITOR_HELP =
   'Enter = nueva línea. *Así* = resaltado. ~Así~ = ese tramo con la sombra al revés del resto (sin sombra si el texto ' +
-  'la lleva; con sombra si no). _Así_ = cursiva (o recto, si esa parte ya va en cursiva). Cambia sólo la imagen: el ' +
-  'título y el gancho de la pieza no se tocan.';
-/** 2026-10-28 — la ayuda del botón «Cursiva» del texto de la imagen. */
-export const OVERLAY_ITALIC_HELP =
-  'Cursiva: selecciona el tramo y toca el botón (o escribe _así_). Si esa parte ya va en cursiva, sale recta. Si la fuente '
-  + 'de la marca no tiene cursiva, se inclina y la pieza lo avisa.';
+  'la lleva; con sombra si no). _Así_ = cursiva (o recto, si esa parte ya va en cursiva). «Verificar formato» enseña ' +
+  'cómo va a salir antes de aplicarlo. Cambia sólo la imagen: el título y el gancho de la pieza no se tocan.';
 
 /** 2026-10-20 — la sombra de todo el texto. `null` = lo que la marca hace (se dice cuál en el botón). */
 export const SHADOW_CHOICES: ReadonlyArray<{ value: 'on' | 'off' | null; label: string }> = [
@@ -553,12 +550,6 @@ export function PieceActionsBar({
 }) {
   const [panel, setPanel] = useState<PanelKey | null>(null);
   const [note, setNote] = useState('');
-  // 2026-10-28 — el cuadro del texto, para que el botón «Cursiva» sepa qué está seleccionado.
-  const notaRef = useRef<HTMLTextAreaElement>(null);
-  // 2026-10-28 — los campos del texto de la imagen, para el botón «Cursiva».
-  const overlayMarkupRef = useRef<HTMLTextAreaElement>(null);
-  const overlaySubRef = useRef<HTMLInputElement>(null);
-  const slideSubRef = useRef<HTMLInputElement>(null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState<PieceActionKey | null>(null);
   const [error, setError] = useState<null | { message: string; detail: string | null }>(null);
@@ -627,8 +618,13 @@ export function PieceActionsBar({
   const [colVigente, setColVigente] = useState<TextColumn | null>(null);
   const [colSel, setColSel] = useState<TextColumn | null>(null);
   const colActual = laminaElegida ? laminaElegida.text_column : colVigente;
+  // 2026-10-28 — EL TAMAÑO DEL TEXTO DE LA IMAGEN (Sam: «el zoom es para el embedded text»). Sólo la imagen de la pieza
+  // (y con ella la portada). `scaleSel` null = no se tocó el deslizador.
+  const [scaleVigente, setScaleVigente] = useState<number | null>(null);
+  const [scaleSel, setScaleSel] = useState<number | null>(null);
+  const scaleVisto = scaleSel ?? scaleVigente ?? 1;
   const elegirLamina = (n: number) => {
-    setSlideN(n); setError(null); setPlaceSel(null); setColSel(null);
+    setSlideN(n); setError(null); setPlaceSel(null); setColSel(null); setScaleSel(null);
     if (n > 1) {
       const lam = carouselView?.slides.find((s) => s.n === n) ?? null;
       // 2026-10-23 — la bajada abre con su resaltado y sus tramos de sombra marcados; los controles, con lo elegido.
@@ -684,6 +680,7 @@ export function PieceActionsBar({
       setSlideN(1);
       setPlaceSel(null);
       setColSel(null);
+      setScaleSel(null);
       overlayTocado.current = false;
       sembrarEditor(overlayVigente);
       // Sin opciones (o si la lectura falla) el editor funciona igual, sin selector de color.
@@ -697,6 +694,7 @@ export function PieceActionsBar({
           setCarouselView(r.carousel ?? null);
           setPlaceVigente(r.text_place ?? null);
           setColVigente(r.text_column ?? null);
+          setScaleVigente(r.text_scale ?? null);
         })
         .catch(() => { setEmColors([]); setCast(null); setHistory([]); setCarouselView(null); });
     }
@@ -776,15 +774,16 @@ export function PieceActionsBar({
   const submitOverlay = async (clear: boolean) => {
     let override: OverlayOverrideOut | null = null;
     if (!clear) {
-      const parsed = parseOverlayMarkup(overlayMarkup);
+      // 2026-10-28 — lo que viaja es lo mismo que enseña «Verificar formato», se haya tocado o no (`_verificarFormato.ts`).
+      const parsed = verificarTextoImagen(overlayMarkup, 'titular');
       if (!parsed.ok) { setError({ message: parsed.error, detail: null }); return; }
       // 2026-10-23 — la bajada con su resaltado y sus tramos de sombra, y lo elegido por bloque.
-      const subP = parseSubMarkup(overlaySub);
+      const subP = verificarTextoImagen(overlaySub, 'bajada');
       if (!subP.ok) { setError({ message: subP.error, detail: null }); return; }
       // 2026-10-28 — la cursiva por tramo del titular y de la bajada viaja en el bloque (ImageLab ≥ 1.18.0).
       const estilo = textStylePayload(textDraft, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans, italic_spans: subP.italic_spans },
         { italic_spans: parsed.italic_spans });
-      override = { headline: parsed.headline, subheadline: subP.sub, emphasis: parsed.emphasis,
+      override = { headline: parsed.text, subheadline: subP.text || null, emphasis: parsed.emphasis,
         ...(overlayRole && parsed.emphasis.length ? { emphasis_role: overlayRole } : {}),
         // 2026-10-20 — la sombra (toda o por tramos) y el color del filete: viajan sólo si se eligieron.
         ...(overlayShadow ? { text_shadow: overlayShadow } : {}),
@@ -800,11 +799,15 @@ export function PieceActionsBar({
       const lugar = clear ? null : textPlaceToSend(placeSel, placeVigente);
       // 2026-10-24 — y la columna elegida, con el mismo criterio.
       const columna = clear ? null : textColumnToSend(colSel, colVigente);
+      // 2026-10-28 — y el tamaño del texto, sólo si se movió el deslizador.
+      const tamano = clear ? undefined : textScaleToSend(scaleSel, scaleVigente);
       const r = await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: '', overlay_override: override,
-        ...(lugar ? { text_place: lugar } : {}), ...(columna ? { text_column: columna } : {}) });
+        ...(lugar ? { text_place: lugar } : {}), ...(columna ? { text_column: columna } : {}),
+        ...(tamano !== undefined ? { text_scale: tamano } : {}) });
       setOverlayVigente(overlayViewAfterApply(override));
       if (lugar) setPlaceVigente(r.text_place ?? lugar);
       if (columna) setColVigente(r.text_column ?? columna);
+      if (tamano !== undefined) { setScaleVigente(r.text_scale ?? tamano); setScaleSel(null); }
       onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: r.composed, refreshed: r.artifact_refreshed, posts: r.scheduled_posts_updated });
       setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated, portada: r.carousel_recomposed ?? null });
       setPanel(null);
@@ -817,9 +820,9 @@ export function PieceActionsBar({
   const submitSlideText = async () => {
     if (!laminaElegida || !carouselView) return;
     // 2026-10-23 — la bajada se escribe con marcas (*resaltado*, ~sombra~): viaja el texto plano y los tramos van en `text_style`.
-    const subP = parseSubMarkup(slideDraft.subheadline);
+    const subP = verificarTextoImagen(slideDraft.subheadline, 'bajada');
     if (!subP.ok) { setError({ message: subP.error, detail: null }); return; }
-    const p = slideTextPayload(laminaElegida, { ...slideDraft, subheadline: subP.sub ?? '' });
+    const p = slideTextPayload(laminaElegida, { ...slideDraft, subheadline: subP.text });
     if (!p.ok) { setError({ message: p.error, detail: null }); return; }
     // 2026-10-22 — la ubicación elegida viaja con el texto de la lámina (sólo si cambió).
     const lugar = textPlaceToSend(placeSel, laminaElegida.text_place);
@@ -870,9 +873,12 @@ export function PieceActionsBar({
    */
   const submitPlace = async () => {
     // 2026-10-24 — la fila, la columna o las dos: cada una viaja sólo si se eligió.
-    if (!placeSel && !colSel) return;
+    // 2026-10-28 — y el tamaño del texto de la imagen de la pieza (no de una lámina 2..N).
+    const tamano = laminaElegida ? undefined : textScaleToSend(scaleSel, scaleVigente);
+    if (!placeSel && !colSel && tamano === undefined) return;
     const pedido = { ...(placeSel ? { text_place: placeSel } : {}), ...(colSel ? { text_column: colSel } : {}) };
-    const nota = (n: number | null) => (colSel ? textLayoutNoteOf(placeSel, colSel, n) : textPlaceNoteOf(placeSel!, n));
+    const nota = (n: number | null) => (colSel ? textLayoutNoteOf(placeSel, colSel, n)
+      : placeSel ? textPlaceNoteOf(placeSel, n) : `La imagen se recompuso con el texto al ${textScaleLabel(tamano ?? null)}, sobre su misma foto (0 USD).`);
     setBusy('recompose_image'); setError(null); setRegenNote(null);
     try {
       if (laminaElegida && carouselView) {
@@ -882,14 +888,16 @@ export function PieceActionsBar({
         onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: true, refreshed: r.artifact_refreshed, posts: 0 });
         setRegenNote({ compuesta: true, refrescado: r.artifact_refreshed, posts: 0, lugar: nota(laminaElegida.n) });
       } else {
-        const r = await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: '', ...pedido });
+        const r = await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: '', ...pedido,
+          ...(tamano !== undefined ? { text_scale: tamano } : {}) });
         if (placeSel) setPlaceVigente(r.text_place ?? placeSel);
         if (colSel) setColVigente(r.text_column ?? colSel);
+        if (tamano !== undefined) setScaleVigente(r.text_scale ?? tamano);
         onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: r.composed, refreshed: r.artifact_refreshed, posts: r.scheduled_posts_updated });
         setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated,
           portada: r.carousel_recomposed ?? null, lugar: nota(null) });
       }
-      setPlaceSel(null); setColSel(null); setPanel(null);
+      setPlaceSel(null); setColSel(null); setScaleSel(null); setPanel(null);
     } catch (err) {
       setError(cardError(err, 'No se pudo recomponer con la ubicación pedida.'));
     } finally { setBusy(null); }
@@ -1236,8 +1244,8 @@ export function PieceActionsBar({
                   ))}
                   <button
                     onClick={submitPlace}
-                    disabled={!!busy || (!placeSel && !colSel)}
-                    title={placeSel || colSel ? 'Recompone sólo con la ubicación y la columna elegidas, sin cambiar el texto (0 USD)' : 'Elige primero una ubicación o una columna'}
+                    disabled={!!busy || (!placeSel && !colSel && (!!laminaElegida || textScaleToSend(scaleSel, scaleVigente) === undefined))}
+                    title={placeSel || colSel || scaleSel != null ? 'Recompone sólo con la ubicación, la columna y el tamaño elegidos, sin cambiar el texto (0 USD)' : 'Elige primero una ubicación, una columna o un tamaño'}
                     className="ml-1 px-2 py-0.5 rounded-lg text-[11px] border border-violet-500/60 bg-violet-500/15 text-violet-100 hover:bg-violet-500/25 disabled:opacity-40"
                   >
                     Recomponer
@@ -1245,6 +1253,28 @@ export function PieceActionsBar({
                 </div>
                 <p className="text-[10px] text-zinc-500 leading-snug">{TEXT_PLACE_HELP} Hoy: {textPlaceLabel(placeActual)}.</p>
                 <p className="text-[10px] text-zinc-500 leading-snug">{TEXT_COLUMN_HELP} Hoy: {textColumnLabel(colActual)}.</p>
+                {/* 2026-10-28 — EL TAMAÑO DEL TEXTO DE LA IMAGEN (Sam: «el zoom es para el embedded text»). Lo lleva el mismo
+                    «Recomponer» de arriba o «Aplicar texto»; rige la imagen de la pieza y la portada, no las láminas 2..N. */}
+                {!laminaElegida && (
+                  <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Tamaño del texto de la imagen">
+                    <span className="text-[10px] text-zinc-400 mr-1">Tamaño del texto</span>
+                    <button type="button" onClick={() => setScaleSel(clampTextScale(scaleVisto - TEXT_SCALE_STEP))}
+                      disabled={scaleVisto <= TEXT_SCALE_MIN} aria-label="Achicar el texto" title="Achicar el texto"
+                      className="px-1.5 rounded-lg text-[12px] border border-zinc-700 text-zinc-300 hover:text-white disabled:opacity-30">−</button>
+                    <input type="range" min={TEXT_SCALE_MIN} max={TEXT_SCALE_MAX} step={TEXT_SCALE_STEP} value={scaleVisto}
+                      onChange={(e) => setScaleSel(clampTextScale(e.target.value))}
+                      aria-label="Tamaño del texto" aria-valuetext={textScaleLabel(scaleVisto)}
+                      className="w-28 md:w-36 accent-violet-400 cursor-pointer" />
+                    <button type="button" onClick={() => setScaleSel(clampTextScale(scaleVisto + TEXT_SCALE_STEP))}
+                      disabled={scaleVisto >= TEXT_SCALE_MAX} aria-label="Agrandar el texto" title="Agrandar el texto"
+                      className="px-1.5 rounded-lg text-[12px] border border-zinc-700 text-zinc-300 hover:text-white disabled:opacity-30">+</button>
+                    <button type="button" onClick={() => setScaleSel(1)} title="Volver al tamaño de la marca"
+                      className="min-w-[3rem] text-[11px] font-mono text-zinc-300 hover:text-white">{textScaleLabel(scaleVisto)}</button>
+                  </div>
+                )}
+                {!laminaElegida && (
+                  <p className="text-[10px] text-zinc-500 leading-snug">{TEXT_SCALE_HELP} Hoy: {textScaleLabel(scaleVigente)}.</p>
+                )}
               </div>
             )}
 
@@ -1264,9 +1294,9 @@ export function PieceActionsBar({
                   aria-label={`Titular de la lámina ${laminaElegida.n}`}
                   className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
                 />
-                <div className="flex items-center gap-1.5">
+                <CampoConVerificacion valor={slideDraft.subheadline} bloque="bajada"
+                  onCambio={(v) => setSlideDraft({ ...slideDraft, subheadline: v })}>
                   <input
-                    ref={slideSubRef}
                     value={slideDraft.subheadline}
                     onChange={(e) => setSlideDraft({ ...slideDraft, subheadline: e.target.value })}
                     placeholder="Bajada (opcional): *así* resalta, ~así~ invierte la sombra, _así_ cursiva"
@@ -1274,9 +1304,7 @@ export function PieceActionsBar({
                     title={SUB_EDITOR_HELP}
                     className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
                   />
-                  <BotonCursiva campo={slideSubRef} valor={slideDraft.subheadline} marca="_" titulo={OVERLAY_ITALIC_HELP}
-                    onCambio={(v) => setSlideDraft({ ...slideDraft, subheadline: v })} />
-                </div>
+                </CampoConVerificacion>
                 <textarea
                   value={slideDraft.steps}
                   onChange={(e) => setSlideDraft({ ...slideDraft, steps: e.target.value })}
@@ -1312,21 +1340,20 @@ export function PieceActionsBar({
             {panel === 'regen' && regenTab === 'text' && !laminaElegida && (
               <div className="space-y-1.5" onChangeCapture={() => { overlayTocado.current = true; }} onClickCapture={() => { overlayTocado.current = true; }}>
                 <p className="text-[10px] text-zinc-400 leading-snug">{OVERLAY_EDITOR_HELP}</p>
-                <div className="flex items-start gap-1.5">
+                <CampoConVerificacion valor={overlayMarkup} bloque="titular"
+                  colorResaltado={(emColors ?? []).find((c) => (overlayRole ? c.role === overlayRole : c.is_default))?.hex ?? null}
+                  onCambio={(v) => { overlayTocado.current = true; setOverlayMarkup(v); }}>
                   <textarea
-                    ref={overlayMarkupRef}
                     value={overlayMarkup}
                     onChange={(e) => setOverlayMarkup(e.target.value)}
                     rows={4}
                     aria-label="Titular de la imagen"
                     className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
                   />
-                  <BotonCursiva campo={overlayMarkupRef} valor={overlayMarkup} marca="_" titulo={OVERLAY_ITALIC_HELP}
-                    onCambio={(v) => { overlayTocado.current = true; setOverlayMarkup(v); }} />
-                </div>
-                <div className="flex items-center gap-1.5">
+                </CampoConVerificacion>
+                <CampoConVerificacion valor={overlaySub} bloque="bajada"
+                  onCambio={(v) => { overlayTocado.current = true; setOverlaySub(v); }}>
                   <input
-                    ref={overlaySubRef}
                     value={overlaySub}
                     onChange={(e) => setOverlaySub(e.target.value)}
                     placeholder="Bajada (opcional): *así* resalta, ~así~ invierte la sombra, _así_ cursiva"
@@ -1334,9 +1361,7 @@ export function PieceActionsBar({
                     title={SUB_EDITOR_HELP}
                     className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
                   />
-                  <BotonCursiva campo={overlaySubRef} valor={overlaySub} marca="_" titulo={OVERLAY_ITALIC_HELP}
-                    onCambio={(v) => { overlayTocado.current = true; setOverlaySub(v); }} />
-                </div>
+                </CampoConVerificacion>
                 {/* 2026-10-19 — el color del resaltado: sólo los que la marca declara para él. */}
                 {!!emColors?.length && (
                   <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Color del resaltado">
@@ -1666,31 +1691,7 @@ export function PieceActionsBar({
             {copy?.label && !enTextoImagen && (
               <label className="block text-[11px] font-medium text-zinc-300">{copy.label}</label>
             )}
-            {/* 2026-10-28 — el botón «Cursiva» (Sam): pone o quita `*…*` en lo seleccionado del cuerpo. */}
-            {panel === 'edit' && !enTextoImagen && (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    const el = notaRef.current;
-                    if (!el) return;
-                    const r = alternarCursiva({ text: note, start: el.selectionStart, end: el.selectionEnd });
-                    if (r.text === note) return;
-                    setNote(r.text); setError(null); setWarnings([]);
-                    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(r.start, r.end); });
-                  }}
-                  title={CURSIVA_AYUDA}
-                  aria-label="Cursiva"
-                  className="px-2.5 py-0.5 rounded-lg border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 text-[12px] italic font-serif"
-                >
-                  Cursiva
-                </button>
-                <span className="text-[10px] text-zinc-500 leading-snug">{CURSIVA_AYUDA}</span>
-              </div>
-            )}
             {!enTextoImagen && panel !== 'approve' && <textarea
-              ref={notaRef}
               value={note}
               onChange={(e) => { setNote(e.target.value); setError(null); setWarnings([]); }}
               rows={panel === 'edit' ? 8 : 3}
@@ -1701,6 +1702,9 @@ export function PieceActionsBar({
                 copy?.focus,
               )}
             />}
+            {/* 2026-10-28 — «Verificar formato» (Sam), en lugar del botón «Cursiva»: enseña cómo salen la negrita y la
+                cursiva en el artículo y avisa de lo que no va a salir. */}
+            {panel === 'edit' && !enTextoImagen && <VerificarCuerpo valor={note} />}
 
             {/* LA GUARDA AVISA Y NO BLOQUEA. Se muestran sus avisos y se ofrece insistir:
                 convertirlos en un bloqueo sería cambiar el contrato por la puerta de atrás. */}
