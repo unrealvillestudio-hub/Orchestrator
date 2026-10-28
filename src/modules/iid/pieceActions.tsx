@@ -15,6 +15,8 @@ import { TextBlockControls } from './TextStyleControls';
 import { highlightPayload, HIGHLIGHT_NOTE_MAX, type HighlightInput } from '../../../api/_highlights';
 import { SCENE_SLOTS, slotDirective, SLOT_CHANGE_MODE, MODE_HELP, type SceneCast, type ImageHistoryEntry } from '../../../api/_sceneCast';
 import { fmtInZone } from './pieceUi';
+import { alternarCursiva, CURSIVA_AYUDA } from './cursiva';
+import { BotonCursiva } from './BotonCursiva';
 import {
   carouselViewAfterSlideSave, coverNoteOf, slideTabLabel, slideTextDraftOf, slideTextPayload, CAROUSEL_SLIDE_HELP,
   type CarouselTextView, type SlideTextDraft,
@@ -414,7 +416,12 @@ export const OVERLAY_EDITOR_FOOT =
   'No regenera la escena: recompone el texto sobre la imagen limpia que ya existe (0 USD). La pieza sigue en la bandeja.';
 export const OVERLAY_EDITOR_HELP =
   'Enter = nueva línea. *Así* = resaltado. ~Así~ = ese tramo con la sombra al revés del resto (sin sombra si el texto ' +
-  'la lleva; con sombra si no). Cambia sólo la imagen: el título y el gancho de la pieza no se tocan.';
+  'la lleva; con sombra si no). _Así_ = cursiva (o recto, si esa parte ya va en cursiva). Cambia sólo la imagen: el ' +
+  'título y el gancho de la pieza no se tocan.';
+/** 2026-10-28 — la ayuda del botón «Cursiva» del texto de la imagen. */
+export const OVERLAY_ITALIC_HELP =
+  'Cursiva: selecciona el tramo y toca el botón (o escribe _así_). Si esa parte ya va en cursiva, sale recta. Si la fuente '
+  + 'de la marca no tiene cursiva, se inclina y la pieza lo avisa.';
 
 /** 2026-10-20 — la sombra de todo el texto. `null` = lo que la marca hace (se dice cuál en el botón). */
 export const SHADOW_CHOICES: ReadonlyArray<{ value: 'on' | 'off' | null; label: string }> = [
@@ -546,6 +553,12 @@ export function PieceActionsBar({
 }) {
   const [panel, setPanel] = useState<PanelKey | null>(null);
   const [note, setNote] = useState('');
+  // 2026-10-28 — el cuadro del texto, para que el botón «Cursiva» sepa qué está seleccionado.
+  const notaRef = useRef<HTMLTextAreaElement>(null);
+  // 2026-10-28 — los campos del texto de la imagen, para el botón «Cursiva».
+  const overlayMarkupRef = useRef<HTMLTextAreaElement>(null);
+  const overlaySubRef = useRef<HTMLInputElement>(null);
+  const slideSubRef = useRef<HTMLInputElement>(null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState<PieceActionKey | null>(null);
   const [error, setError] = useState<null | { message: string; detail: string | null }>(null);
@@ -768,7 +781,9 @@ export function PieceActionsBar({
       // 2026-10-23 — la bajada con su resaltado y sus tramos de sombra, y lo elegido por bloque.
       const subP = parseSubMarkup(overlaySub);
       if (!subP.ok) { setError({ message: subP.error, detail: null }); return; }
-      const estilo = textStylePayload(textDraft, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans });
+      // 2026-10-28 — la cursiva por tramo del titular y de la bajada viaja en el bloque (ImageLab ≥ 1.18.0).
+      const estilo = textStylePayload(textDraft, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans, italic_spans: subP.italic_spans },
+        { italic_spans: parsed.italic_spans });
       override = { headline: parsed.headline, subheadline: subP.sub, emphasis: parsed.emphasis,
         ...(overlayRole && parsed.emphasis.length ? { emphasis_role: overlayRole } : {}),
         // 2026-10-20 — la sombra (toda o por tramos) y el color del filete: viajan sólo si se eligieron.
@@ -809,7 +824,7 @@ export function PieceActionsBar({
     // 2026-10-22 — la ubicación elegida viaja con el texto de la lámina (sólo si cambió).
     const lugar = textPlaceToSend(placeSel, laminaElegida.text_place);
     // 2026-10-23 — lo elegido por bloque, sólo si cambió; en la lámina el color de la palabra clave va en el bloque del titular.
-    const estilo = textStylePayload(slideStyle, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans }, { emphasis_role_in_block: true });
+    const estilo = textStylePayload(slideStyle, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans, italic_spans: subP.italic_spans }, { emphasis_role_in_block: true });
     const estiloCambia = JSON.stringify(estilo ?? null) !== JSON.stringify(laminaElegida.text_style ?? null);
     // 2026-10-24 — la columna elegida, sólo si cambió.
     const columna = textColumnToSend(colSel, laminaElegida.text_column);
@@ -1249,14 +1264,19 @@ export function PieceActionsBar({
                   aria-label={`Titular de la lámina ${laminaElegida.n}`}
                   className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
                 />
-                <input
-                  value={slideDraft.subheadline}
-                  onChange={(e) => setSlideDraft({ ...slideDraft, subheadline: e.target.value })}
-                  placeholder="Bajada (opcional): *así* resalta, ~así~ invierte la sombra"
-                  aria-label={`Bajada de la lámina ${laminaElegida.n}`}
-                  title={SUB_EDITOR_HELP}
-                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
-                />
+                <div className="flex items-center gap-1.5">
+                  <input
+                    ref={slideSubRef}
+                    value={slideDraft.subheadline}
+                    onChange={(e) => setSlideDraft({ ...slideDraft, subheadline: e.target.value })}
+                    placeholder="Bajada (opcional): *así* resalta, ~así~ invierte la sombra, _así_ cursiva"
+                    aria-label={`Bajada de la lámina ${laminaElegida.n}`}
+                    title={SUB_EDITOR_HELP}
+                    className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
+                  />
+                  <BotonCursiva campo={slideSubRef} valor={slideDraft.subheadline} marca="_" titulo={OVERLAY_ITALIC_HELP}
+                    onCambio={(v) => setSlideDraft({ ...slideDraft, subheadline: v })} />
+                </div>
                 <textarea
                   value={slideDraft.steps}
                   onChange={(e) => setSlideDraft({ ...slideDraft, steps: e.target.value })}
@@ -1292,21 +1312,31 @@ export function PieceActionsBar({
             {panel === 'regen' && regenTab === 'text' && !laminaElegida && (
               <div className="space-y-1.5" onChangeCapture={() => { overlayTocado.current = true; }} onClickCapture={() => { overlayTocado.current = true; }}>
                 <p className="text-[10px] text-zinc-400 leading-snug">{OVERLAY_EDITOR_HELP}</p>
-                <textarea
-                  value={overlayMarkup}
-                  onChange={(e) => setOverlayMarkup(e.target.value)}
-                  rows={4}
-                  aria-label="Titular de la imagen"
-                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
-                />
-                <input
-                  value={overlaySub}
-                  onChange={(e) => setOverlaySub(e.target.value)}
-                  placeholder="Bajada (opcional): *así* resalta, ~así~ invierte la sombra"
-                  aria-label="Bajada de la imagen"
-                  title={SUB_EDITOR_HELP}
-                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
-                />
+                <div className="flex items-start gap-1.5">
+                  <textarea
+                    ref={overlayMarkupRef}
+                    value={overlayMarkup}
+                    onChange={(e) => setOverlayMarkup(e.target.value)}
+                    rows={4}
+                    aria-label="Titular de la imagen"
+                    className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
+                  />
+                  <BotonCursiva campo={overlayMarkupRef} valor={overlayMarkup} marca="_" titulo={OVERLAY_ITALIC_HELP}
+                    onCambio={(v) => { overlayTocado.current = true; setOverlayMarkup(v); }} />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    ref={overlaySubRef}
+                    value={overlaySub}
+                    onChange={(e) => setOverlaySub(e.target.value)}
+                    placeholder="Bajada (opcional): *así* resalta, ~así~ invierte la sombra, _así_ cursiva"
+                    aria-label="Bajada de la imagen"
+                    title={SUB_EDITOR_HELP}
+                    className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
+                  />
+                  <BotonCursiva campo={overlaySubRef} valor={overlaySub} marca="_" titulo={OVERLAY_ITALIC_HELP}
+                    onCambio={(v) => { overlayTocado.current = true; setOverlaySub(v); }} />
+                </div>
                 {/* 2026-10-19 — el color del resaltado: sólo los que la marca declara para él. */}
                 {!!emColors?.length && (
                   <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Color del resaltado">
@@ -1636,7 +1666,31 @@ export function PieceActionsBar({
             {copy?.label && !enTextoImagen && (
               <label className="block text-[11px] font-medium text-zinc-300">{copy.label}</label>
             )}
+            {/* 2026-10-28 — el botón «Cursiva» (Sam): pone o quita `*…*` en lo seleccionado del cuerpo. */}
+            {panel === 'edit' && !enTextoImagen && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    const el = notaRef.current;
+                    if (!el) return;
+                    const r = alternarCursiva({ text: note, start: el.selectionStart, end: el.selectionEnd });
+                    if (r.text === note) return;
+                    setNote(r.text); setError(null); setWarnings([]);
+                    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(r.start, r.end); });
+                  }}
+                  title={CURSIVA_AYUDA}
+                  aria-label="Cursiva"
+                  className="px-2.5 py-0.5 rounded-lg border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 text-[12px] italic font-serif"
+                >
+                  Cursiva
+                </button>
+                <span className="text-[10px] text-zinc-500 leading-snug">{CURSIVA_AYUDA}</span>
+              </div>
+            )}
             {!enTextoImagen && panel !== 'approve' && <textarea
+              ref={notaRef}
               value={note}
               onChange={(e) => { setNote(e.target.value); setError(null); setWarnings([]); }}
               rows={panel === 'edit' ? 8 : 3}

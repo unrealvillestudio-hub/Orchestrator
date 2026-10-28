@@ -64,6 +64,7 @@ import { carouselTextViewOf, readSlideTextRequest } from './_carouselText.js';
 import { readTextPlaceRequest, textPlaceOfImage } from './_textPlace.js';
 import { readTextColumnRequest, textColumnOfImage } from './_textColumn.js';
 import { textColorOptions } from './_textStyle.js';
+import { textStyleWantsItalic } from './_textStyleShape.js';
 
 /**
  * Mismo techo que declara el motor (`SCENE_DIRECTIVE_MAX_CHARS` en content-run-stage). Se valida
@@ -216,6 +217,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(409).json({
           error: 'text_style_unsupported',
           detail: 'el motor recompuso la imagen pero no aplicó el color del texto, la bajada ni el grosor de la sombra: falta desplegar content-run-stage (unrlvl-iid-functions#469) o ImageLab con el compositor 1.16.0 (ImageLab#79)',
+        });
+      }
+      // 2026-10-28 — la cursiva por tramo: el motor la acusa sólo si el compositor que compuso sabe de ella (ImageLab ≥ 1.18.0).
+      if (conEstilo && textStyleWantsItalic((body.overlay_override as Record<string, unknown>).text_style) && ef.body.text_italic_applied !== true) {
+        return res.status(409).json({
+          error: 'text_italic_unsupported',
+          detail: 'el motor recompuso la imagen pero no aplicó la cursiva: falta desplegar content-run-stage con italic_spans o ImageLab con el compositor 1.18.0',
         });
       }
       // Lo mismo con la ubicación: un motor anterior recompondría en el lugar de siempre y respondería «ok».
@@ -441,6 +449,12 @@ async function textoDeLaLamina(res: VercelResponse, piece: any, raw: unknown, ed
     return res.status(409).json({
       error: 'text_column_unsupported',
       detail: 'el motor recompuso la lámina pero no aplicó la columna del texto: falta desplegar content-run-stage con text_column o ImageLab con el compositor 1.17.0',
+    });
+  }
+  if (textStyleWantsItalic(pedido.value.text_style) && ef.body.text_italic_applied !== true) {
+    return res.status(409).json({
+      error: 'text_italic_unsupported',
+      detail: 'el motor recompuso la lámina pero no aplicó la cursiva: falta desplegar content-run-stage con italic_spans o ImageLab con el compositor 1.18.0',
     });
   }
   if (pedido.value.text_style && ef.body.text_style_applied !== true) {

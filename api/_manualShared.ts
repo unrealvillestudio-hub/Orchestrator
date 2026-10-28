@@ -19,6 +19,8 @@
  * así que si no viaja en el texto se pierde. Si el texto ya abre con el título, no se repite.
  */
 
+import { inlineMarksToHtml, stripInlineMarks } from './_marcasEnLinea.js';
+
 // ── SIGNCANON ── COPIA del bloque SIGNCANON de `unrlvl-iid-functions`
 // (`content-run-stage` y `content-scheduler`, SIGN-02, 2026-09-15). Se copia porque el Orchestrator
 // no comparte módulos con las Edge Functions. Si la regla cambia allá, cambia aquí: dos firmas
@@ -273,7 +275,8 @@ function escapeHtml(s: string): string {
 
 /** Negrita: lo único que se interpreta dentro de un texto YA escapado. */
 function negrita(escapado: string): string {
-  return escapado.replace(/\*\*(.+?)\*\*/gu, '<strong>$1</strong>');
+  // 2026-10-28 — negrita y cursiva con la regla de las tres puntas (`_marcasEnLinea.ts`); antes era una negrita más laxa.
+  return inlineMarksToHtml(escapado);
 }
 
 /**
@@ -349,13 +352,13 @@ export function articleBodyHtml(md: string, parrafoEnlace: number | null = null,
   }).join('');
 }
 
-/** `markdown_min` → texto plano: sin `## ` ni `> ` al inicio de línea ni marcas de negrita; cada imagen, su lugar en texto. */
+/** `markdown_min` → texto plano: sin `## ` ni `> ` al inicio de línea ni marcas de negrita o cursiva; cada imagen, su lugar en texto. */
 export function articleBodyText(md: string, imagenes: ManualArticleImage[] = []): string {
   return md.split('\n')
     .map((l) => {
       const marca = MARCA_IMAGEN.exec(l.trim());
       if (marca) { const n = Number(marca[1]); return imagePlaceholder(n, imagenes.find((x) => x.n === n)?.alt); }
-      return l.replace(/^(\s*)##\s+/u, '$1').replace(/^(\s*)>\s?/u, '$1').replace(/\*\*(.+?)\*\*/gu, '$1');
+      return stripInlineMarks(l.replace(/^(\s*)##\s+/u, '$1').replace(/^(\s*)>\s?/u, '$1'));
     })
     .join('\n');
 }

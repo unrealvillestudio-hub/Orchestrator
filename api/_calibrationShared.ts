@@ -30,6 +30,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { hasInlineMarks, inlineMarksToHtml, stripInlineMarks } from './_marcasEnLinea.js';
 import type { PieceMetrics } from './_pieceMetrics.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
@@ -787,16 +788,17 @@ export function esc(s: unknown): string {
  * puntas, para que la bandeja muestre exactamente lo que se publica).
  */
 export const PROVIDERS_WITH_INLINE_EMPHASIS: ReadonlySet<string> = new Set(['vercel_html', 'shopify_blog']);
-const EMPHASIS = /\*\*(?!\s)([^*]+?)(?<!\s)\*\*/g;
+// 2026-10-28 — la negrita y la cursiva (`*así*`) viven en `_marcasEnLinea.ts`, la misma regla que los sitios y
+// que `blog-promoter`: aquí sólo se conserva el nombre de siempre.
 
-/** `**texto**` → `<strong>texto</strong>`. Recibe texto YA escapado. */
+/** `**texto**` → `<strong>` y `*texto*` → `<em>`. Recibe texto YA escapado. */
 export function emphasisToHtml(escaped: string): string {
-  return String(escaped).replace(EMPHASIS, '<strong>$1</strong>');
+  return inlineMarksToHtml(escaped);
 }
 
-/** ¿Trae el texto al menos una negrita bien formada? */
+/** ¿Trae el texto al menos una negrita o una cursiva bien formadas? */
 export function hasEmphasis(text: string): boolean {
-  return new RegExp(EMPHASIS.source).test(String(text ?? ''));
+  return hasInlineMarks(text);
 }
 
 /**
@@ -900,7 +902,7 @@ export function editorialToHtml(body: string, escape: (s: string) => string, inl
   return blocksOf(body).map((b) => {
     if (b.t === 'img') return inlineFigureHtml(b.n, inlineImages, escape);
     const inline = emphasisToHtml(escape(b.text)).replace(/\n/g, '<br>\n');
-    if (b.t === 'h') return `<h2 class="sec">${escape(b.text.replace(EMPHASIS, '$1'))}</h2>`;
+    if (b.t === 'h') return `<h2 class="sec">${escape(stripInlineMarks(b.text))}</h2>`;
     if (b.t === 'quote') return `<blockquote class="pull">${inline}</blockquote>`;
     return `<p>${inline}</p>`;
     // Saltos de línea ENTRE bloques: `readablePiece` lee `.text` con `textContent`, y sin

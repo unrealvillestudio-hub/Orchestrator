@@ -273,7 +273,7 @@ export interface ManualArticle {
   title: string;
   cover_url: string | null;
   body_markdown: string;
-  /** HTML mínimo y escapado en el server: `<p>`, `<br>`, `<h2>`, `<strong>`, `<blockquote>`, `<img>` y `<a href>` http(s). */
+  /** HTML mínimo y escapado en el server: `<p>`, `<br>`, `<h2>`, `<strong>`, `<em>` (desde 2026-10-28), `<blockquote>`, `<img>` y `<a href>` http(s). */
   body_html: string;
   /** El mismo HTML con cada imagen dicha en texto. Opcional: un servidor anterior no lo manda. */
   body_html_marked?: string;

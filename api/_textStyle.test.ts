@@ -52,8 +52,8 @@ describe('el borrador y lo que viaja', () => {
     const ts = { sub: { emphasis: ['el vecino'], shadow_spans: ['No fue'] } };
     const m = subMarkupOf('No fue el clima. Fue el vecino.', ts);
     expect(m).toBe('~No fue~ el clima. Fue *el vecino*.');
-    expect(parseSubMarkup(m)).toEqual({ ok: true, sub: 'No fue el clima. Fue el vecino.', emphasis: ['el vecino'], shadow_spans: ['No fue'] });
-    expect(parseSubMarkup('')).toEqual({ ok: true, sub: null, emphasis: [], shadow_spans: [] });
+    expect(parseSubMarkup(m)).toEqual({ ok: true, sub: 'No fue el clima. Fue el vecino.', emphasis: ['el vecino'], shadow_spans: ['No fue'], italic_spans: [] });
+    expect(parseSubMarkup('')).toEqual({ ok: true, sub: null, emphasis: [], shadow_spans: [], italic_spans: [] });
     const mal = parseSubMarkup('a *b');
     expect(mal.ok).toBe(false);
     if (!mal.ok) expect(mal.error).toMatch(/^En la bajada: /);
@@ -129,3 +129,19 @@ describe('el cableado', () => {
     }
   });
 });
+
+describe('la cursiva de la bajada y del titular viaja en el bloque (2026-10-28)', () => {
+  it('la bajada se edita con _cursiva_ y vuelve a su texto y sus tramos', () => {
+    const ts = { sub: { italic_spans: ['el clima'] } };
+    const m = subMarkupOf('No fue el clima.', ts);
+    expect(m).toBe('No fue _el clima_.');
+    expect(parseSubMarkup(m)).toEqual({ ok: true, sub: 'No fue el clima.', emphasis: [], shadow_spans: [], italic_spans: ['el clima'] });
+  });
+  it('textStylePayload lleva la cursiva del titular y de la bajada sólo si hay tramos', () => {
+    const d = textStyleDraftOf(null);
+    expect(textStylePayload(d, { emphasis: [], shadow_spans: [], italic_spans: ['el clima'] }, { italic_spans: ['Uno'] }))
+      .toEqual({ headline: { italic_spans: ['Uno'] }, sub: { italic_spans: ['el clima'] } });
+    expect(textStylePayload(d, { emphasis: [], shadow_spans: [], italic_spans: [] }, { italic_spans: [] })).toBeNull();
+  });
+});
+
