@@ -15,6 +15,7 @@ import { TextBlockControls } from './TextStyleControls';
 import { highlightPayload, HIGHLIGHT_NOTE_MAX, type HighlightInput } from '../../../api/_highlights';
 import { SCENE_SLOTS, slotDirective, SLOT_CHANGE_MODE, MODE_HELP, type SceneCast, type ImageHistoryEntry } from '../../../api/_sceneCast';
 import { fmtInZone } from './pieceUi';
+import { alternarCursiva, CURSIVA_AYUDA } from './cursiva';
 import {
   carouselViewAfterSlideSave, coverNoteOf, slideTabLabel, slideTextDraftOf, slideTextPayload, CAROUSEL_SLIDE_HELP,
   type CarouselTextView, type SlideTextDraft,
@@ -546,6 +547,8 @@ export function PieceActionsBar({
 }) {
   const [panel, setPanel] = useState<PanelKey | null>(null);
   const [note, setNote] = useState('');
+  // 2026-10-28 — el cuadro del texto, para que el botón «Cursiva» sepa qué está seleccionado.
+  const notaRef = useRef<HTMLTextAreaElement>(null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState<PieceActionKey | null>(null);
   const [error, setError] = useState<null | { message: string; detail: string | null }>(null);
@@ -1636,7 +1639,31 @@ export function PieceActionsBar({
             {copy?.label && !enTextoImagen && (
               <label className="block text-[11px] font-medium text-zinc-300">{copy.label}</label>
             )}
+            {/* 2026-10-28 — el botón «Cursiva» (Sam): pone o quita `*…*` en lo seleccionado del cuerpo. */}
+            {panel === 'edit' && !enTextoImagen && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    const el = notaRef.current;
+                    if (!el) return;
+                    const r = alternarCursiva({ text: note, start: el.selectionStart, end: el.selectionEnd });
+                    if (r.text === note) return;
+                    setNote(r.text); setError(null); setWarnings([]);
+                    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(r.start, r.end); });
+                  }}
+                  title={CURSIVA_AYUDA}
+                  aria-label="Cursiva"
+                  className="px-2.5 py-0.5 rounded-lg border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 text-[12px] italic font-serif"
+                >
+                  Cursiva
+                </button>
+                <span className="text-[10px] text-zinc-500 leading-snug">{CURSIVA_AYUDA}</span>
+              </div>
+            )}
             {!enTextoImagen && panel !== 'approve' && <textarea
+              ref={notaRef}
               value={note}
               onChange={(e) => { setNote(e.target.value); setError(null); setWarnings([]); }}
               rows={panel === 'edit' ? 8 : 3}
