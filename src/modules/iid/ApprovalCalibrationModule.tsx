@@ -21,6 +21,8 @@ import {
 } from './pieceUi';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
 import { SpeechReader } from '../../ui/SpeechReader';
+import { partirVista } from './vistaPartida';
+import { ImagenSiHay, VistaPrevia } from './VistaPartida';
 import { readableFromArtifactHtml } from './readablePiece';
 
 const PAGE = 20;
@@ -417,6 +419,24 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
       className="block text-[10px] font-mono text-zinc-600 hover:text-zinc-400 transition-colors truncate">{artUrl}</a>}
   </>);
 
+  // 2026-10-28 — la vista previa partida en imagen y texto, y lo que la barra de acciones recibe (una sola vez).
+  const vista = useMemo(() => partirVista(artHtml), [artHtml]);
+  // La lectura en voz alta, una sola vez y fuera de «Detalles» (Sam, 2026-10-01): va justo después del texto.
+  const lector = readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />;
+  const accionable = {
+    piece_id: piece.piece_id,
+    actions: piece.actions,
+    body: piece.body,
+    title: piece.title,
+    // SIN-IMAGEN-01 — decide si la acción de imagen dice «generar» o «regenerar», y si
+    // la directriz se exige. Ver `panelCopyFor`.
+    has_image: piece.has_image, research_hint: piece.research_hint, image_overlay: piece.image_overlay ?? null,
+  };
+  const alRecomponer = (r: { html: string | null; artifact_url: string | null }) => {
+    if (r.html) { rehecha.current = true; setArtHtml(r.html); setArtErr(null); }
+    if (r.artifact_url) setArtUrl(r.artifact_url);
+  };
+
   return (
     <RuleTextsProvider value={piece.rule_texts}><motion.div
       initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
@@ -446,47 +466,20 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
         {/* Escritorio: en su sitio de siempre. Teléfono: en «Detalles». */}
         <div className="hidden md:block space-y-4">{tecnico}</div>
 
-        {/* Artefacto embebido — LA PIEZA. En el teléfono va antes que cualquier dato técnico. */}
-        <div className="rounded-xl overflow-hidden border border-zinc-800 bg-[#050508]">
-          {artErr ? (
-            <div className="p-4 text-[11px] text-rose-400/90 font-mono flex items-center gap-2">
-              <AlertTriangle size={13} /> {artErr}
-            </div>
-          ) : artHtml === null ? (
-            <div className="flex items-center justify-center py-16 text-zinc-700"><Spinner size={18} /></div>
-          ) : (
-            <iframe
-              srcDoc={artHtml}
-              title={`preview-${piece.piece_id}`}
-              sandbox=""
-              className="w-full h-[70vh] md:h-[85vh]"
-              style={{ border: 'none', background: '#050508' }}
-            />
-          )}
-        </div>
-        <div className="hidden md:block space-y-4">{lectura}</div>
-
-        {/* U-5 — LAS ACCIONES. El MISMO componente que monta la bandeja de publicación: si
-            dos pantallas pueden divergir, divergirán, y aquí no pueden. Esta bandeja no
-            entrega `slot` porque lo suyo es una PREVISIÓN, no un compromiso — y una
-            previsión no se puede prometer liberar. */}
-        {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
+        {/* 2026-10-28 — LA TARJETA POR ZONAS (Sam): la imagen con sus correcciones debajo, el texto, la lectura con las
+            del texto debajo, el veredicto y, abajo de todo y plegada, la investigación. Hasta que el artefacto llega, o
+            si no tiene imagen que sacar, la vista de siempre. */}
         <PieceActionsBar
-          piece={{
-            piece_id: piece.piece_id,
-            actions: piece.actions,
-            body: piece.body,
-            title: piece.title,
-            // SIN-IMAGEN-01 — decide si la acción de imagen dice «generar» o «regenerar», y si
-            // la directriz se exige. Ver `panelCopyFor`.
-            has_image: piece.has_image, research_hint: piece.research_hint, image_overlay: piece.image_overlay ?? null,
-          }}
+          piece={accionable}
           token={token}
           onResolved={(id) => onResolved(id)}
-          onRegenerated={(r) => {
-            if (r.html) { rehecha.current = true; setArtHtml(r.html); setArtErr(null); }
-            if (r.artifact_url) setArtUrl(r.artifact_url);
-          }}
+          onRegenerated={alRecomponer}
+          media={<ImagenSiHay vista={vista} pieceId={piece.piece_id} />}
+          textView={<>
+            <VistaPrevia artHtml={artHtml} artErr={artErr} vista={vista} pieceId={piece.piece_id} />
+            <div className="hidden md:block mt-2">{lectura}</div>
+          </>}
+          reader={lector}
         />
 
         {/* MOBILE-FIRST — todo lo técnico, a un toque. Sólo existe en el teléfono: en escritorio

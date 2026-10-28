@@ -537,7 +537,7 @@ function cardError(err: unknown, caida: string): { message: string; detail: stri
 
 // ── El componente ────────────────────────────────────────────────────────────────
 export function PieceActionsBar({
-  piece, token, onResolved, onRegenerated, onEdited,
+  piece, token, onResolved, onRegenerated, onEdited, media, textView, reader, beforeVerdict,
 }: {
   piece: ActionablePiece;
   token: string;
@@ -547,6 +547,19 @@ export function PieceActionsBar({
   onRegenerated?: (r: { html: string | null; artifact_url: string | null; composed: boolean; refreshed: boolean; posts: number }) => void;
   /** El texto cambió: la bandeja puede refrescar lo que muestre de él. */
   onEdited?: (after: string) => void;
+  /**
+   * 2026-10-28 — LA TARJETA POR ZONAS (Sam): «las funciones de corrección de imagen y embedded text justamente abajo
+   * de la imagen; las de title y body justamente después de la franja del TTS; los botones de aprobar y demás después,
+   * justo antes de la tarjeta de investigación, abajo de todo y desplegable (cerrada)». Con `textView`, este componente
+   * pinta la tarjeta en ese orden: la imagen, sus correcciones, el texto (`textView`), la lectura (`reader`), sus
+   * correcciones, el veredicto y la investigación. Sin `textView`, el orden de siempre (las bandejas que no se partieron).
+   * `media` puede faltar (canal solo texto, o el artefacto todavía no llegó): la zona de la imagen queda con sus botones.
+   */
+  media?: React.ReactNode;
+  textView?: React.ReactNode;
+  reader?: React.ReactNode;
+  /** Lo que la bandeja quiere justo antes del veredicto (p. ej. el estado del canal en Publicación). */
+  beforeVerdict?: React.ReactNode;
 }) {
   const [panel, setPanel] = useState<PanelKey | null>(null);
   const [note, setNote] = useState('');
@@ -1062,10 +1075,8 @@ export function PieceActionsBar({
     );
   }
 
-  return (
-    <div className="space-y-2">
-      {piece.research_hint && <ResearchCaseLine pieceId={piece.piece_id} token={token} />}
-      {slotNote && (
+  // 2026-10-28 — cada nota y cada panel, por separado: la tarjeta por zonas los pone junto a lo que corrigen.
+  const notaFranja = slotNote && (
         <div className={cn(
           'text-[11px] font-mono leading-snug rounded-xl px-3 py-2 border',
           slotNote.tone === 'alert'
@@ -1074,9 +1085,8 @@ export function PieceActionsBar({
         )}>
           {slotNote.text}
         </div>
-      )}
-
-      {regenNote && (
+      );
+  const notaImagen = regenNote && (
         <div className="text-[11px] font-mono leading-snug text-violet-300/80 bg-violet-500/[0.06] border border-violet-500/20 rounded-xl px-3 py-2 space-y-0.5">
           <p>{regenNote.lugar
             ? regenNote.lugar
@@ -1094,18 +1104,16 @@ export function PieceActionsBar({
           {regenNote.posts > 0 && <p className="text-violet-300/60">{regenNote.posts} post pendiente de publicar actualizado con la imagen nueva.</p>}
           <p className="text-violet-300/50">Sigue sin veredicto: la pieza no se ha movido de la bandeja.</p>
         </div>
-      )}
-
-      {undoNote && (
+      );
+  const notaDeshacer = undoNote && (
         <div className="text-[11px] font-mono leading-snug text-emerald-300/85 bg-emerald-500/[0.06] border border-emerald-500/25 rounded-xl px-3 py-2 space-y-0.5">
           <p>{undoNote.que === 'image'
             ? 'Volvió la imagen anterior. La que estaba quedó en «Imágenes anteriores»: Deshacer otra vez la devuelve.'
             : `Volvió el ${undoNote.que === 'title' ? 'título' : 'texto'} anterior. Deshacer otra vez devuelve el que estaba.`}</p>
           {!undoNote.refrescado && <p className="text-amber-300/80">Se deshizo, pero la vista previa no se pudo rehacer: puede seguir mostrando la versión de antes.</p>}
         </div>
-      )}
-
-      {editNote && (
+      );
+  const notaEdicion = editNote && (
         <div className="text-[11px] font-mono leading-snug text-emerald-300/85 bg-emerald-500/[0.06] border border-emerald-500/25 rounded-xl px-3 py-2 space-y-0.5">
           <p>Texto guardado.{editNote.refrescado ? ' La vista previa ya muestra la versión nueva.' : ''}</p>
           {!editNote.refrescado && <p className="text-amber-300/80">Se guardó, pero la vista previa no se pudo rehacer: puede seguir mostrando la anterior.</p>}
@@ -1116,9 +1124,8 @@ export function PieceActionsBar({
             </div>
           )}
         </div>
-      )}
-
-      {error && (
+      );
+  const notaError = error && (
         <div className="text-xs text-rose-400 font-mono leading-snug space-y-1">
           <p>{error.message}</p>
           {error.detail && (
@@ -1128,10 +1135,8 @@ export function PieceActionsBar({
             </details>
           )}
         </div>
-      )}
-
-      <AnimatePresence mode="wait">
-        {panel ? (
+      );
+  const panelJsx = panel ? (
           <motion.div key={panel} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
             {/* EL COMPROMISO, ANTES DE ROMPERLO. La fecha sale de la misma función que la
                 pinta en la tarjeta: no se recalcula ni se formatea una segunda vez. */}
@@ -1296,10 +1301,11 @@ export function PieceActionsBar({
                 />
                 <CampoConVerificacion valor={slideDraft.subheadline} bloque="bajada"
                   onCambio={(v) => setSlideDraft({ ...slideDraft, subheadline: v })}>
-                  <input
+                  <textarea
                     value={slideDraft.subheadline}
                     onChange={(e) => setSlideDraft({ ...slideDraft, subheadline: e.target.value })}
-                    placeholder="Bajada (opcional): *así* resalta, ~así~ invierte la sombra, _así_ cursiva"
+                    rows={2}
+                    placeholder="Bajada (opcional). Enter = línea aparte. *así* resalta, ~así~ invierte la sombra, _así_ cursiva"
                     aria-label={`Bajada de la lámina ${laminaElegida.n}`}
                     title={SUB_EDITOR_HELP}
                     className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
@@ -1353,10 +1359,11 @@ export function PieceActionsBar({
                 </CampoConVerificacion>
                 <CampoConVerificacion valor={overlaySub} bloque="bajada"
                   onCambio={(v) => { overlayTocado.current = true; setOverlaySub(v); }}>
-                  <input
+                  <textarea
                     value={overlaySub}
                     onChange={(e) => setOverlaySub(e.target.value)}
-                    placeholder="Bajada (opcional): *así* resalta, ~así~ invierte la sombra, _así_ cursiva"
+                    rows={2}
+                    placeholder="Bajada (opcional). Enter = línea aparte. *así* resalta, ~así~ invierte la sombra, _así_ cursiva"
                     aria-label="Bajada de la imagen"
                     title={SUB_EDITOR_HELP}
                     className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
@@ -1744,7 +1751,20 @@ export function PieceActionsBar({
             </div>
             <p className="text-[10px] font-mono leading-snug text-zinc-600">{enTextoImagen ? OVERLAY_EDITOR_FOOT : copy?.foot}</p>
           </motion.div>
-        ) : (
+  ) : null;
+  // 2026-10-19 — el editor del texto de la imagen, a la vista (Sam no lo encontraba dentro de «Regenerar imagen»). Es
+  // el mismo panel, abierto en su pestaña; cuesta 0 USD.
+  const botonTextoImagen = texto && (
+    <button
+      onClick={() => { open('regen'); setRegenTab('text'); }}
+      disabled={!!busy}
+      title="Cambia el texto que va sobre la imagen: líneas, palabras resaltadas y su color. No regenera la escena (0 USD)."
+      className={cn('flex items-center justify-center gap-2 transition-colors', WEIGHT_SHAPE.tertiary, BUTTON_STYLE.recompose_image)}
+    >
+      {ICON.edit_text} Texto de la imagen
+    </button>
+  );
+  const actionsJsx = (
           <motion.div key="actions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
             {/* Juicio y sello: primero y juntos, sin un arreglo intercalado entre ellos. */}
             <div className="flex gap-2 flex-wrap">{juicio.map(pintar)}</div>
@@ -1752,22 +1772,68 @@ export function PieceActionsBar({
             {arreglo.length > 0 && (
               <div className="flex gap-1.5 flex-wrap items-center">
                 {arreglo.map(pintar)}
-                {/* 2026-10-19 — el editor del texto de la imagen, a la vista (Sam no lo encontraba dentro de
-                    «Regenerar imagen»). Es el mismo panel, abierto en su pestaña; cuesta 0 USD. */}
-                {texto && (
-                  <button
-                    onClick={() => { open('regen'); setRegenTab('text'); }}
-                    disabled={!!busy}
-                    title="Cambia el texto que va sobre la imagen: líneas, palabras resaltadas y su color. No regenera la escena (0 USD)."
-                    className={cn('flex items-center justify-center gap-2 transition-colors', WEIGHT_SHAPE.tertiary, BUTTON_STYLE.recompose_image)}
-                  >
-                    {ICON.edit_text} Texto de la imagen
-                  </button>
-                )}
+                {botonTextoImagen}
               </div>
             )}
           </motion.div>
+  );
+
+  if (textView !== undefined) {
+    // LA TARJETA POR ZONAS. Cada panel se abre en la zona de lo que corrige; el resto de la tarjeta sigue a la vista.
+    const zonaDe = (p: PanelKey | null) => (p === 'regen' ? 'imagen' : p === 'edit' ? 'texto' : p ? 'veredicto' : null);
+    const zona = zonaDe(panel);
+    const deImagen = arreglo.filter((b) => b.key === 'recompose_image');
+    const deTexto = arreglo.filter((b) => b.key !== 'recompose_image');
+    const enZona = (z: 'imagen' | 'texto' | 'veredicto', botones: React.ReactNode) => (
+      <AnimatePresence mode="wait">
+        {zona === z ? panelJsx : (
+          <motion.div key={`botones-${z}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>{botones}</motion.div>
         )}
+      </AnimatePresence>
+    );
+    return (
+      <div className="space-y-3">
+        {media}
+        <div className="space-y-2">
+          {notaImagen}
+          {zona === 'imagen' && notaError}
+          {enZona('imagen', (deImagen.length > 0 || texto) && (
+            <div className="flex gap-1.5 flex-wrap items-center">
+              {deImagen.map(pintar)}
+              {botonTextoImagen}
+            </div>
+          ))}
+        </div>
+        {textView}
+        {reader}
+        <div className="space-y-2">
+          {notaDeshacer}
+          {notaEdicion}
+          {zona === 'texto' && notaError}
+          {enZona('texto', deTexto.length > 0 && <div className="flex gap-1.5 flex-wrap items-center">{deTexto.map(pintar)}</div>)}
+        </div>
+        <div className="space-y-2">
+          {beforeVerdict}
+          {notaFranja}
+          {zona !== 'imagen' && zona !== 'texto' && notaError}
+          {enZona('veredicto', <div className="flex gap-2 flex-wrap">{juicio.map(pintar)}</div>)}
+        </div>
+        {piece.research_hint && <ResearchCaseLine pieceId={piece.piece_id} token={token} plegada />}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {piece.research_hint && <ResearchCaseLine pieceId={piece.piece_id} token={token} />}
+      {notaFranja}
+      {notaImagen}
+      {notaDeshacer}
+      {notaEdicion}
+      {notaError}
+
+      <AnimatePresence mode="wait">
+        {panel ? panelJsx : actionsJsx}
       </AnimatePresence>
     </div>
   );
@@ -1820,12 +1886,34 @@ export function researchCaseSummary(c: ResearchCase, viewedPieceId: string): {
   }
 }
 
+/** 2026-10-28 — el título de la investigación plegada: qué es y cuántas fuentes, en una línea. PURO. */
+export function researchCaseHeadline(s: ReturnType<typeof researchCaseSummary>): string {
+  const que = s.tone === 'ok' ? 'Investigación terminada' : s.tone === 'alert' ? 'Investigación con aviso' : 'Investigación en curso';
+  const n = s.sources.length;
+  return n ? `${que} · ${n} fuente${n === 1 ? '' : 's'}` : que;
+}
+
+/** 2026-10-28 — lo que se ve al desplegarla: el texto, el enlace y las fuentes. */
+function researchCaseBody(s: ReturnType<typeof researchCaseSummary>) {
+  return (<>
+    <p>{s.text}</p>
+    {s.link && <a href={s.link.href} target="_blank" rel="noreferrer" className="underline hover:text-white">{s.link.label}</a>}
+    {s.sources.length > 0 && (
+      <ul className="list-disc pl-4 space-y-0.5">
+        {s.sources.map((f) => (
+          <li key={f.url}><a href={f.url} target="_blank" rel="noreferrer" className="underline break-all hover:text-white">{f.title}</a></li>
+        ))}
+      </ul>
+    )}
+  </>);
+}
+
 /**
  * La línea del caso. Lee `/api/research-cases` una vez, y sólo en las tarjetas con `research_hint`:
  * una bandeja de cien tarjetas no hace cien peticiones para saber que casi ninguna tiene caso. Sin
  * casos, o sin la tabla (migración sin aplicar), no pinta nada: una línea vacía no es un error.
  */
-export function ResearchCaseLine({ pieceId, token }: { pieceId: string; token: string }) {
+export function ResearchCaseLine({ pieceId, token, plegada = false }: { pieceId: string; token: string; plegada?: boolean }) {
   const [c, setC] = useState<ResearchCase | null>(null);
   useEffect(() => {
     let vivo = true;
@@ -1836,6 +1924,24 @@ export function ResearchCaseLine({ pieceId, token }: { pieceId: string; token: s
   }, [pieceId, token]);
   if (!c) return null;
   const s = researchCaseSummary(c, pieceId);
+  const caja = cn(
+    'text-[11px] font-mono leading-snug rounded-xl px-3 py-2 border space-y-1',
+    s.tone === 'ok' ? 'bg-emerald-500/[0.06] border-emerald-500/25 text-emerald-300/90'
+      : s.tone === 'alert' ? 'bg-amber-500/[0.08] border-amber-500/40 text-amber-200'
+        : 'bg-zinc-800/40 border-zinc-700/60 text-zinc-300',
+  );
+  // 2026-10-28 — en la tarjeta por zonas va abajo de todo y plegada (Sam: «desplegable, cerrada por default»).
+  if (plegada) {
+    return (
+      <details className={caja}>
+        <summary className="cursor-pointer select-none flex items-center gap-1.5">
+          <Search size={12} className="shrink-0" />
+          <span>{researchCaseHeadline(s)}</span>
+        </summary>
+        <div className="pt-1 space-y-1">{researchCaseBody(s)}</div>
+      </details>
+    );
+  }
   return (
     <div className={cn(
       'text-[11px] font-mono leading-snug rounded-xl px-3 py-2 border space-y-1',

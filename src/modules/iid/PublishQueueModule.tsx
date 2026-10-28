@@ -17,6 +17,8 @@ import {
 import { PieceActionsBar } from './pieceActions';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
 import { SpeechReader } from '../../ui/SpeechReader';
+import { partirVista } from './vistaPartida';
+import { ImagenSiHay, VistaPrevia } from './VistaPartida';
 import { readableFromArtifactHtml } from './readablePiece';
 import ManualPublishModule from './ManualPublishModule';
 
@@ -341,6 +343,52 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
 
   const blocked = piece.channel.status !== 'operational';
 
+  // 2026-10-28 — la vista previa partida en imagen y texto, y lo que la barra de acciones recibe (una sola vez).
+  const vista = useMemo(() => partirVista(artHtml), [artHtml]);
+  // La lectura en voz alta, una sola vez y fuera de «Detalles» (Sam, 2026-10-01): va justo después del texto.
+  const lector = readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />;
+  const accionable = {
+    piece_id: piece.piece_id,
+    actions: piece.actions,
+    body: piece.body,
+    title: piece.title,
+    slot: slotsRead ? piece.slot : null,
+    // SIN-IMAGEN-01 — mismo dato en las tres bandejas: la acción no puede llamarse
+    // distinto según desde dónde se abra.
+    has_image: piece.has_image,
+    image_overlay: piece.image_overlay ?? null,
+    // INVESTIGAR — si la tarjeta pide el estado del caso de investigación.
+    research_hint: piece.research_hint,
+  };
+  const alRecomponer = (r: { html: string | null; artifact_url: string | null }) => {
+    if (r.html) { rehecha.current = true; setArtHtml(r.html); setArtErr(null); }
+    if (r.artifact_url) setArtUrl(r.artifact_url);
+  };
+  // ESTADO DEL CANAL, y sólo eso.
+  // U-5 — la coletilla que remitía a la otra bandeja para aprobar se retiró: estaba
+  // escrita a mano en esta pantalla, no salía de ningún campo del contrato, y
+  // con este corte dejó de ser cierta. Es el tercer texto caduco en dos días y todos
+  // compartían la misma forma: una frase que afirma qué puede hacer OTRA pantalla.
+  // La regla que deja escrita — si un texto afirma algo sobre disponibilidad, sale del
+  // contrato o no se escribe. Lo que esta pieza puede hacer está en sus botones.
+  const estadoCanal = (
+        <div
+          className={cn(
+            'flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] font-mono leading-snug border',
+            blocked
+              ? 'bg-rose-500/[0.06] border-rose-500/25 text-rose-300/90'
+              : 'bg-zinc-800/40 border-zinc-700/60 text-zinc-400'
+          )}
+        >
+          {blocked ? <Lock size={13} className="shrink-0 mt-0.5" /> : <Send size={13} className="shrink-0 mt-0.5" />}
+          <span>
+            {blocked
+              ? `${piece.channel.reason} — esta pieza no podría salir por su canal.`
+              : 'Canal operativo.'}
+          </span>
+        </div>
+  );
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
@@ -381,84 +429,25 @@ function PublishCard({ piece, token, onResolved, slotsRead }: {
 
         <div className="hidden md:block"><Provenance piece={piece} /></div>
 
-        {/* Artefacto embebido */}
-        <div className="rounded-xl overflow-hidden border border-zinc-800 bg-[#050508]">
-          {artErr ? (
-            <div className="p-4 text-[11px] text-rose-400/90 font-mono flex items-center gap-2">
-              <AlertTriangle size={13} /> {artErr}
-            </div>
-          ) : artHtml === null ? (
-            <div className="flex items-center justify-center py-16 text-zinc-700"><Spinner size={18} /></div>
-          ) : (
-            <iframe
-              srcDoc={artHtml}
-              title={`preview-${piece.piece_id}`}
-              sandbox=""
-              className="w-full h-[70vh] md:h-[85vh]"
-              style={{ border: 'none', background: '#050508' }}
-            />
-          )}
-        </div>
-        {artUrl && (
-          <a href={artUrl} target="_blank" rel="noopener noreferrer"
-             className="hidden md:block text-[10px] font-mono text-zinc-600 hover:text-zinc-400 transition-colors truncate">
-            {artUrl}
-          </a>
-        )}
-
-        {/* Lectura en voz alta. Va debajo de la vista previa porque se lee lo mismo que se
-            ve, y su propio bloque de texto es donde ocurre la selección: dentro del
-            `<iframe sandbox="">` de arriba, `getSelection()` no alcanza. */}
-        {/* Lectura en voz alta: visible en el teléfono también (Sam, 2026-10-01). */}
-        {readable && <SpeechReader piece={readable} suggestedLang={piece.reading_language} />}
-
-        {/* ESTADO DEL CANAL, y sólo eso.
-            U-5 — la coletilla que remitía a la otra bandeja para aprobar se retiró: estaba
-            escrita a mano en esta pantalla, no salía de ningún campo del contrato, y
-            con este corte dejó de ser cierta. Es el tercer texto caduco en dos días y todos
-            compartían la misma forma: una frase que afirma qué puede hacer OTRA pantalla.
-            La regla que deja escrita — si un texto afirma algo sobre disponibilidad, sale del
-            contrato o no se escribe. Lo que esta pieza puede hacer está en sus botones. */}
-        <div
-          className={cn(
-            'flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] font-mono leading-snug border',
-            blocked
-              ? 'bg-rose-500/[0.06] border-rose-500/25 text-rose-300/90'
-              : 'bg-zinc-800/40 border-zinc-700/60 text-zinc-400'
-          )}
-        >
-          {blocked ? <Lock size={13} className="shrink-0 mt-0.5" /> : <Send size={13} className="shrink-0 mt-0.5" />}
-          <span>
-            {blocked
-              ? `${piece.channel.reason} — esta pieza no podría salir por su canal.`
-              : 'Canal operativo.'}
-          </span>
-        </div>
-
-        {/* U-5 — LAS ACCIONES. El MISMO componente que monta la bandeja de calibración.
-            Aquí SÍ viaja `slot`: esta bandeja entrega el COMPROMISO de fecha, así que antes
-            de sellar una pieza el diálogo repite esa fecha y avisa de que la franja se
-            libera. Sam decide con el compromiso delante, no después de haberlo roto. */}
+        {/* 2026-10-28 — LA TARJETA POR ZONAS (Sam), como en Calibración: la imagen con sus correcciones debajo, el texto,
+            la lectura con las del texto debajo, el estado del canal y el veredicto, y la investigación plegada al final. */}
         <PieceActionsBar
-          piece={{
-            piece_id: piece.piece_id,
-            actions: piece.actions,
-            body: piece.body,
-            title: piece.title,
-            slot: slotsRead ? piece.slot : null,
-            // SIN-IMAGEN-01 — mismo dato en las tres bandejas: la acción no puede llamarse
-            // distinto según desde dónde se abra.
-            has_image: piece.has_image,
-            image_overlay: piece.image_overlay ?? null,
-            // INVESTIGAR — si la tarjeta pide el estado del caso de investigación.
-            research_hint: piece.research_hint,
-          }}
+          piece={accionable}
           token={token}
           onResolved={(id) => onResolved(id)}
-          onRegenerated={(r) => {
-            if (r.html) { rehecha.current = true; setArtHtml(r.html); setArtErr(null); }
-            if (r.artifact_url) setArtUrl(r.artifact_url);
-          }}
+          onRegenerated={alRecomponer}
+          media={<ImagenSiHay vista={vista} pieceId={piece.piece_id} />}
+          textView={<>
+            <VistaPrevia artHtml={artHtml} artErr={artErr} vista={vista} pieceId={piece.piece_id} />
+            {artUrl && (
+              <a href={artUrl} target="_blank" rel="noopener noreferrer"
+                 className="hidden md:block mt-2 text-[10px] font-mono text-zinc-600 hover:text-zinc-400 transition-colors truncate">
+                {artUrl}
+              </a>
+            )}
+          </>}
+          reader={lector}
+          beforeVerdict={estadoCanal}
         />
 
         {/* Móvil: lo técnico, plegado. En escritorio ya se pintó arriba. */}

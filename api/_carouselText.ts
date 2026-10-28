@@ -17,6 +17,7 @@
  */
 
 import { CAROUSEL_FORMAT } from './_manualShared.js';
+import { subBreaksOf } from './_textStyle.js';
 import { readTextPlaceRequest, storedTextPlace, type TextPlace } from './_textPlace.js';
 import { readTextColumnRequest, storedTextColumn, type TextColumn } from './_textColumn.js';
 import { textStyleOf, type TextStyle } from './_textStyleShape.js';
@@ -131,7 +132,8 @@ export function slideTextPayload(slide: CarouselSlideTextView, draft: SlideTextD
   const headline = draft.headline.replace(/\s+/g, ' ').trim();
   if (!headline) return { ok: false, error: `El titular de la lámina ${slide.n} no puede quedar vacío.` };
   if (headline.length > SLIDE_HEADLINE_MAX) return { ok: false, error: `El titular tiene ${headline.length} caracteres; el máximo es ${SLIDE_HEADLINE_MAX}.` };
-  const sub = draft.subheadline.replace(/\s+/g, ' ').trim();
+  // 2026-10-28 — la bajada conserva sus líneas aparte (`subBreaksOf`).
+  const sub = subBreaksOf(draft.subheadline);
   if (sub.length > SLIDE_SUBHEADLINE_MAX) return { ok: false, error: `La bajada tiene ${sub.length} caracteres; el máximo es ${SLIDE_SUBHEADLINE_MAX}.` };
   const eyebrow = draft.eyebrow.replace(/\s+/g, ' ').trim();
   if (eyebrow.length > SLIDE_EYEBROW_MAX) return { ok: false, error: `La etiqueta tiene ${eyebrow.length} caracteres; el máximo es ${SLIDE_EYEBROW_MAX}.` };
