@@ -76,11 +76,12 @@ export function imageOverlayOf(assets: any): ImageOverlayView | null {
 }
 
 /**
- * El titular como marcado editable: cada tramo resaltado entre asteriscos y, desde 2026-10-20, cada tramo con la
- * sombra al revés entre virgulillas (`~así~`). Las marcas se ponen por posición sobre el titular, así un tramo de
- * sombra puede contener un resaltado o cruzarlo. PURO.
+ * El titular como marcado editable: cada tramo resaltado entre asteriscos, desde 2026-10-20 cada tramo con la
+ * sombra al revés entre virgulillas (`~así~`) y desde 2026-10-28 cada tramo en cursiva entre guiones bajos (`_así_`).
+ * Las marcas se ponen por posición sobre el titular, así un tramo puede contener a otro o cruzarlo. PURO.
  */
-export function overlayMarkupOf(headline: string | null, emphasis: readonly string[], shadowSpans: readonly string[] = []): string {
+export function overlayMarkupOf(headline: string | null, emphasis: readonly string[], shadowSpans: readonly string[] = [],
+  italicSpans: readonly string[] = []): string {
   const h = String(headline ?? '');
   // Primera aparición que no se pise con otra del mismo tipo; de más largo a más corto (un tramo contenido en otro
   // no se marca dos veces).
@@ -100,6 +101,7 @@ export function overlayMarkupOf(headline: string | null, emphasis: readonly stri
   const marcas: Array<{ at: number; mark: string; close: boolean }> = [];
   for (const [a, b] of rangos(emphasis)) marcas.push({ at: a, mark: '*', close: false }, { at: b, mark: '*', close: true });
   for (const [a, b] of rangos(shadowSpans)) marcas.push({ at: a, mark: '~', close: false }, { at: b, mark: '~', close: true });
+  for (const [a, b] of rangos(italicSpans)) marcas.push({ at: a, mark: '_', close: false }, { at: b, mark: '_', close: true });
   // En la misma posición, primero se cierra y después se abre.
   marcas.sort((x, y) => x.at - y.at || Number(y.close) - Number(x.close));
   let out = '';
@@ -120,7 +122,7 @@ export function overlayEditorSeed(view: ImageOverlayView | null | undefined): {
   markup: string; sub: string; role: string | null; shadow: 'on' | 'off' | null; ruleRole: string | null; identityRole: string | null;
 } {
   return {
-    markup: overlayMarkupOf(view?.headline ?? null, view?.emphasis ?? [], view?.shadow_spans ?? []),
+    markup: overlayMarkupOf(view?.headline ?? null, view?.emphasis ?? [], view?.shadow_spans ?? [], view?.text_style?.headline?.italic_spans ?? []),
     sub: view?.subheadline ?? '',
     role: view?.emphasis_role ?? null,
     shadow: view?.text_shadow ?? null,
@@ -153,20 +155,23 @@ export function overlayViewAfterApply(override: OverlayOverrideOut | null): Imag
 }
 
 /**
- * Del marcado a lo que el motor espera. Un asterisco o una virgulilla sin pareja, un tramo vacío, más de 3 resaltados
- * o de 3 tramos de sombra, o un titular demasiado largo son errores que se dicen antes de mandar nada.
+ * Del marcado a lo que el motor espera. Un asterisco, una virgulilla o un guion bajo sin pareja, un tramo vacío, más de 3
+ * resaltados, de 3 tramos de sombra o de 3 en cursiva, o un titular demasiado largo son errores que se dicen antes de
+ * mandar nada. 2026-10-28 — `_así_` = cursiva (Sam): el texto de la imagen no lleva guiones bajos propios.
  */
 export function parseOverlayMarkup(markup: string):
-  { ok: true; headline: string; emphasis: string[]; shadow_spans: string[] } | { ok: false; error: string } {
+  { ok: true; headline: string; emphasis: string[]; shadow_spans: string[]; italic_spans: string[] } | { ok: false; error: string } {
   const lines = String(markup ?? '').replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return { ok: false, error: 'El texto de la imagen está vacío.' };
   const emphasis: string[] = [];
   const shadowSpans: string[] = [];
+  const italicSpans: string[] = [];
   const plain: string[] = [];
-  // Un tramo se lee con la OTRA marca ya quitada: así se pueden cruzar o anidar.
-  const tramos = (line: string, mark: '*' | '~', otra: '*' | '~', out: string[], vacio: string): string | null => {
-    const sin = line.split(otra).join('');
-    const re = mark === '*' ? /\*([^*]*)\*/g : /~([^~]*)~/g;
+  // Un tramo se lee con las OTRAS marcas ya quitadas: así se pueden cruzar o anidar.
+  const RE: Record<'*' | '~' | '_', RegExp> = { '*': /\*([^*]*)\*/g, '~': /~([^~]*)~/g, '_': /_([^_]*)_/g };
+  const tramos = (line: string, mark: '*' | '~' | '_', out: string[], vacio: string): string | null => {
+    const sin = (['*', '~', '_'] as const).filter((m) => m !== mark).reduce((t, m) => t.split(m).join(''), line);
+    const re = new RegExp(RE[mark].source, 'g');
     for (const m of sin.matchAll(re)) {
       const t = m[1].replace(/\s+/g, ' ').trim();
       if (!t) return vacio;
@@ -177,20 +182,24 @@ export function parseOverlayMarkup(markup: string):
   for (const line of lines) {
     if ((line.match(/\*/g) ?? []).length % 2) return { ok: false, error: `Un asterisco sin pareja en «${line}».` };
     if ((line.match(/~/g) ?? []).length % 2) return { ok: false, error: `Una virgulilla (~) sin pareja en «${line}».` };
-    const e1 = tramos(line, '*', '~', emphasis, 'Hay un resaltado vacío (**).');
+    if ((line.match(/_/g) ?? []).length % 2) return { ok: false, error: `Un guion bajo (_) de cursiva sin pareja en «${line}».` };
+    const e1 = tramos(line, '*', emphasis, 'Hay un resaltado vacío (**).');
     if (e1) return { ok: false, error: e1 };
-    const e2 = tramos(line, '~', '*', shadowSpans, 'Hay un tramo de sombra vacío (~~).');
+    const e2 = tramos(line, '~', shadowSpans, 'Hay un tramo de sombra vacío (~~).');
     if (e2) return { ok: false, error: e2 };
-    plain.push(line.replace(/[*~]/g, '').replace(/\s+/g, ' ').trim());
+    const e3 = tramos(line, '_', italicSpans, 'Hay un tramo en cursiva vacío (__).');
+    if (e3) return { ok: false, error: e3 };
+    plain.push(line.replace(/[*~_]/g, '').replace(/\s+/g, ' ').trim());
   }
   if (emphasis.length > OVERLAY_EMPHASIS_MAX) return { ok: false, error: `Hay ${emphasis.length} resaltados; el máximo es ${OVERLAY_EMPHASIS_MAX}.` };
   if (shadowSpans.length > OVERLAY_EMPHASIS_MAX) return { ok: false, error: `Hay ${shadowSpans.length} tramos de sombra; el máximo es ${OVERLAY_EMPHASIS_MAX}.` };
+  if (italicSpans.length > OVERLAY_EMPHASIS_MAX) return { ok: false, error: `Hay ${italicSpans.length} tramos en cursiva; el máximo es ${OVERLAY_EMPHASIS_MAX}.` };
   const headline = plain.join('\n');
   if (headline.length > OVERLAY_TEXT_MAX) return { ok: false, error: `El texto tiene ${headline.length} caracteres; el máximo es ${OVERLAY_TEXT_MAX}.` };
-  for (const t of [...emphasis, ...shadowSpans]) {
+  for (const t of [...emphasis, ...shadowSpans, ...italicSpans]) {
     if (!headline.includes(t)) return { ok: false, error: `El tramo «${t}» no queda igual en el texto: revise los espacios alrededor de las marcas.` };
   }
-  return { ok: true, headline, emphasis, shadow_spans: shadowSpans };
+  return { ok: true, headline, emphasis, shadow_spans: shadowSpans, italic_spans: italicSpans };
 }
 
 // ── EL COLOR DEL RESALTADO (2026-10-19) ─────────────────────────────────────────────────────────
