@@ -87,9 +87,9 @@ export function textStyleDraftOf(ts: TextStyle | null | undefined, legacyShadow:
   return { headline: b(ts?.headline), sub: b(ts?.sub) };
 }
 
-/** La bajada como marcado editable: `*resaltado*`, `~sombra al revés~` y `_cursiva_`, como el titular. PURO. */
+/** La bajada como marcado editable: `^resaltado^`, `*sólo color*`, `~sombra al revés~` y `_cursiva_`, como el titular. PURO. */
 export function subMarkupOf(sub: string | null | undefined, ts: TextStyle | null | undefined): string {
-  return overlayMarkupOf(sub ?? '', ts?.sub?.emphasis ?? [], ts?.sub?.shadow_spans ?? [], ts?.sub?.italic_spans ?? []);
+  return overlayMarkupOf(sub ?? '', ts?.sub?.emphasis ?? [], ts?.sub?.shadow_spans ?? [], ts?.sub?.italic_spans ?? [], ts?.sub?.color_spans ?? []);
 }
 
 /**
@@ -97,20 +97,20 @@ export function subMarkupOf(sub: string | null | undefined, ts: TextStyle | null
  * bajada quisiera poder poner una línea aparte entre una oración y otra»), como el titular: cada línea recortada, sin
  * líneas vacías (`subBreaksOf`). Un tramo marcado no cruza un salto: cada línea se lee por separado.
  */
-export function parseSubMarkup(markup: string): { ok: true; sub: string | null; emphasis: string[]; shadow_spans: string[]; italic_spans: string[] } | { ok: false; error: string } {
+export function parseSubMarkup(markup: string): { ok: true; sub: string | null; emphasis: string[]; shadow_spans: string[]; italic_spans: string[]; color_spans: string[] } | { ok: false; error: string } {
   const plano = subBreaksOf(markup);
-  if (!plano) return { ok: true, sub: null, emphasis: [], shadow_spans: [], italic_spans: [] };
+  if (!plano) return { ok: true, sub: null, emphasis: [], shadow_spans: [], italic_spans: [], color_spans: [] };
   const p = parseOverlayMarkup(plano);
   if (!p.ok) return { ok: false, error: `En la bajada: ${p.error}` };
-  return { ok: true, sub: p.headline, emphasis: p.emphasis, shadow_spans: p.shadow_spans, italic_spans: p.italic_spans };
+  return { ok: true, sub: p.headline, emphasis: p.emphasis, shadow_spans: p.shadow_spans, italic_spans: p.italic_spans, color_spans: p.color_spans };
 }
 
 /**
  * Lo que viaja como `text_style`: sólo lo elegido. `headlineSpans` y `headlineEmphasisRole` van aquí en las láminas
  * (en la imagen de la pieza viajan sueltos, como siempre). Sin nada elegido ⇒ null. PURO.
  */
-export function textStylePayload(draft: TextStyleDraft, sub: { emphasis: string[]; shadow_spans: string[]; italic_spans?: string[] },
-  headline: { shadow_spans?: string[]; emphasis_role_in_block?: boolean; italic_spans?: string[] } = {}): TextStyle | null {
+export function textStylePayload(draft: TextStyleDraft, sub: { emphasis: string[]; shadow_spans: string[]; italic_spans?: string[]; color_spans?: string[] },
+  headline: { shadow_spans?: string[]; emphasis_role_in_block?: boolean; italic_spans?: string[]; color_spans?: string[] } = {}): TextStyle | null {
   const blk = (d: TextBlockDraft, extra: Partial<TextStyleBlock>): TextStyleBlock | null => {
     const out: TextStyleBlock = {
       ...(d.role ? { role: d.role } : {}),
@@ -125,12 +125,16 @@ export function textStylePayload(draft: TextStyleDraft, sub: { emphasis: string[
     ...(headline.shadow_spans?.length ? { shadow_spans: headline.shadow_spans } : {}),
     // 2026-10-28 — la cursiva por tramo viaja siempre en el bloque (ImageLab ≥ 1.18.0).
     ...(headline.italic_spans?.length ? { italic_spans: headline.italic_spans } : {}),
+    // 2026-10-30 — y el color por tramo (ImageLab ≥ 1.21.0).
+    ...(headline.color_spans?.length ? { color_spans: headline.color_spans } : {}),
   });
   const s = blk(draft.sub, {
     ...(sub.emphasis.length ? { emphasis: sub.emphasis } : {}),
-    ...(sub.emphasis.length && draft.sub.emphasisRole ? { emphasis_role: draft.sub.emphasisRole } : {}),
+    // 2026-10-30 — el color elegido para el resaltado de la bajada vale también para sus tramos de sólo color.
+    ...((sub.emphasis.length || sub.color_spans?.length) && draft.sub.emphasisRole ? { emphasis_role: draft.sub.emphasisRole } : {}),
     ...(sub.shadow_spans.length ? { shadow_spans: sub.shadow_spans } : {}),
     ...(sub.italic_spans?.length ? { italic_spans: sub.italic_spans } : {}),
+    ...(sub.color_spans?.length ? { color_spans: sub.color_spans } : {}),
   });
   const out: TextStyle = { ...(h ? { headline: h } : {}), ...(s ? { sub: s } : {}) };
   return Object.keys(out).length ? out : null;
@@ -147,4 +151,4 @@ export function subBreaksOf(raw: unknown): string {
 }
 
 /** La ayuda del editor de la bajada. */
-export const SUB_EDITOR_HELP = 'Bajada: Enter = línea aparte. *así* resalta, ~así~ invierte la sombra y _así_ pone (o quita) la cursiva en ese tramo, como en el titular.';
+export const SUB_EDITOR_HELP = 'Bajada: Enter = línea aparte. ^así^ resalta (con la letra del resaltado), *así* cambia sólo el color, ~así~ invierte la sombra y _así_ pone (o quita) la cursiva en ese tramo, como en el titular.';

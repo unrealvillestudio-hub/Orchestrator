@@ -18,10 +18,12 @@ import { parseSubMarkup } from './_textStyle.js';
 import { hasInlineMarks, inlineMarksToHtml, stripInlineMarks } from './_marcasEnLinea.js';
 
 /** Un trozo del texto con lo que lleva. */
-export interface TramoVisto { text: string; resaltado: boolean; cursiva: boolean; sombra: boolean }
+export interface TramoVisto { text: string; resaltado: boolean; cursiva: boolean; sombra: boolean;
+  /** 2026-10-30 — `*así*`: sólo el color del resaltado, sin su letra. */
+  color: boolean }
 
 export type VerificacionImagen =
-  | { ok: true; markup: string; text: string; emphasis: string[]; shadow_spans: string[]; italic_spans: string[];
+  | { ok: true; markup: string; text: string; emphasis: string[]; shadow_spans: string[]; italic_spans: string[]; color_spans: string[];
       tramos: TramoVisto[]; cambios: string[] }
   | { ok: false; error: string };
 
@@ -43,14 +45,15 @@ function rangosDe(texto: string, terms: readonly string[]): Array<[number, numbe
 }
 
 /** El texto partido en trozos con lo que lleva cada uno: lo que la vista previa pinta. PURO. */
-export function tramosDe(texto: string, emphasis: readonly string[], shadow: readonly string[], italic: readonly string[]): TramoVisto[] {
+export function tramosDe(texto: string, emphasis: readonly string[], shadow: readonly string[], italic: readonly string[],
+  color: readonly string[] = []): TramoVisto[] {
   const en = (r: Array<[number, number]>, i: number) => r.some(([a, b]) => i >= a && i < b);
-  const re = rangosDe(texto, emphasis), so = rangosDe(texto, shadow), cu = rangosDe(texto, italic);
+  const re = rangosDe(texto, emphasis), so = rangosDe(texto, shadow), cu = rangosDe(texto, italic), co = rangosDe(texto, color);
   const out: TramoVisto[] = [];
   for (let i = 0; i < texto.length; i++) {
-    const f = { resaltado: en(re, i), cursiva: en(cu, i), sombra: en(so, i) };
+    const f = { resaltado: en(re, i), cursiva: en(cu, i), sombra: en(so, i), color: en(co, i) };
     const last = out[out.length - 1];
-    if (last && last.resaltado === f.resaltado && last.cursiva === f.cursiva && last.sombra === f.sombra) last.text += texto[i];
+    if (last && last.resaltado === f.resaltado && last.cursiva === f.cursiva && last.sombra === f.sombra && last.color === f.color) last.text += texto[i];
     else out.push({ text: texto[i], ...f });
   }
   return out;
@@ -68,12 +71,12 @@ export function verificarTextoImagen(markup: string, bloque: 'titular' | 'bajada
   const cambios: string[] = [];
   if (text !== crudo) cambios.push('Se quitó el espacio antes de un signo de cierre.');
   const keep = (xs: string[]) => xs.filter((t) => text.includes(t));
-  const emphasis = keep(p.emphasis), shadow_spans = keep(p.shadow_spans), italic_spans = keep(p.italic_spans);
-  const limpio = overlayMarkupOf(text, emphasis, shadow_spans, italic_spans);
+  const emphasis = keep(p.emphasis), shadow_spans = keep(p.shadow_spans), italic_spans = keep(p.italic_spans), color_spans = keep(p.color_spans);
+  const limpio = overlayMarkupOf(text, emphasis, shadow_spans, italic_spans, color_spans);
   const escrito = String(markup ?? '').replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean).join('\n');
   if (limpio !== escrito && !cambios.length) cambios.push('Las marcas quedaron pegadas al texto que marcan.');
-  return { ok: true, markup: limpio, text, emphasis, shadow_spans, italic_spans,
-    tramos: tramosDe(text, emphasis, shadow_spans, italic_spans), cambios };
+  return { ok: true, markup: limpio, text, emphasis, shadow_spans, italic_spans, color_spans,
+    tramos: tramosDe(text, emphasis, shadow_spans, italic_spans, color_spans), cambios };
 }
 
 /** El cuerpo de la pieza tal como lo pintan el blog y el artículo: negrita y cursiva, y lo que no va a salir. PURO. */

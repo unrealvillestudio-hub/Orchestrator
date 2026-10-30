@@ -65,7 +65,7 @@ import { readTextPlaceRequest, textPlaceOfImage } from './_textPlace.js';
 import { readTextColumnRequest, textColumnOfImage } from './_textColumn.js';
 import { readTextScaleRequest, textScaleOfImage } from './_textScale.js';
 import { subBreaksOf, textColorOptions } from './_textStyle.js';
-import { textStyleWantsItalic } from './_textStyleShape.js';
+import { textStyleWantsItalic, textStyleWantsColor } from './_textStyleShape.js';
 
 /**
  * Mismo techo que declara el motor (`SCENE_DIRECTIVE_MAX_CHARS` en content-run-stage). Se valida
@@ -232,6 +232,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(409).json({
           error: 'text_italic_unsupported',
           detail: 'el motor recompuso la imagen pero no aplicó la cursiva: falta desplegar content-run-stage con italic_spans o ImageLab con el compositor 1.18.0',
+        });
+      }
+      // 2026-10-30 — el color por tramo (`*así*`), igual (ImageLab ≥ 1.21.0).
+      if (conEstilo && textStyleWantsColor((body.overlay_override as Record<string, unknown>).text_style) && ef.body.text_color_applied !== true) {
+        return res.status(409).json({
+          error: 'text_color_unsupported',
+          detail: 'el motor recompuso la imagen pero no aplicó el color por tramo: falta desplegar content-run-stage con color_spans (unrlvl-iid-functions#538) o ImageLab con el compositor 1.21.0 (ImageLab#85)',
         });
       }
       // Lo mismo con la ubicación: un motor anterior recompondría en el lugar de siempre y respondería «ok».
@@ -483,6 +490,13 @@ async function textoDeLaLamina(res: VercelResponse, piece: any, raw: unknown, ed
     return res.status(409).json({
       error: 'text_italic_unsupported',
       detail: 'el motor recompuso la lámina pero no aplicó la cursiva: falta desplegar content-run-stage con italic_spans o ImageLab con el compositor 1.18.0',
+    });
+  }
+  // 2026-10-30 — el color por tramo de la lámina, igual (ImageLab ≥ 1.21.0).
+  if (textStyleWantsColor(pedido.value.text_style) && ef.body.text_color_applied !== true) {
+    return res.status(409).json({
+      error: 'text_color_unsupported',
+      detail: 'el motor recompuso la lámina pero no aplicó el color por tramo: falta desplegar content-run-stage con color_spans (unrlvl-iid-functions#538) o ImageLab con el compositor 1.21.0 (ImageLab#85)',
     });
   }
   // 2026-10-28 — la bajada con líneas aparte, igual (ImageLab ≥ 1.20.0).

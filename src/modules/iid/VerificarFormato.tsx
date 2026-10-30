@@ -29,7 +29,7 @@ export function CampoConVerificacion({ children, valor, bloque, onCambio, colorR
       <div className="flex items-start gap-1.5">
         {children}
         <button type="button" onClick={verificar} className={BOTON}
-          title="Revisa las marcas (*resaltado*, _cursiva_, ~sombra~), las deja bien escritas y enseña cómo va a salir.">
+          title="Revisa las marcas (^resaltado^, *sólo color*, _cursiva_, ~sombra~), las deja bien escritas y enseña cómo va a salir.">
           Verificar formato
         </button>
       </div>
@@ -41,12 +41,13 @@ export function CampoConVerificacion({ children, valor, bloque, onCambio, colorR
             <p className="text-sm text-zinc-100 whitespace-pre-wrap leading-snug">
               {visto.tramos.map((t, i) => (
                 <span key={i}
-                  title={[t.resaltado && 'resaltado', t.cursiva && 'cursiva',
+                  title={[t.resaltado && 'resaltado', t.color && !t.resaltado && 'sólo color', t.cursiva && 'cursiva',
                     sombraEfectiva(t, sombra) === true ? 'con sombra' : sombraEfectiva(t, sombra) === false ? (t.sombra ? 'sin sombra (~)' : 'sin sombra') : t.sombra && 'sombra al revés',
                   ].filter(Boolean).join(' · ') || undefined}
                   className={t.resaltado ? 'font-semibold' : undefined}
                   style={{
-                    ...(t.resaltado ? { color: colorResaltado || '#c4b5fd' } : {}),
+                    // 2026-10-30 — `*así*` lleva el color del resaltado sin su letra (sin negrita aquí).
+                    ...(t.resaltado || t.color ? { color: colorResaltado || '#c4b5fd' } : {}),
                     ...(t.cursiva ? { fontStyle: 'italic' } : {}),
                     // 2026-10-28 — la sombra que de verdad lleva el trozo; sin saberla (la de la marca), el tramo ~ subrayado.
                     ...(sombraEfectiva(t, sombra) === true ? { textShadow: '0 1px 3px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.8)' } : {}),
