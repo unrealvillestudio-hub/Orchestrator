@@ -171,7 +171,42 @@ export function filaDeDecision(
   };
 }
 
-/** La URL pública del objeto. La bandeja muestra la imagen; sin esto mostraría su nombre. */
+/**
+ * LOS BUCKETS DE ATERRIZAJE QUE DECLARAN LAS FILAS DE LOS PRINCIPALES. Puro: recibe las filas ya
+ * leídas y devuelve la lista de buckets distintos, en el orden en que aparecen.
+ *
+ * POR QUÉ ESTO ES UNA FUNCIÓN Y NO UNA CONSTANTE (2026-10-30). El bucket en el que aterriza lo que
+ * sube un agente es **dato de la fila**, no eje del sistema: `intel.media_principals.allowed_bucket`
+ * lo declara por principal, y el corredor (`media-grant`) emite el permiso contra ese mismo valor.
+ * Cablearlo aquí haría que el día que cambie la fila la bandeja mirase donde ya no aterriza nada
+ * —y mirar un prefijo vacío se lee igual que «no hay nada pendiente», que es el fallo silencioso
+ * que esta bandeja existe para no tener.
+ *
+ * Sólo cuentan las filas ACTIVAS: un principal desactivado no recibe permisos nuevos, así que su
+ * bucket no es zona de entrada viva. Una fila sin `allowed_bucket` no aporta nada —el corredor cae
+ * a su propio valor por defecto— y por eso, si ninguna lo declara, se devuelve `porDefecto`: una
+ * lista vacía haría que la bandeja no mirase a ninguna parte.
+ */
+export function bucketsDeclarados(filas: unknown, porDefecto: string): string[] {
+  const vistos: string[] = [];
+  for (const f of Array.isArray(filas) ? filas : []) {
+    const fila = (f ?? {}) as { allowed_bucket?: unknown; active?: unknown };
+    if (fila.active === false) continue;
+    const b = String(fila.allowed_bucket ?? '').trim();
+    if (b && !vistos.includes(b)) vistos.push(b);
+  }
+  return vistos.length ? vistos : [porDefecto];
+}
+
+/**
+ * La URL pública del objeto, para un bucket PÚBLICO.
+ *
+ * NO sirve para la zona de entrada desde el 2026-10-30: `unrlvl-media-staging` es privado y una URL
+ * `object/public/…` contra un bucket privado devuelve 400 —el navegador pinta un hueco, no un
+ * error—. Lo que necesita la tarjeta es una URL FIRMADA, que no se puede construir sin red y por
+ * eso vive en `_mediaStore.ts` (`urlesFirmadas`). Esta función se conserva porque sigue siendo la
+ * correcta para lo YA PROMOVIDO, que aterriza en el bucket público.
+ */
 export function urlDelObjeto(base: string, bucket: string, objectPath: string): string {
   const raiz = String(base ?? '').replace(/\/+$/, '');
   return `${raiz}/storage/v1/object/public/${bucket}/${objectPath.split('/').map(encodeURIComponent).join('/')}`;

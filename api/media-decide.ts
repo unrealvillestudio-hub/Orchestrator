@@ -16,6 +16,19 @@
  * SE COPIA, SE VERIFICA Y LUEGO SE BORRA. Es el patrón que ya usa el promotor del carril para
  * `temp/` → `permanent/`: un `move` que falle a mitad deja el objeto en ninguna parte.
  *
+ * ── CAMBIOS (2026-10-30) · LA PROMOCIÓN CRUZA DE BUCKET ──────────────────────────────────────
+ *
+ * El objeto sale del bucket PRIVADO de entrada —el que declara la fila del principal, desde
+ * `unrlvl-iid-functions#537`— y entra en el PÚBLICO, en `permanent/<marca>/promovidas/`. Dos cosas
+ * que no son detalle:
+ *
+ *   · EL BUCKET DE ORIGEN SE BUSCA, NO SE SUPONE. Se recorren los buckets de aterrizaje y se usa
+ *     el primero donde el objeto EXISTE. Suponerlo y errar borraría—o no encontraría— el objeto
+ *     justo cuando alguien acaba de decidir sobre él.
+ *   · EL BUCKET QUEDA ESCRITO EN `outcome_detail`. La tabla de decisiones guarda la ruta y no el
+ *     bucket; mientras no tenga columna propia, el detalle del desenlace lo dice, porque una ruta
+ *     sin bucket ya no identifica un objeto.
+ *
  * POST /api/media-decide   { object_path, decision: 'promote'|'discard', motive }
  *   200 { ok, decision, object_path, destination_path?, outcome }
  *   400 lo pedido no se entiende · 403 fuera de alcance · 404 el objeto no está
@@ -25,7 +38,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, extractToken, SB_URL, SB_KEY } from './_calibrationShared.js';
 import { requireReviewer, inReviewScope, denyOutOfScope, signerOf } from './_reviewScope.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
-import { BUCKET, existe, copiar, borrar } from './_mediaStore.js';
+import { BUCKET_PUBLICO, bucketsDeAterrizaje, existe, copiar, borrar } from './_mediaStore.js';
 import { decisionPedida, filaDeDecision } from './_mediaTray.js';
 
 const TABLA = 'media_promotion_decisions';
@@ -54,9 +67,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'destino_no_derivable', detail: 'De esa ruta no se puede derivar un destino.' });
   }
 
-  // 2 · ¿ESTÁ? Un 404 limpio vale más que una copia que falla por un objeto que no existe.
+  // 2 · ¿ESTÁ, Y EN QUÉ BUCKET? Un 404 limpio vale más que una copia que falla por un objeto que
+  // no existe — y el bucket se BUSCA, porque suponerlo y errar toca el objeto equivocado.
+  let bucketOrigen = '';
   try {
-    if (!await existe(pedido.object_path)) {
+    for (const b of await bucketsDeAterrizaje()) {
+      if (await existe(b, pedido.object_path)) { bucketOrigen = b; break; }
+    }
+    if (!bucketOrigen) {
       return res.status(404).json({
         error: 'objeto_no_encontrado',
         detail: 'Ese objeto ya no está en la zona de entrada. Puede que alguien lo haya decidido antes.',
@@ -104,12 +122,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let detalle: string | null = null;
   try {
     if (pedido.decision === 'promote') {
-      await copiar(pedido.object_path, pedido.destino!);
-      // VERIFICAR ANTES DE BORRAR. Sin esta comprobación, un borrado tras una copia que no llegó
-      // pierde el objeto — y lo pierde justo después de que alguien decidiera conservarlo.
-      if (!await existe(pedido.destino!)) throw new Error('la copia no apareció en el destino: no se borra el origen');
+      await copiar(bucketOrigen, pedido.object_path, BUCKET_PUBLICO, pedido.destino!);
+      // VERIFICAR ANTES DE BORRAR, Y EN EL BUCKET DE DESTINO. Sin esta comprobación, un borrado
+      // tras una copia que no llegó pierde el objeto — y lo pierde justo después de que alguien
+      // decidiera conservarlo.
+      if (!await existe(BUCKET_PUBLICO, pedido.destino!)) {
+        throw new Error('la copia no apareció en el destino: no se borra el origen');
+      }
     }
-    await borrar(pedido.object_path);
+    await borrar(bucketOrigen, pedido.object_path);
   } catch (err) {
     outcome = 'failed';
     detalle = err instanceof Error ? err.message : String(err);
@@ -121,7 +142,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let sellado = true;
   try {
     const r = await fetchWithTimeout('db', `${SB_URL()}/rest/v1/${TABLA}?id=eq.${encodeURIComponent(id)}`, {
-      method: 'PATCH', headers: cabeceras(), body: JSON.stringify({ outcome, outcome_detail: detalle }),
+      method: 'PATCH',
+      headers: cabeceras(),
+      // El bucket de origen va SIEMPRE, también cuando todo fue bien: la tabla no tiene columna
+      // para él y una ruta sin bucket ya no identifica un objeto.
+      body: JSON.stringify({
+        outcome,
+        outcome_detail: [`bucket_origen=${bucketOrigen}`, detalle].filter(Boolean).join(' · '),
+      }),
     });
     sellado = r.ok;
     if (!r.ok) console.error(`[media-decide] no se pudo sellar el desenlace de ${id}: ${r.status}`);
@@ -135,7 +163,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ok: outcome === 'done',
     decision: pedido.decision,
     object_path: pedido.object_path,
-    ...(pedido.decision === 'promote' ? { destination_path: pedido.destino } : {}),
+    bucket_origen: bucketOrigen,
+    ...(pedido.decision === 'promote'
+      ? { destination_path: pedido.destino, bucket_destino: BUCKET_PUBLICO }
+      : {}),
     brand_id: pedido.brand_id,
     outcome,
     ...(detalle ? { detail: detalle } : {}),

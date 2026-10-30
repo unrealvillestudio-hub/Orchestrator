@@ -15,14 +15,25 @@
  * `decisiones_legibles: false` significa que el registro de decisiones todavía no existe —esta ruta
  * se despliega ANTES de su DDL, a propósito—. La bandeja se lee igual, pero no se puede decidir, y
  * lo dice en vez de parecer vacía de pendientes.
+ *
+ * ── CAMBIOS (2026-10-30) · LA ZONA DE ENTRADA ESTÁ EN UN BUCKET PRIVADO ──────────────────────
+ *
+ * La bandeja ya no mira `unrlvl-media`: mira **los buckets que declaran las filas de los
+ * principales** (`intel.media_principals.allowed_bucket`), que desde `unrlvl-iid-functions#537` es
+ * el privado `unrlvl-media-staging`. Dos consecuencias visibles en la respuesta:
+ *
+ *   · cada item trae su **`bucket`**, porque la ruta sola ya no dice dónde vive el objeto;
+ *   · la **`url` es firmada y temporal**, y puede venir `null`. Una URL pública contra un bucket
+ *     privado devuelve 400 y el navegador pinta un hueco, así que lo que no se pudo firmar se
+ *     CUENTA en `sin_url` en vez de salir como una URL que no abre.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, extractToken, SB_URL, SB_KEY } from './_calibrationShared.js';
 import { requireReviewer, filterByReviewScope } from './_reviewScope.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
-import { BUCKET, objetosBajo } from './_mediaStore.js';
+import { bucketsDeAterrizaje, objetosBajo, urlesFirmadas, MAX_FIRMAS } from './_mediaStore.js';
 import {
-  ZONA_DE_ENTRADA, marcaDeLaRuta, urlDelObjeto, diasEsperando, type EnBandeja,
+  ZONA_DE_ENTRADA, marcaDeLaRuta, diasEsperando, type EnBandeja,
 } from './_mediaTray.js';
 
 const CAP = 500;
@@ -52,9 +63,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!session) return;
 
   try {
-    const objetos = (await objetosBajo(ZONA_DE_ENTRADA)).slice(0, CAP);
+    // LOS BUCKETS SALEN DE LA FILA, NO DEL CÓDIGO. Si esta lectura falla, el `catch` de abajo
+    // responde 502: mirar el bucket equivocado devolvería una bandeja vacía, que no es un error a
+    // la vista.
+    const buckets = await bucketsDeAterrizaje();
+
+    const objetos: Array<{ bucket: string; name: string; created_at: string | null; bytes: number | null; mime: string | null }> = [];
+    for (const b of buckets) {
+      for (const o of await objetosBajo(b, ZONA_DE_ENTRADA)) objetos.push({ bucket: b, ...o });
+      if (objetos.length >= CAP) break;
+    }
+    objetos.length = Math.min(objetos.length, CAP);
 
     // Quién pidió el permiso de cada objeto. Es dato del corredor, escrito por el corredor.
+    // `intel.media_grants` guarda la ruta y no el bucket, así que el cruce es por ruta: hoy hay un
+    // solo bucket de aterrizaje y no hay ambigüedad. Si algún día hay dos, esta lectura necesita
+    // que la concesión declare su bucket — queda dicho aquí y no se supone resuelto.
     const rutas = objetos.map((o) => o.name);
     let concesiones: Array<{ object_path: string; principal_key: string; issued_at: string }> = [];
     let decididos = new Map<string, { decision: string; outcome: string; decided_at: string }>();
@@ -79,20 +103,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const porRuta = new Map(concesiones.map((c) => [c.object_path, c]));
     const ahora = Date.now();
 
+    // LAS FIRMAS. Se piden por bucket y con tope: lo que pase del tope llega sin URL y se cuenta.
+    const firmas = new Map<string, string>();
+    let firmadas = 0;
+    for (const b of buckets) {
+      const delBucket = objetos.filter((o) => o.bucket === b).map((o) => o.name).slice(0, Math.max(0, MAX_FIRMAS - firmadas));
+      if (!delBucket.length) continue;
+      for (const [ruta, url] of await urlesFirmadas(b, delBucket)) firmas.set(`${b}/${ruta}`, url);
+      firmadas += delBucket.length;
+    }
+
     const todos = objetos
       .map((o) => {
         const marca = marcaDeLaRuta(o.name);
         if (!marca) return null;                       // una ruta que no se entiende no se decide
         const c = porRuta.get(o.name);
         const previo = decididos.get(o.name);
-        const fila: EnBandeja & { brand_id: string; decidido?: unknown } = {
+        const fila: Omit<EnBandeja, 'url'> & { brand_id: string; bucket: string; url: string | null; decidido?: unknown } = {
           object_path: o.name,
           brand_id: marca,
+          bucket: o.bucket,
           subido_por: c?.principal_key ?? null,
           subido_en: o.created_at,
           bytes: o.bytes,
           mime: o.mime,
-          url: urlDelObjeto(SB_URL(), BUCKET, o.name),
+          // Firmada y temporal. `null` = no se pudo firmar: se cuenta, no se disfraza.
+          url: firmas.get(`${o.bucket}/${o.name}`) ?? null,
           dias_esperando: diasEsperando(o.created_at, ahora),
         };
         // Un intento anterior que no se consumó: se ve, para que no parezca que nadie lo tocó.
@@ -106,12 +142,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const by_brand: Record<string, number> = {};
     for (const it of items) by_brand[it.brand_id] = (by_brand[it.brand_id] ?? 0) + 1;
 
+    const sinUrl = items.filter((i) => !i.url).length;
+
     return res.status(200).json({
       total: items.length,
       // Nada caduca solo en esta zona: lo que lleva más de una semana esperando se cuenta aparte.
       esperando: items.filter((i) => (i.dias_esperando ?? 0) >= 7).length,
       by_brand,
       items,
+      // De dónde se leyó, para que una bandeja vacía se pueda distinguir de una bandeja que miró
+      // al bucket equivocado.
+      buckets,
+      // Cuántas tarjetas llegan sin imagen porque su firma no se pudo emitir. Cero es lo normal.
+      sin_url: sinUrl,
+      ...(sinUrl ? {
+        aviso_firmas: `${sinUrl} de ${items.length} objetos llegan sin URL firmada: la tarjeta no `
+                    + 'puede mostrar la imagen. No se decide sobre lo que no se ve.',
+      } : {}),
       decisiones_legibles: decisionesLegibles,
       ...(decisionesLegibles ? {} : {
         aviso: 'El registro de decisiones todavía no existe: la bandeja se puede leer, pero no se '
