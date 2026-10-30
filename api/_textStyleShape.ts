@@ -11,6 +11,8 @@ export interface TextStyleBlock {
   shadow_spans?: string[]; shadow_strength?: ShadowStrength;
   /** 2026-10-28 — los tramos en cursiva (ImageLab ≥ 1.18.0): cada uno invierte la cursiva de lo que tiene debajo. */
   italic_spans?: string[];
+  /** 2026-10-30 — los tramos de sólo color (ImageLab ≥ 1.21.0): toman el color del resaltado del bloque, sin su tipografía. */
+  color_spans?: string[];
 }
 export interface TextStyle { headline?: TextStyleBlock; sub?: TextStyleBlock }
 
@@ -33,6 +35,7 @@ function blockOf(raw: unknown, sub: boolean): TextStyleBlock | null {
   if (b.text_shadow === 'on' || b.text_shadow === 'off') out.text_shadow = b.text_shadow;
   if (textos(b.shadow_spans).length) out.shadow_spans = textos(b.shadow_spans);
   if (textos(b.italic_spans).length) out.italic_spans = textos(b.italic_spans);
+  if (textos(b.color_spans).length) out.color_spans = textos(b.color_spans);
   if (typeof b.shadow_strength === 'string' && (TEXT_STYLE_STRENGTHS as readonly string[]).includes(b.shadow_strength)) out.shadow_strength = b.shadow_strength as ShadowStrength;
   return Object.keys(out).length ? out : null;
 }
@@ -41,6 +44,12 @@ function blockOf(raw: unknown, sub: boolean): TextStyleBlock | null {
 export function textStyleWantsItalic(ts: unknown): boolean {
   const o = ts && typeof ts === 'object' && !Array.isArray(ts) ? ts as Record<string, any> : {};
   return ['headline', 'sub'].some((k) => Array.isArray(o[k]?.italic_spans) && o[k].italic_spans.length > 0);
+}
+
+/** ¿Pide `text_style` algún tramo de sólo color, en cualquier bloque? (2026-10-30) PURO. */
+export function textStyleWantsColor(ts: unknown): boolean {
+  const o = ts && typeof ts === 'object' && !Array.isArray(ts) ? ts as Record<string, any> : {};
+  return ['headline', 'sub'].some((k) => Array.isArray(o[k]?.color_spans) && o[k].color_spans.length > 0);
 }
 
 /** Lo elegido por bloque tal como está guardado (`overlay_override.text_style` o el de una lámina). PURO. */

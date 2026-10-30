@@ -416,7 +416,8 @@ export type RegenTab = 'scene' | 'text';
 export const OVERLAY_EDITOR_FOOT =
   'No regenera la escena: recompone el texto sobre la imagen limpia que ya existe (0 USD). La pieza sigue en la bandeja.';
 export const OVERLAY_EDITOR_HELP =
-  'Enter = nueva línea. *Así* = resaltado. ~Así~ = ese tramo con la sombra al revés del resto (sin sombra si el texto ' +
+  'Enter = nueva línea. ^Así^ = resaltado (con la letra del resaltado de la marca). *Así* = sólo el color del resaltado, ' +
+  'con la misma letra que el resto. ~Así~ = ese tramo con la sombra al revés del resto (sin sombra si el texto ' +
   'la lleva; con sombra si no). _Así_ = cursiva (o recto, si esa parte ya va en cursiva). «Verificar formato» enseña ' +
   'cómo va a salir antes de aplicarlo. Cambia sólo la imagen: el título y el gancho de la pieza no se tocan.';
 
@@ -794,10 +795,12 @@ export function PieceActionsBar({
       const subP = verificarTextoImagen(overlaySub, 'bajada');
       if (!subP.ok) { setError({ message: subP.error, detail: null }); return; }
       // 2026-10-28 — la cursiva por tramo del titular y de la bajada viaja en el bloque (ImageLab ≥ 1.18.0).
-      const estilo = textStylePayload(textDraft, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans, italic_spans: subP.italic_spans },
-        { italic_spans: parsed.italic_spans });
+      // 2026-10-30 — y el color por tramo (`*así*`), en los dos bloques (ImageLab ≥ 1.21.0).
+      const estilo = textStylePayload(textDraft, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans, italic_spans: subP.italic_spans, color_spans: subP.color_spans },
+        { italic_spans: parsed.italic_spans, color_spans: parsed.color_spans });
       override = { headline: parsed.text, subheadline: subP.text || null, emphasis: parsed.emphasis,
-        ...(overlayRole && parsed.emphasis.length ? { emphasis_role: overlayRole } : {}),
+        // 2026-10-30 — el color elegido vale para el resaltado y para los tramos de sólo color del titular.
+        ...(overlayRole && (parsed.emphasis.length || parsed.color_spans.length) ? { emphasis_role: overlayRole } : {}),
         // 2026-10-20 — la sombra (toda o por tramos) y el color del filete: viajan sólo si se eligieron.
         ...(overlayShadow ? { text_shadow: overlayShadow } : {}),
         ...(parsed.shadow_spans.length ? { shadow_spans: parsed.shadow_spans } : {}),
@@ -840,7 +843,7 @@ export function PieceActionsBar({
     // 2026-10-22 — la ubicación elegida viaja con el texto de la lámina (sólo si cambió).
     const lugar = textPlaceToSend(placeSel, laminaElegida.text_place);
     // 2026-10-23 — lo elegido por bloque, sólo si cambió; en la lámina el color de la palabra clave va en el bloque del titular.
-    const estilo = textStylePayload(slideStyle, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans, italic_spans: subP.italic_spans }, { emphasis_role_in_block: true });
+    const estilo = textStylePayload(slideStyle, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans, italic_spans: subP.italic_spans, color_spans: subP.color_spans }, { emphasis_role_in_block: true });
     const estiloCambia = JSON.stringify(estilo ?? null) !== JSON.stringify(laminaElegida.text_style ?? null);
     // 2026-10-24 — la columna elegida, sólo si cambió.
     const columna = textColumnToSend(colSel, laminaElegida.text_column);
@@ -1305,7 +1308,7 @@ export function PieceActionsBar({
                     value={slideDraft.subheadline}
                     onChange={(e) => setSlideDraft({ ...slideDraft, subheadline: e.target.value })}
                     rows={2}
-                    placeholder="Bajada (opcional). Enter = línea aparte. *así* resalta, ~así~ invierte la sombra, _así_ cursiva"
+                    placeholder="Bajada (opcional). Enter = línea aparte. ^así^ resalta, *así* sólo color, ~así~ invierte la sombra, _así_ cursiva"
                     aria-label={`Bajada de la lámina ${laminaElegida.n}`}
                     title={SUB_EDITOR_HELP}
                     className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
@@ -1336,7 +1339,7 @@ export function PieceActionsBar({
                     onChange={(patch) => setSlideStyle(withBlock(slideStyle, 'sub', patch))}
                     textColors={textColors?.options}
                     textDefault={textColors?.sub_default}
-                    emphasisColors={slideDraft.subheadline.includes('*') ? emColors : null}
+                    emphasisColors={/[*^]/.test(slideDraft.subheadline) ? emColors : null}
                     shadowOpt={shadowOpt}
                   />
                 )}
@@ -1363,7 +1366,7 @@ export function PieceActionsBar({
                     value={overlaySub}
                     onChange={(e) => setOverlaySub(e.target.value)}
                     rows={2}
-                    placeholder="Bajada (opcional). Enter = línea aparte. *así* resalta, ~así~ invierte la sombra, _así_ cursiva"
+                    placeholder="Bajada (opcional). Enter = línea aparte. ^así^ resalta, *así* sólo color, ~así~ invierte la sombra, _así_ cursiva"
                     aria-label="Bajada de la imagen"
                     title={SUB_EDITOR_HELP}
                     className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
@@ -1429,7 +1432,7 @@ export function PieceActionsBar({
                     onChange={(patch) => setTextDraft(withBlock(textDraft, 'sub', patch))}
                     textColors={textColors?.options}
                     textDefault={textColors?.sub_default}
-                    emphasisColors={overlaySub.includes('*') ? emColors : null}
+                    emphasisColors={/[*^]/.test(overlaySub) ? emColors : null}
                     shadowOpt={shadowOpt}
                     inheritLabel="Como el título"
                   />

@@ -6,7 +6,8 @@
  * (`content-run-stage`, `assets.image.overlay_override`) recibe { headline, subheadline, emphasis[] }; un salto
  * de línea en `headline` es un corte (ImageLab ≥ 1.7.0).
  *
- * La pantalla lo escribe con un marcado mínimo: Enter = nueva línea, `*así*` = resaltado. Este módulo es PURO:
+ * La pantalla lo escribe con un marcado mínimo: Enter = nueva línea, `^así^` = resaltado (desde 2026-10-30; antes
+ * `*así*`) y `*así*` = sólo color. Este módulo es PURO:
  * traduce entre el marcado y lo que el motor espera. Sin red, sin DB.
  *
  * MULTIMARCA: cero marcas; los colores y la tipografía del resaltado son dato de cada marca en ImageLab.
@@ -79,9 +80,18 @@ export function imageOverlayOf(assets: any): ImageOverlayView | null {
  * El titular como marcado editable: cada tramo resaltado entre asteriscos, desde 2026-10-20 cada tramo con la
  * sombra al revés entre virgulillas (`~así~`) y desde 2026-10-28 cada tramo en cursiva entre guiones bajos (`_así_`).
  * Las marcas se ponen por posición sobre el titular, así un tramo puede contener a otro o cruzarlo. PURO.
+ *
+ * 2026-10-30 — LAS MARCAS NUEVAS (Sam: «aparte del resaltado por asteriscos que convierte el texto resaltado en
+ * mayúsculas cerradas, haya otra opción para que resalte solo en color»; aprobado «Sí, así»): el resaltado de la marca
+ * (con su tipografía) pasa a `^así^` y `*así*` es SÓLO COLOR (ImageLab ≥ 1.21.0, `text_style.<bloque>.color_spans`). Lo
+ * guardado son listas, no marcado: una pieza que ya tenía resaltado vuelve al editor con `^…^` y sale igual que antes.
  */
+export const MARK_EMPHASIS = '^';
+export const MARK_COLOR = '*';
+export const MARK_SHADOW = '~';
+export const MARK_ITALIC = '_';
 export function overlayMarkupOf(headline: string | null, emphasis: readonly string[], shadowSpans: readonly string[] = [],
-  italicSpans: readonly string[] = []): string {
+  italicSpans: readonly string[] = [], colorSpans: readonly string[] = []): string {
   const h = String(headline ?? '');
   // Primera aparición que no se pise con otra del mismo tipo; de más largo a más corto (un tramo contenido en otro
   // no se marca dos veces).
@@ -102,7 +112,7 @@ export function overlayMarkupOf(headline: string | null, emphasis: readonly stri
   const poner = (terms: readonly string[], mark: string, k: number) => {
     for (const [a, b] of rangos(terms)) marcas.push({ at: a, mark, close: false, a, b, k }, { at: b, mark, close: true, a, b, k });
   };
-  poner(emphasis, '*', 0); poner(shadowSpans, '~', 1); poner(italicSpans, '_', 2);
+  poner(emphasis, MARK_EMPHASIS, 0); poner(shadowSpans, MARK_SHADOW, 1); poner(italicSpans, MARK_ITALIC, 2); poner(colorSpans, MARK_COLOR, 3);
   // En la misma posición, primero se cierra y después se abre. 2026-10-28 — y las marcas se ANIDAN, no se cruzan: se
   // cierra primero la que se abrió último, y se abre primero la que cierra último. Sam lo vio en la pieza 23698205: la
   // bajada `*_El contrato sí_*` volvía al editor como `*_El contrato sí*_`, que se lee como un error de quien escribe.
@@ -126,7 +136,8 @@ export function overlayEditorSeed(view: ImageOverlayView | null | undefined): {
   markup: string; sub: string; role: string | null; shadow: 'on' | 'off' | null; ruleRole: string | null; identityRole: string | null;
 } {
   return {
-    markup: overlayMarkupOf(view?.headline ?? null, view?.emphasis ?? [], view?.shadow_spans ?? [], view?.text_style?.headline?.italic_spans ?? []),
+    markup: overlayMarkupOf(view?.headline ?? null, view?.emphasis ?? [], view?.shadow_spans ?? [], view?.text_style?.headline?.italic_spans ?? [],
+      view?.text_style?.headline?.color_spans ?? []),
     sub: view?.subheadline ?? '',
     role: view?.emphasis_role ?? null,
     shadow: view?.text_shadow ?? null,
@@ -162,19 +173,22 @@ export function overlayViewAfterApply(override: OverlayOverrideOut | null): Imag
  * Del marcado a lo que el motor espera. Un asterisco, una virgulilla o un guion bajo sin pareja, un tramo vacío, más de 3
  * resaltados, de 3 tramos de sombra o de 3 en cursiva, o un titular demasiado largo son errores que se dicen antes de
  * mandar nada. 2026-10-28 — `_así_` = cursiva (Sam): el texto de la imagen no lleva guiones bajos propios.
+ * 2026-10-30 — `^así^` = resaltado y `*así*` = sólo color (ver `overlayMarkupOf`).
  */
 export function parseOverlayMarkup(markup: string):
-  { ok: true; headline: string; emphasis: string[]; shadow_spans: string[]; italic_spans: string[] } | { ok: false; error: string } {
+  { ok: true; headline: string; emphasis: string[]; shadow_spans: string[]; italic_spans: string[]; color_spans: string[] } | { ok: false; error: string } {
   const lines = String(markup ?? '').replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return { ok: false, error: 'El texto de la imagen está vacío.' };
   const emphasis: string[] = [];
   const shadowSpans: string[] = [];
   const italicSpans: string[] = [];
+  const colorSpans: string[] = [];
   const plain: string[] = [];
   // Un tramo se lee con las OTRAS marcas ya quitadas: así se pueden cruzar o anidar.
-  const RE: Record<'*' | '~' | '_', RegExp> = { '*': /\*([^*]*)\*/g, '~': /~([^~]*)~/g, '_': /_([^_]*)_/g };
-  const tramos = (line: string, mark: '*' | '~' | '_', out: string[], vacio: string): string | null => {
-    const sin = (['*', '~', '_'] as const).filter((m) => m !== mark).reduce((t, m) => t.split(m).join(''), line);
+  type Mark = '^' | '*' | '~' | '_';
+  const RE: Record<Mark, RegExp> = { '^': /\^([^^]*)\^/g, '*': /\*([^*]*)\*/g, '~': /~([^~]*)~/g, '_': /_([^_]*)_/g };
+  const tramos = (line: string, mark: Mark, out: string[], vacio: string): string | null => {
+    const sin = (['^', '*', '~', '_'] as const).filter((m) => m !== mark).reduce((t, m) => t.split(m).join(''), line);
     const re = new RegExp(RE[mark].source, 'g');
     for (const m of sin.matchAll(re)) {
       const t = m[1].replace(/\s+/g, ' ').trim();
@@ -184,26 +198,30 @@ export function parseOverlayMarkup(markup: string):
     return null;
   };
   for (const line of lines) {
-    if ((line.match(/\*/g) ?? []).length % 2) return { ok: false, error: `Un asterisco sin pareja en «${line}».` };
+    if ((line.match(/\^/g) ?? []).length % 2) return { ok: false, error: `Un acento circunflejo (^) de resaltado sin pareja en «${line}».` };
+    if ((line.match(/\*/g) ?? []).length % 2) return { ok: false, error: `Un asterisco (*) de color sin pareja en «${line}».` };
     if ((line.match(/~/g) ?? []).length % 2) return { ok: false, error: `Una virgulilla (~) sin pareja en «${line}».` };
     if ((line.match(/_/g) ?? []).length % 2) return { ok: false, error: `Un guion bajo (_) de cursiva sin pareja en «${line}».` };
-    const e1 = tramos(line, '*', emphasis, 'Hay un resaltado vacío (**).');
+    const e1 = tramos(line, '^', emphasis, 'Hay un resaltado vacío (^^).');
     if (e1) return { ok: false, error: e1 };
     const e2 = tramos(line, '~', shadowSpans, 'Hay un tramo de sombra vacío (~~).');
     if (e2) return { ok: false, error: e2 };
     const e3 = tramos(line, '_', italicSpans, 'Hay un tramo en cursiva vacío (__).');
     if (e3) return { ok: false, error: e3 };
-    plain.push(line.replace(/[*~_]/g, '').replace(/\s+/g, ' ').trim());
+    const e4 = tramos(line, '*', colorSpans, 'Hay un tramo de color vacío (**).');
+    if (e4) return { ok: false, error: e4 };
+    plain.push(line.replace(/[\^*~_]/g, '').replace(/\s+/g, ' ').trim());
   }
   if (emphasis.length > OVERLAY_EMPHASIS_MAX) return { ok: false, error: `Hay ${emphasis.length} resaltados; el máximo es ${OVERLAY_EMPHASIS_MAX}.` };
   if (shadowSpans.length > OVERLAY_EMPHASIS_MAX) return { ok: false, error: `Hay ${shadowSpans.length} tramos de sombra; el máximo es ${OVERLAY_EMPHASIS_MAX}.` };
   if (italicSpans.length > OVERLAY_EMPHASIS_MAX) return { ok: false, error: `Hay ${italicSpans.length} tramos en cursiva; el máximo es ${OVERLAY_EMPHASIS_MAX}.` };
+  if (colorSpans.length > OVERLAY_EMPHASIS_MAX) return { ok: false, error: `Hay ${colorSpans.length} tramos de color; el máximo es ${OVERLAY_EMPHASIS_MAX}.` };
   const headline = plain.join('\n');
   if (headline.length > OVERLAY_TEXT_MAX) return { ok: false, error: `El texto tiene ${headline.length} caracteres; el máximo es ${OVERLAY_TEXT_MAX}.` };
-  for (const t of [...emphasis, ...shadowSpans, ...italicSpans]) {
+  for (const t of [...emphasis, ...shadowSpans, ...italicSpans, ...colorSpans]) {
     if (!headline.includes(t)) return { ok: false, error: `El tramo «${t}» no queda igual en el texto: revise los espacios alrededor de las marcas.` };
   }
-  return { ok: true, headline, emphasis, shadow_spans: shadowSpans, italic_spans: italicSpans };
+  return { ok: true, headline, emphasis, shadow_spans: shadowSpans, italic_spans: italicSpans, color_spans: colorSpans };
 }
 
 // ── EL COLOR DEL RESALTADO (2026-10-19) ─────────────────────────────────────────────────────────

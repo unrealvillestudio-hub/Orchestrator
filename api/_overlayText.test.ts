@@ -8,32 +8,32 @@ import { imageOverlayOf, overlayMarkupOf, parseOverlayMarkup, emphasisColorOptio
  * estas pruebas son los de sus capturas del 2026-10-19.
  */
 describe('del marcado a lo que el motor espera', () => {
-  it('Enter es línea y *así* es resaltado', () => {
-    expect(parseOverlayMarkup('¿Por qué el color\n*SE VA ANTES*\nde la próxima cita?'))
-      .toEqual({ ok: true, headline: '¿Por qué el color\nSE VA ANTES\nde la próxima cita?', emphasis: ['SE VA ANTES'], shadow_spans: [], italic_spans: [] });
+  it('Enter es línea y ^así^ es resaltado', () => {
+    expect(parseOverlayMarkup('¿Por qué el color\n^SE VA ANTES^\nde la próxima cita?'))
+      .toEqual({ ok: true, headline: '¿Por qué el color\nSE VA ANTES\nde la próxima cita?', emphasis: ['SE VA ANTES'], shadow_spans: [], italic_spans: [], color_spans: [] });
   });
   it('líneas vacías y espacios sobran; un resaltado repetido cuenta una vez', () => {
-    expect(parseOverlayMarkup('  Tu *PUNTA* y tu *RAÍZ*  \n\n no tienen la misma edad. '))
-      .toEqual({ ok: true, headline: 'Tu PUNTA y tu RAÍZ\nno tienen la misma edad.', emphasis: ['PUNTA', 'RAÍZ'], shadow_spans: [], italic_spans: [] });
+    expect(parseOverlayMarkup('  Tu ^PUNTA^ y tu ^RAÍZ^  \n\n no tienen la misma edad. '))
+      .toEqual({ ok: true, headline: 'Tu PUNTA y tu RAÍZ\nno tienen la misma edad.', emphasis: ['PUNTA', 'RAÍZ'], shadow_spans: [], italic_spans: [], color_spans: [] });
   });
   it('lo que no se puede componer se dice antes de mandar nada', () => {
     expect(parseOverlayMarkup('').ok).toBe(false);
-    expect(parseOverlayMarkup('Hola *mundo').ok).toBe(false);
-    expect(parseOverlayMarkup('Hola ** mundo').ok).toBe(false);
-    expect(parseOverlayMarkup('*a* *b* *c* *d*').ok).toBe(false);
+    expect(parseOverlayMarkup('Hola ^mundo').ok).toBe(false);
+    expect(parseOverlayMarkup('Hola ^^ mundo').ok).toBe(false);
+    expect(parseOverlayMarkup('^a^ ^b^ ^c^ ^d^').ok).toBe(false);
     expect(parseOverlayMarkup('x'.repeat(301)).ok).toBe(false);
   });
 });
 
 describe('de lo que la imagen lleva al marcado', () => {
   it('marca el énfasis entre asteriscos, el más largo primero', () => {
-    expect(overlayMarkupOf('Nunca te preguntó DÓNDE VIVES.', ['DÓNDE VIVES'])).toBe('Nunca te preguntó *DÓNDE VIVES*.');
+    expect(overlayMarkupOf('Nunca te preguntó DÓNDE VIVES.', ['DÓNDE VIVES'])).toBe('Nunca te preguntó ^DÓNDE VIVES^.');
     expect(overlayMarkupOf('75 MINUTOS de blowout. MENOS DE 5 en el estacionamiento.', ['75 MINUTOS', 'MENOS DE 5']))
-      .toBe('*75 MINUTOS* de blowout. *MENOS DE 5* en el estacionamiento.');
+      .toBe('^75 MINUTOS^ de blowout. ^MENOS DE 5^ en el estacionamiento.');
   });
   it('ida y vuelta: el marcado de lo compuesto se vuelve a leer igual', () => {
     const h = '¿Por qué el color SE VA ANTES de la próxima cita?';
-    expect(parseOverlayMarkup(overlayMarkupOf(h, ['SE VA ANTES']))).toEqual({ ok: true, headline: h, emphasis: ['SE VA ANTES'], shadow_spans: [], italic_spans: [] });
+    expect(parseOverlayMarkup(overlayMarkupOf(h, ['SE VA ANTES']))).toEqual({ ok: true, headline: h, emphasis: ['SE VA ANTES'], shadow_spans: [], italic_spans: [], color_spans: [] });
   });
 });
 
@@ -105,8 +105,8 @@ describe('el cableado del editor', () => {
     expect(MOD).toContain("onClick={() => { open('regen'); setRegenTab('text'); }}");
     expect(MOD).toContain('Texto de la imagen');
   });
-  it('el color viaja si se tocó un chip (también el de siempre) y hay resaltado', () => {
-    expect(MOD).toContain('...(overlayRole && parsed.emphasis.length ? { emphasis_role: overlayRole } : {})');
+  it('el color viaja si se tocó un chip (también el de siempre) y hay resaltado o tramos de color', () => {
+    expect(MOD).toContain('...(overlayRole && (parsed.emphasis.length || parsed.color_spans.length) ? { emphasis_role: overlayRole } : {})');
     // 2026-10-20 — medido en 6738a414: el chip de siempre mandaba null y el compositor lo cambiaba por contraste.
     expect(MOD).toContain('onClick={() => setOverlayRole(c.role)}');
     expect(MOD).not.toContain('setOverlayRole(c.is_default ? null : c.role)');
@@ -132,13 +132,13 @@ describe('el editor abre con el texto que la imagen lleva ahora (2026-10-20)', (
   const API = sin(readFileSync(new URL('./recompose-image.ts', import.meta.url), 'utf8'));
   it('la semilla del editor sale del texto vigente, con su resaltado y su color', () => {
     expect(overlayEditorSeed({ headline: 'Uno dos\ntres', subheadline: 'b', emphasis: ['dos'], written: true, emphasis_role: 'accent_x', text_shadow: 'off', shadow_spans: ['Uno'], rule_role: 'r2' }))
-      .toEqual({ markup: '~Uno~ *dos*\ntres', sub: 'b', role: 'accent_x', shadow: 'off', ruleRole: 'r2', identityRole: null });
+      .toEqual({ markup: '~Uno~ ^dos^\ntres', sub: 'b', role: 'accent_x', shadow: 'off', ruleRole: 'r2', identityRole: null });
     expect(overlayEditorSeed(null)).toEqual({ markup: '', sub: '', role: null, shadow: null, ruleRole: null, identityRole: null });
   });
   it('después de aplicar, lo vigente es exactamente lo que se mandó; volver al copy no se conoce hasta releer', () => {
     const v = overlayViewAfterApply({ headline: 'A\nB', subheadline: null, emphasis: ['B'], emphasis_role: 'r' });
     expect(v).toEqual({ headline: 'A\nB', subheadline: null, emphasis: ['B'], written: true, emphasis_role: 'r', text_shadow: null, shadow_spans: [], rule_role: null, identity_role: null });
-    expect(overlayEditorSeed(v).markup).toBe('A\n*B*');
+    expect(overlayEditorSeed(v).markup).toBe('A\n^B^');
     expect(overlayViewAfterApply(null)).toBeNull();
   });
   it('el editor ya no se siembra con lo que la tarjeta trajo al cargar', () => {
@@ -162,10 +162,10 @@ describe('el editor abre con el texto que la imagen lleva ahora (2026-10-20)', (
 describe('la sombra y la franja (2026-10-20)', () => {
   // Sam, 2026-10-20: «quitar o poner la sombra de las letras… en palabras» y «cambiar el accent color de la franja».
   it('~así~ marca un tramo con la sombra al revés; se puede cruzar con un resaltado', () => {
-    expect(parseOverlayMarkup('La ~cuota *no* se~ vota'))
-      .toEqual({ ok: true, headline: 'La cuota no se vota', emphasis: ['no'], shadow_spans: ['cuota no se'], italic_spans: [] });
-    expect(parseOverlayMarkup('*Uno ~dos* tres~'))
-      .toEqual({ ok: true, headline: 'Uno dos tres', emphasis: ['Uno dos'], shadow_spans: ['dos tres'], italic_spans: [] });
+    expect(parseOverlayMarkup('La ~cuota ^no^ se~ vota'))
+      .toEqual({ ok: true, headline: 'La cuota no se vota', emphasis: ['no'], shadow_spans: ['cuota no se'], italic_spans: [], color_spans: [] });
+    expect(parseOverlayMarkup('^Uno ~dos^ tres~'))
+      .toEqual({ ok: true, headline: 'Uno dos tres', emphasis: ['Uno dos'], shadow_spans: ['dos tres'], italic_spans: [], color_spans: [] });
   });
   it('lo que no se puede componer se dice', () => {
     expect(parseOverlayMarkup('Hola ~mundo').ok).toBe(false);
@@ -175,8 +175,8 @@ describe('la sombra y la franja (2026-10-20)', () => {
   it('ida y vuelta con resaltado y sombra a la vez', () => {
     const h = 'La cuota extraordinaria no se vota a mano alzada';
     const m = overlayMarkupOf(h, ['no se vota'], ['cuota extraordinaria no']);
-    expect(m).toBe('La ~cuota extraordinaria *no~ se vota* a mano alzada');
-    expect(parseOverlayMarkup(m)).toEqual({ ok: true, headline: h, emphasis: ['no se vota'], shadow_spans: ['cuota extraordinaria no'], italic_spans: [] });
+    expect(m).toBe('La ~cuota extraordinaria ^no~ se vota^ a mano alzada');
+    expect(parseOverlayMarkup(m)).toEqual({ ok: true, headline: h, emphasis: ['no se vota'], shadow_spans: ['cuota extraordinaria no'], italic_spans: [], color_spans: [] });
   });
   it('la tarjeta recibe la sombra y el filete elegidos; un valor raro no se inventa', () => {
     const v = imageOverlayOf({ image: { overlay_override: { headline: 'A b', emphasis: [], text_shadow: 'on', shadow_spans: ['b'], rule_role: 'mar' } } });
@@ -243,10 +243,10 @@ describe('la barra lateral (2026-10-20)', () => {
 
 describe('la cursiva por tramo del texto de la imagen (2026-10-28): _así_', () => {
   it('_así_ marca un tramo en cursiva y se cruza con el resaltado y la sombra', () => {
-    expect(parseOverlayMarkup('La *cuota* _no se vota_ ~sola~'))
-      .toEqual({ ok: true, headline: 'La cuota no se vota sola', emphasis: ['cuota'], shadow_spans: ['sola'], italic_spans: ['no se vota'] });
-    expect(parseOverlayMarkup('_Uno *dos_ tres*'))
-      .toEqual({ ok: true, headline: 'Uno dos tres', emphasis: ['dos tres'], shadow_spans: [], italic_spans: ['Uno dos'] });
+    expect(parseOverlayMarkup('La ^cuota^ _no se vota_ ~sola~'))
+      .toEqual({ ok: true, headline: 'La cuota no se vota sola', emphasis: ['cuota'], shadow_spans: ['sola'], italic_spans: ['no se vota'], color_spans: [] });
+    expect(parseOverlayMarkup('_Uno ^dos_ tres^'))
+      .toEqual({ ok: true, headline: 'Uno dos tres', emphasis: ['dos tres'], shadow_spans: [], italic_spans: ['Uno dos'], color_spans: [] });
   });
   it('un guion bajo sin pareja, un tramo vacío o más de 3 tramos son errores claros', () => {
     expect(parseOverlayMarkup('Uno _dos')).toMatchObject({ ok: false, error: expect.stringMatching(/guion bajo \(_\) de cursiva sin pareja/) });
@@ -256,7 +256,7 @@ describe('la cursiva por tramo del texto de la imagen (2026-10-28): _así_', () 
   it('ida y vuelta: el marcado de lo compuesto, con cursiva, se vuelve a leer igual', () => {
     const h = 'La cuota extraordinaria no se vota';
     const m = overlayMarkupOf(h, ['no se vota'], ['cuota'], ['extraordinaria no']);
-    expect(parseOverlayMarkup(m)).toEqual({ ok: true, headline: h, emphasis: ['no se vota'], shadow_spans: ['cuota'], italic_spans: ['extraordinaria no'] });
+    expect(parseOverlayMarkup(m)).toEqual({ ok: true, headline: h, emphasis: ['no se vota'], shadow_spans: ['cuota'], italic_spans: ['extraordinaria no'], color_spans: [] });
   });
   it('el editor abre con la cursiva guardada del titular', () => {
     const s = overlayEditorSeed({ headline: 'Uno dos tres', subheadline: null, emphasis: [], written: true, emphasis_role: null,
