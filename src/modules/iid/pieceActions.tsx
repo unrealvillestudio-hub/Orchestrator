@@ -418,7 +418,8 @@ export const OVERLAY_EDITOR_FOOT =
 export const OVERLAY_EDITOR_HELP =
   'Enter = nueva línea. ^Así^ = resaltado (con la letra del resaltado de la marca). *Así* = sólo el color del resaltado, ' +
   'con la misma letra que el resto. ~Así~ = ese tramo con la sombra al revés del resto (sin sombra si el texto ' +
-  'la lleva; con sombra si no). _Así_ = cursiva (o recto, si esa parte ya va en cursiva). «Verificar formato» enseña ' +
+  'la lleva; con sombra si no). _Así_ = cursiva (o recto, si esa parte ya va en cursiva). +Así+ = negrita (o regular, si ' +
+  'esa parte ya va en negrita; un + suelto, como en «+50 %», es texto). «Verificar formato» enseña ' +
   'cómo va a salir antes de aplicarlo. Cambia sólo la imagen: el título y el gancho de la pieza no se tocan.';
 
 /** 2026-10-20 — la sombra de todo el texto. `null` = lo que la marca hace (se dice cuál en el botón). */
@@ -796,8 +797,10 @@ export function PieceActionsBar({
       if (!subP.ok) { setError({ message: subP.error, detail: null }); return; }
       // 2026-10-28 — la cursiva por tramo del titular y de la bajada viaja en el bloque (ImageLab ≥ 1.18.0).
       // 2026-10-30 — y el color por tramo (`*así*`), en los dos bloques (ImageLab ≥ 1.21.0).
-      const estilo = textStylePayload(textDraft, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans, italic_spans: subP.italic_spans, color_spans: subP.color_spans },
-        { italic_spans: parsed.italic_spans, color_spans: parsed.color_spans });
+      // 2026-10-30 — y la negrita por tramo (`+así+`, ImageLab ≥ 1.22.0).
+      const estilo = textStylePayload(textDraft, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans, italic_spans: subP.italic_spans,
+        color_spans: subP.color_spans, bold_spans: subP.bold_spans },
+        { italic_spans: parsed.italic_spans, color_spans: parsed.color_spans, bold_spans: parsed.bold_spans });
       override = { headline: parsed.text, subheadline: subP.text || null, emphasis: parsed.emphasis,
         // 2026-10-30 — el color elegido vale para el resaltado y para los tramos de sólo color del titular.
         ...(overlayRole && (parsed.emphasis.length || parsed.color_spans.length) ? { emphasis_role: overlayRole } : {}),
@@ -843,7 +846,7 @@ export function PieceActionsBar({
     // 2026-10-22 — la ubicación elegida viaja con el texto de la lámina (sólo si cambió).
     const lugar = textPlaceToSend(placeSel, laminaElegida.text_place);
     // 2026-10-23 — lo elegido por bloque, sólo si cambió; en la lámina el color de la palabra clave va en el bloque del titular.
-    const estilo = textStylePayload(slideStyle, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans, italic_spans: subP.italic_spans, color_spans: subP.color_spans }, { emphasis_role_in_block: true });
+    const estilo = textStylePayload(slideStyle, { emphasis: subP.emphasis, shadow_spans: subP.shadow_spans, italic_spans: subP.italic_spans, color_spans: subP.color_spans, bold_spans: subP.bold_spans }, { emphasis_role_in_block: true });
     const estiloCambia = JSON.stringify(estilo ?? null) !== JSON.stringify(laminaElegida.text_style ?? null);
     // 2026-10-24 — la columna elegida, sólo si cambió.
     const columna = textColumnToSend(colSel, laminaElegida.text_column);
@@ -1308,7 +1311,7 @@ export function PieceActionsBar({
                     value={slideDraft.subheadline}
                     onChange={(e) => setSlideDraft({ ...slideDraft, subheadline: e.target.value })}
                     rows={2}
-                    placeholder="Bajada (opcional). Enter = línea aparte. ^así^ resalta, *así* sólo color, ~así~ invierte la sombra, _así_ cursiva"
+                    placeholder="Bajada (opcional). Enter = línea aparte. ^así^ resalta, *así* sólo color, ~así~ sombra, _así_ cursiva, +así+ negrita"
                     aria-label={`Bajada de la lámina ${laminaElegida.n}`}
                     title={SUB_EDITOR_HELP}
                     className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
@@ -1366,7 +1369,7 @@ export function PieceActionsBar({
                     value={overlaySub}
                     onChange={(e) => setOverlaySub(e.target.value)}
                     rows={2}
-                    placeholder="Bajada (opcional). Enter = línea aparte. ^así^ resalta, *así* sólo color, ~así~ invierte la sombra, _así_ cursiva"
+                    placeholder="Bajada (opcional). Enter = línea aparte. ^así^ resalta, *así* sólo color, ~así~ sombra, _así_ cursiva, +así+ negrita"
                     aria-label="Bajada de la imagen"
                     title={SUB_EDITOR_HELP}
                     className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
