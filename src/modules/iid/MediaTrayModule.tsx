@@ -35,7 +35,7 @@ const esperaLegible = (dias: number | null): string => {
   return dias === 1 ? 'hace 1 día' : `hace ${dias} días`;
 };
 
-function Tarjeta({ item, bloqueada, onDecidir }: {
+function Tarjeta({ item, bloqueada: bloqueadaPorRegistro, onDecidir }: {
   item: MediaItem;
   bloqueada: boolean;
   onDecidir: (decision: 'promote' | 'discard', motive: string) => Promise<void>;
@@ -43,6 +43,13 @@ function Tarjeta({ item, bloqueada, onDecidir }: {
   const [motivo, setMotivo] = useState('');
   const [enCurso, setEnCurso] = useState<'promote' | 'discard' | null>(null);
   const corto = motivo.trim().length < MOTIVO_MINIMO;
+  /**
+   * SIN ARTEFACTO NO HAY DECISIÓN. El bucket de entrada es privado desde el 2026-10-30 y la imagen
+   * llega por URL firmada; si la firma no se pudo emitir, aprobar sería aprobar una ruta y un
+   * tamaño, no lo que alguien subió — que es exactamente lo que esta bandeja existe para no hacer.
+   */
+  const sinArtefacto = !item.url;
+  const bloqueada = bloqueadaPorRegistro || sinArtefacto;
 
   const decidir = async (decision: 'promote' | 'discard') => {
     if (corto || bloqueada) return;
@@ -53,14 +60,24 @@ function Tarjeta({ item, bloqueada, onDecidir }: {
   return (
     <div className="border border-zinc-800/70 rounded-xl overflow-hidden bg-zinc-950/40">
       {/* EL ARTEFACTO. Fondo a cuadros para que una imagen con transparencia no se lea como blanca. */}
-      <a href={item.url} target="_blank" rel="noreferrer" className="block bg-zinc-900">
-        <img
-          src={item.url}
-          alt={`Objeto en espera de decisión · ${item.brand_id}`}
-          loading="lazy"
-          className="w-full max-h-72 object-contain bg-[conic-gradient(#18181b_90deg,#09090b_0_180deg,#18181b_0_270deg,#09090b_0)] bg-[length:16px_16px]"
-        />
-      </a>
+      {sinArtefacto ? (
+        <div className="bg-zinc-900 px-4 py-8 text-center space-y-1">
+          <p className="text-xs text-amber-300">No se pudo firmar la URL de esta imagen.</p>
+          <p className="text-[10px] text-zinc-500">
+            El bucket de entrada es privado y la tarjeta necesita una URL firmada para mostrar el
+            artefacto. Sin verlo no se decide: recarga la bandeja.
+          </p>
+        </div>
+      ) : (
+        <a href={item.url!} target="_blank" rel="noreferrer" className="block bg-zinc-900">
+          <img
+            src={item.url!}
+            alt={`Objeto en espera de decisión · ${item.brand_id}`}
+            loading="lazy"
+            className="w-full max-h-72 object-contain bg-[conic-gradient(#18181b_90deg,#09090b_0_180deg,#18181b_0_270deg,#09090b_0)] bg-[length:16px_16px]"
+          />
+        </a>
+      )}
 
       <div className="p-3 space-y-3">
         <div className="flex items-start justify-between gap-2">
@@ -197,6 +214,13 @@ export default function MediaTrayModule({ session }: { session: IidSession }) {
           {cargando ? <Spinner size={12} /> : <RefreshCw size={12} />} Recargar
         </button>
       </header>
+
+      {bandeja && (bandeja.sin_url ?? 0) > 0 && (
+        <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+          {bandeja.aviso_firmas
+            ?? `${bandeja.sin_url} objetos llegan sin URL firmada: su tarjeta no muestra la imagen y no se puede decidir.`}
+        </p>
+      )}
 
       {bandeja && !bandeja.decisiones_legibles && (
         <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 flex items-start gap-2">

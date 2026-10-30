@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ZONA_DE_ENTRADA, ZONA_PUBLICA, CARPETA_DE_PROMOVIDAS, DECISIONES, MOTIVO_MINIMO, MOTIVO_MAXIMO,
   marcaDeLaRuta, destinoDePromocion, decisionPedida, filaDeDecision, urlDelObjeto, diasEsperando,
+  bucketsDeclarados,
 } from './_mediaTray.js';
 
 // Identificadores ficticios A PROPÓSITO: si algo de esto dependiera de una marca real, estas
@@ -221,8 +222,11 @@ describe('media-decide — la secuencia que hace que el registro no sea decorati
     const s = fuente();
     // Borrar tras una copia que no llegó pierde el objeto, y lo pierde justo después de que
     // alguien decidiera conservarlo.
-    expect(s.indexOf('await existe(pedido.destino')).toBeGreaterThan(s.indexOf('await copiar('));
-    expect(s.indexOf('await borrar(')).toBeGreaterThan(s.indexOf('await existe(pedido.destino'));
+    // La llamada lleva el bucket de destino desde el 2026-10-30 —la promoción cruza de bucket—,
+    // así que el ancla es la verificación del destino, no su forma anterior de un solo argumento.
+    const verifica = s.indexOf('await existe(BUCKET_PUBLICO, pedido.destino');
+    expect(verifica).toBeGreaterThan(s.indexOf('await copiar('));
+    expect(s.indexOf('await borrar(')).toBeGreaterThan(verifica);
   });
 
   it('si el registro no existe todavía, NO toca el bucket y lo dice', () => {
@@ -253,5 +257,108 @@ describe('media-decide — la secuencia que hace que el registro no sea decorati
     expect(s).not.toContain('body.destination_path');
     expect(s).not.toContain('body.destino');
     expect(s).toContain('pedido.destino');
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// LA ZONA DE ENTRADA VIVE EN UN BUCKET PRIVADO (2026-10-30)
+//
+// `unrlvl-iid-functions#537` movió el aterrizaje al bucket privado que declara la fila del
+// principal. Lo que estas pruebas protegen no es el nombre del bucket —es dato y puede cambiar—:
+// protegen que el nombre NO esté en el código, que la tarjeta reciba una URL firmada en vez de una
+// pública, y que la promoción cruce de bucket sin suponer el de origen.
+// ════════════════════════════════════════════════════════════════════════════════════════════
+
+/** La fuente SIN COMENTARIOS. Un nombre citado en una explicación no es un valor cableado. */
+const codigoDe = async (archivo: string): Promise<string> => {
+  const { readFileSync } = await import('node:fs');
+  return readFileSync(new URL(`./${archivo}`, import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+};
+
+describe('bucketsDeclarados — el bucket de aterrizaje es dato de la fila', () => {
+  it('devuelve los distintos, en el orden en que aparecen', () => {
+    expect(bucketsDeclarados(
+      [{ allowed_bucket: 'zona-a', active: true }, { allowed_bucket: 'zona-b', active: true },
+       { allowed_bucket: 'zona-a', active: true }], 'por-defecto',
+    )).toEqual(['zona-a', 'zona-b']);
+  });
+
+  it('ignora los principales desactivados: su bucket no es zona de entrada viva', () => {
+    expect(bucketsDeclarados(
+      [{ allowed_bucket: 'viva', active: true }, { allowed_bucket: 'apagada', active: false }],
+      'por-defecto',
+    )).toEqual(['viva']);
+  });
+
+  it('cae al valor por defecto cuando ninguna fila lo declara, nunca a lista vacía', () => {
+    // Una lista vacía haría que la bandeja no mirase a ninguna parte, y eso se lee igual que
+    // «no hay nada pendiente»: el fallo silencioso que esta bandeja existe para no tener.
+    for (const filas of [[], null, undefined, [{ active: true }], [{ allowed_bucket: '   ' }]])
+      expect(bucketsDeclarados(filas, 'por-defecto')).toEqual(['por-defecto']);
+  });
+
+  it('recorta el valor de la fila: un espacio no crea un bucket nuevo', () => {
+    expect(bucketsDeclarados([{ allowed_bucket: '  zona-a  ' }, { allowed_bucket: 'zona-a' }], 'd'))
+      .toEqual(['zona-a']);
+  });
+});
+
+describe('el bucket de entrada no está en el código de la bandeja', () => {
+  it('ni la lectura ni la decisión nombran un bucket de aterrizaje', async () => {
+    // El bucket PÚBLICO sí es eje del ecosistema y vive en `_mediaStore.ts` como constante; el de
+    // ATERRIZAJE es instancia y sólo puede venir de la fila. Si alguien lo cablea, esto falla.
+    for (const archivo of ['media-tray.ts', 'media-decide.ts', '_mediaTray.ts']) {
+      const s = await codigoDe(archivo);
+      expect(s).not.toContain('unrlvl-media');
+    }
+  });
+
+  it('la bandeja resuelve los buckets y lista sobre ellos', async () => {
+    const s = await codigoDe('media-tray.ts');
+    expect(s).toContain('bucketsDeAterrizaje');
+    expect(s).toContain('objetosBajo(b, ZONA_DE_ENTRADA)');
+  });
+});
+
+describe('la tarjeta recibe una URL firmada, no una pública', () => {
+  it('la bandeja firma y no construye URLs públicas', async () => {
+    const s = await codigoDe('media-tray.ts');
+    expect(s).toContain('urlesFirmadas');
+    // `object/public/…` contra un bucket privado devuelve 400 y el navegador pinta un hueco.
+    expect(s).not.toContain('object/public');
+    expect(s).not.toContain('urlDelObjeto');
+  });
+
+  it('lo que no se pudo firmar se cuenta, no se inventa', async () => {
+    const s = await codigoDe('media-tray.ts');
+    expect(s).toContain('sin_url');
+    expect(s).toMatch(/url:\s*firmas\.get\([^)]*\)\s*\?\?\s*null/);
+  });
+});
+
+describe('la promoción cruza de bucket sin suponer el de origen', () => {
+  it('busca el bucket donde el objeto existe', async () => {
+    const s = await codigoDe('media-decide.ts');
+    expect(s).toContain('bucketsDeAterrizaje');
+    expect(s).toMatch(/if\s*\(await existe\(b,\s*pedido\.object_path\)\)/);
+  });
+
+  it('copia al bucket público y verifica EN EL DESTINO antes de borrar el origen', async () => {
+    const s = await codigoDe('media-decide.ts');
+    expect(s).toContain('copiar(bucketOrigen, pedido.object_path, BUCKET_PUBLICO, pedido.destino!)');
+    const copia = s.indexOf('copiar(bucketOrigen');
+    const verifica = s.indexOf('existe(BUCKET_PUBLICO, pedido.destino!)');
+    const borra = s.indexOf('borrar(bucketOrigen, pedido.object_path)');
+    expect(copia).toBeGreaterThan(-1);
+    expect(verifica).toBeGreaterThan(copia);
+    expect(borra).toBeGreaterThan(verifica);
+  });
+
+  it('el bucket de origen queda escrito en el desenlace, también cuando todo fue bien', async () => {
+    // La tabla guarda la ruta y no el bucket; una ruta sin bucket ya no identifica un objeto.
+    const s = await codigoDe('media-decide.ts');
+    expect(s).toContain('bucket_origen=${bucketOrigen}');
   });
 });

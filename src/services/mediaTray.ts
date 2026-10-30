@@ -24,8 +24,17 @@ export interface MediaItem {
   subido_en: string | null;
   bytes: number | null;
   mime: string | null;
-  /** La imagen misma: la tarjeta muestra el artefacto, no su descripción. */
-  url: string;
+  /**
+   * En qué bucket vive. Desde el 2026-10-30 la zona de entrada es un bucket PRIVADO distinto del
+   * público, así que la ruta sola ya no dice dónde está el objeto.
+   */
+  bucket: string;
+  /**
+   * La imagen misma: la tarjeta muestra el artefacto, no su descripción. URL **firmada y
+   * temporal**, porque el bucket de entrada es privado. `null` = no se pudo firmar, y entonces la
+   * tarjeta no muestra el artefacto — así que no se decide sobre ella.
+   */
+  url: string | null;
   dias_esperando: number | null;
   /** Un intento anterior que no se consumó, si lo hubo. */
   decidido?: { decision: string; outcome: string; decided_at: string };
@@ -37,6 +46,11 @@ export interface MediaTray {
   esperando: number;
   by_brand: Record<string, number>;
   items: MediaItem[];
+  /** De qué buckets se leyó. Una bandeja vacía y una que miró donde no era se ven distintas. */
+  buckets?: string[];
+  /** Cuántos objetos llegan sin URL firmada. Cero es lo normal. */
+  sin_url?: number;
+  aviso_firmas?: string;
   /** `false` = el registro de decisiones no existe todavía: se lee, no se decide. */
   decisiones_legibles: boolean;
   aviso?: string;
