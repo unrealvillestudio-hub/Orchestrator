@@ -85,13 +85,16 @@ export function imageOverlayOf(assets: any): ImageOverlayView | null {
  * mayúsculas cerradas, haya otra opción para que resalte solo en color»; aprobado «Sí, así»): el resaltado de la marca
  * (con su tipografía) pasa a `^así^` y `*así*` es SÓLO COLOR (ImageLab ≥ 1.21.0, `text_style.<bloque>.color_spans`). Lo
  * guardado son listas, no marcado: una pieza que ya tenía resaltado vuelve al editor con `^…^` y sale igual que antes.
+ * Y `+así+` = negrita (ImageLab ≥ 1.22.0, `bold_spans`): el tramo invierte su peso. Como `+` es también texto («+50 %»),
+ * sólo es marca un PAR BIEN FORMADO —pegado al texto que marca, por dentro—; un `+` suelto se queda en el texto.
  */
 export const MARK_EMPHASIS = '^';
 export const MARK_COLOR = '*';
 export const MARK_SHADOW = '~';
 export const MARK_ITALIC = '_';
+export const MARK_BOLD = '+';
 export function overlayMarkupOf(headline: string | null, emphasis: readonly string[], shadowSpans: readonly string[] = [],
-  italicSpans: readonly string[] = [], colorSpans: readonly string[] = []): string {
+  italicSpans: readonly string[] = [], colorSpans: readonly string[] = [], boldSpans: readonly string[] = []): string {
   const h = String(headline ?? '');
   // Primera aparición que no se pise con otra del mismo tipo; de más largo a más corto (un tramo contenido en otro
   // no se marca dos veces).
@@ -112,7 +115,7 @@ export function overlayMarkupOf(headline: string | null, emphasis: readonly stri
   const poner = (terms: readonly string[], mark: string, k: number) => {
     for (const [a, b] of rangos(terms)) marcas.push({ at: a, mark, close: false, a, b, k }, { at: b, mark, close: true, a, b, k });
   };
-  poner(emphasis, MARK_EMPHASIS, 0); poner(shadowSpans, MARK_SHADOW, 1); poner(italicSpans, MARK_ITALIC, 2); poner(colorSpans, MARK_COLOR, 3);
+  poner(emphasis, MARK_EMPHASIS, 0); poner(shadowSpans, MARK_SHADOW, 1); poner(italicSpans, MARK_ITALIC, 2); poner(colorSpans, MARK_COLOR, 3); poner(boldSpans, MARK_BOLD, 4);
   // En la misma posición, primero se cierra y después se abre. 2026-10-28 — y las marcas se ANIDAN, no se cruzan: se
   // cierra primero la que se abrió último, y se abre primero la que cierra último. Sam lo vio en la pieza 23698205: la
   // bajada `*_El contrato sí_*` volvía al editor como `*_El contrato sí*_`, que se lee como un error de quien escribe.
@@ -137,7 +140,7 @@ export function overlayEditorSeed(view: ImageOverlayView | null | undefined): {
 } {
   return {
     markup: overlayMarkupOf(view?.headline ?? null, view?.emphasis ?? [], view?.shadow_spans ?? [], view?.text_style?.headline?.italic_spans ?? [],
-      view?.text_style?.headline?.color_spans ?? []),
+      view?.text_style?.headline?.color_spans ?? [], view?.text_style?.headline?.bold_spans ?? []),
     sub: view?.subheadline ?? '',
     role: view?.emphasis_role ?? null,
     shadow: view?.text_shadow ?? null,
@@ -173,22 +176,25 @@ export function overlayViewAfterApply(override: OverlayOverrideOut | null): Imag
  * Del marcado a lo que el motor espera. Un asterisco, una virgulilla o un guion bajo sin pareja, un tramo vacío, más de 3
  * resaltados, de 3 tramos de sombra o de 3 en cursiva, o un titular demasiado largo son errores que se dicen antes de
  * mandar nada. 2026-10-28 — `_así_` = cursiva (Sam): el texto de la imagen no lleva guiones bajos propios.
- * 2026-10-30 — `^así^` = resaltado y `*así*` = sólo color (ver `overlayMarkupOf`).
+ * 2026-10-30 — `^así^` = resaltado, `*así*` = sólo color y `+así+` = negrita (ver `overlayMarkupOf`).
  */
 export function parseOverlayMarkup(markup: string):
-  { ok: true; headline: string; emphasis: string[]; shadow_spans: string[]; italic_spans: string[]; color_spans: string[] } | { ok: false; error: string } {
+  { ok: true; headline: string; emphasis: string[]; shadow_spans: string[]; italic_spans: string[]; color_spans: string[]; bold_spans: string[] } | { ok: false; error: string } {
   const lines = String(markup ?? '').replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return { ok: false, error: 'El texto de la imagen está vacío.' };
   const emphasis: string[] = [];
   const shadowSpans: string[] = [];
   const italicSpans: string[] = [];
   const colorSpans: string[] = [];
+  const boldSpans: string[] = [];
   const plain: string[] = [];
-  // Un tramo se lee con las OTRAS marcas ya quitadas: así se pueden cruzar o anidar.
-  type Mark = '^' | '*' | '~' | '_';
-  const RE: Record<Mark, RegExp> = { '^': /\^([^^]*)\^/g, '*': /\*([^*]*)\*/g, '~': /~([^~]*)~/g, '_': /_([^_]*)_/g };
+  // Un tramo se lee con las OTRAS marcas ya quitadas: así se pueden cruzar o anidar. La negrita se lee con `BOLD`, el
+  // carácter en que se convierten sus pares bien formados (los `+` sueltos se quedan como texto).
+  type Mark = '^' | '*' | '~' | '_' | typeof BOLD;
+  const RE: Record<Mark, RegExp> = { '^': /\^([^^]*)\^/g, '*': /\*([^*]*)\*/g, '~': /~([^~]*)~/g, '_': /_([^_]*)_/g,
+    [BOLD]: new RegExp(`${BOLD}([^${BOLD}]*)${BOLD}`, 'g') } as Record<Mark, RegExp>;
   const tramos = (line: string, mark: Mark, out: string[], vacio: string): string | null => {
-    const sin = (['^', '*', '~', '_'] as const).filter((m) => m !== mark).reduce((t, m) => t.split(m).join(''), line);
+    const sin = (['^', '*', '~', '_', BOLD] as const).filter((m) => m !== mark).reduce((t, m) => t.split(m).join(''), line);
     const re = new RegExp(RE[mark].source, 'g');
     for (const m of sin.matchAll(re)) {
       const t = m[1].replace(/\s+/g, ' ').trim();
@@ -197,7 +203,8 @@ export function parseOverlayMarkup(markup: string):
     }
     return null;
   };
-  for (const line of lines) {
+  for (const raw of lines) {
+    const line = boldPairsMarked(raw);
     if ((line.match(/\^/g) ?? []).length % 2) return { ok: false, error: `Un acento circunflejo (^) de resaltado sin pareja en «${line}».` };
     if ((line.match(/\*/g) ?? []).length % 2) return { ok: false, error: `Un asterisco (*) de color sin pareja en «${line}».` };
     if ((line.match(/~/g) ?? []).length % 2) return { ok: false, error: `Una virgulilla (~) sin pareja en «${line}».` };
@@ -210,18 +217,30 @@ export function parseOverlayMarkup(markup: string):
     if (e3) return { ok: false, error: e3 };
     const e4 = tramos(line, '*', colorSpans, 'Hay un tramo de color vacío (**).');
     if (e4) return { ok: false, error: e4 };
-    plain.push(line.replace(/[\^*~_]/g, '').replace(/\s+/g, ' ').trim());
+    tramos(line, BOLD, boldSpans, '');
+    plain.push(line.replace(new RegExp(`[\\^*~_${BOLD}]`, 'g'), '').replace(/\s+/g, ' ').trim());
   }
   if (emphasis.length > OVERLAY_EMPHASIS_MAX) return { ok: false, error: `Hay ${emphasis.length} resaltados; el máximo es ${OVERLAY_EMPHASIS_MAX}.` };
   if (shadowSpans.length > OVERLAY_EMPHASIS_MAX) return { ok: false, error: `Hay ${shadowSpans.length} tramos de sombra; el máximo es ${OVERLAY_EMPHASIS_MAX}.` };
   if (italicSpans.length > OVERLAY_EMPHASIS_MAX) return { ok: false, error: `Hay ${italicSpans.length} tramos en cursiva; el máximo es ${OVERLAY_EMPHASIS_MAX}.` };
   if (colorSpans.length > OVERLAY_EMPHASIS_MAX) return { ok: false, error: `Hay ${colorSpans.length} tramos de color; el máximo es ${OVERLAY_EMPHASIS_MAX}.` };
+  if (boldSpans.length > OVERLAY_EMPHASIS_MAX) return { ok: false, error: `Hay ${boldSpans.length} tramos en negrita; el máximo es ${OVERLAY_EMPHASIS_MAX}.` };
   const headline = plain.join('\n');
   if (headline.length > OVERLAY_TEXT_MAX) return { ok: false, error: `El texto tiene ${headline.length} caracteres; el máximo es ${OVERLAY_TEXT_MAX}.` };
-  for (const t of [...emphasis, ...shadowSpans, ...italicSpans, ...colorSpans]) {
+  for (const t of [...emphasis, ...shadowSpans, ...italicSpans, ...colorSpans, ...boldSpans]) {
     if (!headline.includes(t)) return { ok: false, error: `El tramo «${t}» no queda igual en el texto: revise los espacios alrededor de las marcas.` };
   }
-  return { ok: true, headline, emphasis, shadow_spans: shadowSpans, italic_spans: italicSpans, color_spans: colorSpans };
+  return { ok: true, headline, emphasis, shadow_spans: shadowSpans, italic_spans: italicSpans, color_spans: colorSpans, bold_spans: boldSpans };
+}
+
+/** 2026-10-30 — el carácter interno en que se convierte cada `+` de un par de negrita bien formado. No se escribe. */
+const BOLD = '\u0001';
+/**
+ * Los pares de negrita BIEN FORMADOS de una línea: un `+` pegado por dentro al texto que marca, otro que lo cierra, sin
+ * `+` en medio. Esos `+` pasan a `BOLD`; los demás `+` (como en «+50 %» o «1 + 1») se quedan como texto. PURO.
+ */
+export function boldPairsMarked(line: string): string {
+  return line.replace(/\+(?=[^\s+])([^+]*?[^\s+])\+/g, `${BOLD}$1${BOLD}`);
 }
 
 // ── EL COLOR DEL RESALTADO (2026-10-19) ─────────────────────────────────────────────────────────

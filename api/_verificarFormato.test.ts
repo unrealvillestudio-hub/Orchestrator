@@ -14,7 +14,7 @@ describe('«Verificar formato» del texto de la imagen (Sam, 2026-10-28, pieza 2
     expect(r.italic_spans).toEqual(['El contrato sí']);
     expect(r.markup).toBe('El administrador no responde ni civil ni penalmente. ^_El contrato sí_^.');
     expect(r.cambios).toContain('Se quitó el espacio antes de un signo de cierre.');
-    expect(r.tramos.at(-2)).toEqual({ text: 'El contrato sí', resaltado: true, cursiva: true, sombra: false, color: false });
+    expect(r.tramos.at(-2)).toEqual({ text: 'El contrato sí', resaltado: true, cursiva: true, sombra: false, color: false, negrita: false });
   });
 
   it('el titular de la pieza sale igual, con sus tramos', () => {
@@ -44,9 +44,9 @@ describe('«Verificar formato» del texto de la imagen (Sam, 2026-10-28, pieza 2
 
   it('tramosDe parte el texto por lo que lleva cada trozo', () => {
     expect(tramosDe('abc', [], ['b'], [])).toEqual([
-      { text: 'a', resaltado: false, cursiva: false, sombra: false, color: false },
-      { text: 'b', resaltado: false, cursiva: false, sombra: true, color: false },
-      { text: 'c', resaltado: false, cursiva: false, sombra: false, color: false },
+      { text: 'a', resaltado: false, cursiva: false, sombra: false, color: false, negrita: false },
+      { text: 'b', resaltado: false, cursiva: false, sombra: true, color: false, negrita: false },
+      { text: 'c', resaltado: false, cursiva: false, sombra: false, color: false, negrita: false },
     ]);
   });
 });
@@ -96,11 +96,11 @@ describe('la bajada con líneas aparte (Sam, 2026-10-28)', () => {
 
 describe('la sombra que de verdad lleva cada trozo (Sam, 2026-10-28, pieza 23698205)', () => {
   it('~así~ invierte la sombra del bloque: con «Con sombra» sale sin ella, con «Sin sombra» sale con ella', () => {
-    expect(sombraEfectiva({ sombra: true }, 'on')).toBe(false);
-    expect(sombraEfectiva({ sombra: false }, 'on')).toBe(true);
-    expect(sombraEfectiva({ sombra: true }, 'off')).toBe(true);
-    expect(sombraEfectiva({ sombra: false }, 'off')).toBe(false);
-    expect(sombraEfectiva({ sombra: true }, null)).toBeNull();
+    expect(sombraEfectiva({ sombra: true, color: false, negrita: false }, 'on')).toBe(false);
+    expect(sombraEfectiva({ sombra: false, color: false, negrita: false }, 'on')).toBe(true);
+    expect(sombraEfectiva({ sombra: true, color: false, negrita: false }, 'off')).toBe(true);
+    expect(sombraEfectiva({ sombra: false, color: false, negrita: false }, 'off')).toBe(false);
+    expect(sombraEfectiva({ sombra: true, color: false, negrita: false }, null)).toBeNull();
   });
 
   it('el caso de la pieza: «Con sombra» y ~El contrato sí~ avisa que ese tramo sale sin sombra', () => {
