@@ -101,7 +101,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       retenidas
         // `retenida` o `sin_imagen`: con arbitraje abierto decide el juez primero, falte o no la imagen.
         .filter((p) => {
-          const e = pendingStateOf(p.status, evaluadas.ids.has(p.id), Boolean(p.challenged_at), tieneImagen(p), autofixResiduo(p), cambioTrasAprobacion(p));
+          // Último argumento `false`: estas piezas tienen arbitraje abierto, es decir, fila del juez.
+          const e = pendingStateOf(p.status, evaluadas.ids.has(p.id), Boolean(p.challenged_at), tieneImagen(p), autofixResiduo(p), cambioTrasAprobacion(p), false);
           return e === 'retenida' || e === 'sin_imagen';
         })
         .map((p) => p.id),

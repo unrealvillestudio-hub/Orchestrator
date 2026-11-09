@@ -59,7 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!day) {
     return res.status(400).json({
       error: 'invalid_day',
-      detail: 'El día debe ser «today», «tomorrow» o una fecha real AAAA-MM-DD.',
+      detail: 'El día debe ser «today», «tomorrow», «week» o una fecha real AAAA-MM-DD.',
     });
   }
 

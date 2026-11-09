@@ -51,7 +51,7 @@ import { CAROUSEL_FORMAT } from './_manualShared.js';
 import { requireReviewer, filterByReviewScope } from './_reviewScope.js';
 // UNA PIEZA, UNA PESTAÑA — la retenida CON arbitraje abierto es de Retenidas; la que no lo tiene
 // (p. ej. sin imagen) se queda aquí, porque no hay otra pestaña que la muestre.
-import { fetchPendingChallenges, fetchRuleTexts } from './_challengedShared.js';
+import { fetchPendingChallenges, fetchRuleTexts, fetchJudgedPieceIds } from './_challengedShared.js';
 // CHIP DE REGLA (2026-10-05) — el enunciado de cada código que aparece en la tarjeta, por marca.
 import { codesInValue, ruleTextsFor, type RuleTexts } from './_ruleCodes.js';
 // LO-CORREGIDO-01 — el circuito de arreglos: qué pidió Sam, qué se hizo desde entonces y por qué
@@ -124,7 +124,9 @@ type GenerationFilter = (typeof GENERATION_FILTERS)[number];
 // para por qué: filtrar por la PREVISIÓN de cada pieza habría marcado como urgentes las doce
 // candidatas de un canal que sólo puede publicar una. Aquí el eje es el mismo que el de `platform`
 // y `verdict`: un filtro transversal que se aplica ANTES de `by_brand`.
-const URGENCY_FILTERS = ['all', 'urgent'] as const;
+// `week` (Sam, 2026-11-09: «coloca un filtro "Esta semana"»): el mismo eje con la ventana de 7 días,
+// la de la ventana de producción del carril. Es «lo que hay que aprobar para esta semana».
+const URGENCY_FILTERS = ['all', 'urgent', 'week'] as const;
 type UrgencyFilter = (typeof URGENCY_FILTERS)[number];
 
 /**
@@ -243,7 +245,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // `urgency_hours` CUÁNTO cuenta como cerca. Sam declaró 24-48 h; el defecto es el extremo ancho,
   // porque un filtro que esconde una franja de mañana es peor que uno que muestra una de pasado.
   const urgency = enumParam<UrgencyFilter>(req.query.urgency, URGENCY_FILTERS, 'all');
-  const urgencyHours = intParam(req.query.urgency_hours, URGENCY_HOURS_DEFAULT, 1, URGENCY_HOURS_MAX);
+  const urgencyHours = urgency === 'week'
+    ? URGENCY_HOURS_MAX
+    : intParam(req.query.urgency_hours, URGENCY_HOURS_DEFAULT, 1, URGENCY_HOURS_MAX);
   // LO-CORREGIDO-01 — el alcance de la pestaña. Vacío = `all`, que es toda la bandeja.
   const states = parseStates(req.query.state);
   // U-7 — la PLATAFORMA DE LA PIEZA. No confundir con el `channel` de `publish-queue`, que
@@ -323,6 +327,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // paginar. Servía mientras sólo pintaba un color. En el momento en que el eje FILTRA, hacerlo
     // ahí significaría filtrar por un valor que todavía no existe — y contar `by_state` sobre
     // veinte tarjetas en vez de sobre las ciento y pico que hay.
+    // 2026-11-09 — UNA RETENIDA SIN JUEZ ES TRABAJO DE ARREGLO. Se pregunta al juez sólo por las
+    // `challenged`; una lectura caída (`null`) deja todas donde estaban.
+    const retadasIds = perPiece.filter((p) => String(p.status ?? '').trim().toLowerCase() === 'challenged').map((p) => p.id);
+    const juzgadas = retadasIds.length ? await fetchJudgedPieceIds(retadasIds) : new Set<string>();
     const stateById = new Map<string, PendingState>();
     for (const p of perPiece) {
       stateById.set(p.id, pendingStateOf(
@@ -336,6 +344,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         autofixResiduo(p),
         // 2026-10-21 — lo aprobado que cambió sin Sam también es de Arreglos.
         cambioTrasAprobacion(p),
+        // 2026-11-09 — retenida sin ninguna fila del juez = apartada para arreglo.
+        juzgadas !== null && !juzgadas.has(p.id),
       ));
     }
 
@@ -354,7 +364,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // interfaz pueda decir «este canal necesita 1 pieza» sin pedir nada más. Con `slots_source`
     // caído el mapa viene vacío y el filtro no esconde nada por una lectura fallida — lo dice.
     const urgentes = urgentChannels(freeSlots, urgencyHours);
-    if (urgency === 'urgent') scoped = scoped.filter((p) => isUrgentPiece(p, urgentes, policies));
+    if (urgency !== 'all') scoped = scoped.filter((p) => isUrgentPiece(p, urgentes, policies));
 
     // LO-CORREGIDO-01 — el alcance de la pestaña, con los demás transversales y ANTES de `by_brand`:
     // las pastillas de marca tienen que contar lo que esta pestaña daría, no lo que daría la bandeja

@@ -42,7 +42,7 @@
  *   channel         '' (todos) | <platform_key>       — descubierto del dato, nunca enumerado
  *   channel_status  all (default) | operational | blocked
  *   generation      all (default) | current
- *   day             '' (todos) | today | tomorrow | YYYY-MM-DD   (Sam, 2026-10-21)
+ *   day             '' (todos) | today | tomorrow | week | YYYY-MM-DD   (Sam, 2026-10-21; `week` 2026-11-09)
  *
  * Orden: más reciente primero. Con `day` puesto, por hora de salida (la franja más temprana
  * primero): quien pide «lo de mañana» quiere leerlo en el orden en que va a salir.
@@ -148,7 +148,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!day) {
     return res.status(400).json({
       error: 'invalid_day',
-      detail: 'El día debe ser «today», «tomorrow» o una fecha real AAAA-MM-DD.',
+      detail: 'El día debe ser «today», «tomorrow», «week» o una fecha real AAAA-MM-DD.',
     });
   }
   const now           = new Date();

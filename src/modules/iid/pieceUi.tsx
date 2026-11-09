@@ -327,7 +327,7 @@ export function Selector({ label, value, onChange, options }: {
 /**
  * FILTRO POR DÍA DE SALIDA (Sam, 2026-10-21: «no me permite filtrar por fecha ni hoy o mañana»).
  *
- * El valor viaja tal cual al server: '' (todos), 'today', 'tomorrow' o 'AAAA-MM-DD'. «Hoy» y
+ * El valor viaja tal cual al server: '' (todos), 'today', 'tomorrow', 'week' o 'AAAA-MM-DD'. «Hoy» y
  * «Mañana» los resuelve el server EN EL RELOJ DE CADA MARCA, el mismo en que la tarjeta pinta
  * «Publica:»; esta pantalla no calcula fechas. La fecha inicial del calendario es la de hoy en el
  * reloj de quien mira, sólo como punto de partida.
@@ -351,6 +351,8 @@ export function DayPicker({ value, onChange }: { value: string; onChange: (v: st
         <option value="">Todos</option>
         <option value="today">Hoy</option>
         <option value="tomorrow">Mañana</option>
+        {/* 2026-11-09 — Sam: «coloca un filtro "Esta semana"». Hoy y los 6 días siguientes. */}
+        <option value="week">Esta semana</option>
         <option value="date">Fecha…</option>
       </select>
       {isDate && (
@@ -1114,6 +1116,10 @@ export const PENDING_STATE_UI: Record<PendingState, { color: string; label: stri
   // es que lo que va a salir ya no es lo que aprobaste.
   cambiada_tras_aprobar: { color: '#FB7185', label: 'cambió tras tu aprobación',
                 hint: 'La aprobaste y después cambió algo (imagen, texto o láminas) sin ti. El motivo dice qué, quién y si fue una actividad declarada. Apruébala otra vez o usa Deshacer.' },
+  // 2026-11-09 — retenida sin ningún registro del juez: la apartó una sesión de arreglos o el carril.
+  // Turquesa: no es un desacuerdo del juez (violeta) ni un fixable tuyo (celeste).
+  retenida_para_arreglo: { color: '#2DD4BF', label: 'retenida para arreglo',
+                hint: 'Quedó retenida sin que el juez la marcara: la apartó una sesión de arreglos o el carril. El motivo dice por qué. Arréglala y apruébala, o descártala.' },
 };
 
 /** La píldora que nombra el estado. El color lo pone la misma tabla que pinta el borde. */
@@ -1236,12 +1242,13 @@ export function AutofixNotice({ autofix, reason }: { autofix: AutofixSummary | n
 export function FixNotice({ state, fix }: { state: PendingState; fix: FixFlow | null | undefined }) {
   // Las dos mitades del circuito, y sólo ellas. En una pieza sin reto este aviso no tiene nada que
   // decir, y un recuadro vacío en cien tarjetas enseña a saltarse el recuadro lleno.
-  if (!fix || (state !== 'corregida' && state !== 'por_arreglar' && state !== 'sin_imagen' && state !== 'retenida')) return null;
+  if (!fix || (state !== 'corregida' && state !== 'por_arreglar' && state !== 'sin_imagen' && state !== 'retenida'
+    && state !== 'retenida_para_arreglo')) return null;
   if (!fix.challenge_reason && !fix.challenged_at) return null;
 
   // 2026-10-01 — el motivo de una pieza retenida por el SISTEMA no es una propuesta tuya: se dice
   // «Motivo», no «Pediste». Sin esto, las piezas sin imagen se veían sin explicación.
-  if (state === 'sin_imagen' || state === 'retenida') {
+  if (state === 'sin_imagen' || state === 'retenida' || state === 'retenida_para_arreglo') {
     return (
       <div className={cn(DATE_ROW, 'bg-amber-500/[0.07] border-amber-400/40 text-amber-100/90 border-dashed')}
         title="content_pieces.challenged_reason — el motivo con que se apartó la pieza.">
