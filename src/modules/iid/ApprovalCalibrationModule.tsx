@@ -267,7 +267,7 @@ export default function ApprovalCalibrationModule(
           label="Carril"
           value={urgency}
           onChange={(v) => apply({ urgency: v as UrgencyFilter })}
-          options={[['all', 'Todo'], ['urgent', 'Franja por vencer']]}
+          options={[['all', 'Todo'], ['urgent', 'Franja por vencer'], ['week', 'Esta semana']]}
         />
         <PlatformFilter platform={platform} platforms={data?.platforms ?? []} type={type}
           types={data?.types} onChange={apply} />

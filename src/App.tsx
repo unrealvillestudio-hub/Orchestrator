@@ -17,6 +17,7 @@ import PublishQueueModule from './modules/iid/PublishQueueModule';
 import ChallengedInboxModule from './modules/iid/ChallengedInboxModule';
 import EvaluatedHistoryModule from './modules/iid/EvaluatedHistoryModule';
 import MediaTrayModule from './modules/iid/MediaTrayModule';
+import ProductionWindowNotice from './modules/iid/ProductionWindowNotice';
 import type { IidSession } from './services/iidInbound';
 import { fetchReviewScope, type ReviewAccess, type ReviewView } from './services/calibrationInbox';
 import { tramosDeCaja } from './logotipo';
@@ -51,7 +52,8 @@ const FIX_SCOPE: CalibrationScope = {
   // «Generar imagen», que es un arreglo. Al tener imagen pasa a Calibración como `retenida`.
   // 2026-10-01 — y lo que el carril auto-fix no pudo resolver: es trabajo de arreglo (decisión de Sam).
   // 2026-10-21 — y lo que aprobaste y cambió después sin ti (Sam: «el carril la coloque en arreglos»).
-  states: ['por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo', 'cambiada_tras_aprobar'],
+  // 2026-11-09 — y lo retenido SIN juez: lo apartó una sesión de arreglos o el carril (Sam: «colócalas en arreglos»).
+  states: ['por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo', 'cambiada_tras_aprobar', 'retenida_para_arreglo'],
   title: 'Arreglos',
   subtitle: (
     <>
@@ -69,7 +71,7 @@ const FIX_SCOPE: CalibrationScope = {
   //   · Por reparar = `por_arreglar`: retada con veredicto de Sam en el corpus, es decir, su fixable.
   // `sin_imagen` no es grupo de los tres: sigue visible con «Todas».
   groups: [['corregida', 'Reparadas'], ['autofix_residuo', 'Auto-fixed'], ['por_arreglar', 'Por reparar'],
-    ['cambiada_tras_aprobar', 'Cambiada tras tu aprobación']],
+    ['cambiada_tras_aprobar', 'Cambiada tras tu aprobación'], ['retenida_para_arreglo', 'Retenidas para arreglo']],
 };
 
 const NAV_ITEMS = [
@@ -260,6 +262,8 @@ export default function App() {
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
         >
+          {/* 2026-11-09 — la pregunta del día 5 (Sam): visible en todas las pestañas, sólo cuando toca. */}
+          <ProductionWindowNotice session={session} />
           {view === "hub" && (
             <HubModule onPlanReady={() => setView("planner")} />
           )}

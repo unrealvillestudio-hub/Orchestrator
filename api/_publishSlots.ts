@@ -673,7 +673,13 @@ export type DayFilter =
   | { kind: 'all' }
   | { kind: 'today' }
   | { kind: 'tomorrow' }
+  // ESTA SEMANA (Sam, 2026-11-09: «coloca un filtro "Esta semana"»): hoy y los 6 días siguientes,
+  // en el reloj de la marca. Son los mismos 7 días que mira la ventana de producción del carril.
+  | { kind: 'week' }
   | { kind: 'date'; date: string };
+
+/** Los días de calendario que cubre «Esta semana»: hoy y los 6 siguientes. */
+export const WEEK_DAYS = 7;
 
 const YMD = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -696,6 +702,7 @@ export function dayFilterParam(v: unknown): DayFilter | null {
   if (!s || s === 'all') return { kind: 'all' };
   if (s === 'today') return { kind: 'today' };
   if (s === 'tomorrow') return { kind: 'tomorrow' };
+  if (s === 'week') return { kind: 'week' };
   return isCalendarDate(s) ? { kind: 'date', date: s } : null;
 }
 
@@ -727,7 +734,8 @@ export function nextCalendarDay(ymd: string): string {
 
 /** El día que el filtro pide, en el reloj de la marca. `null` para `all`. */
 export function targetDayOf(f: DayFilter, now: Date, tz: string | null): string | null {
-  if (f.kind === 'all') return null;
+  // `week` no es UN día: su recorte lo hace `slotMatchesDay`.
+  if (f.kind === 'all' || f.kind === 'week') return null;
   if (f.kind === 'date') return f.date;
   const today = localDayOf(now, tz);
   if (!today) return null;
@@ -738,6 +746,15 @@ export function targetDayOf(f: DayFilter, now: Date, tz: string | null): string 
 export function slotMatchesDay(slotAt: string | null | undefined, f: DayFilter, now: Date, tz: string | null): boolean {
   if (f.kind === 'all') return true;
   if (!slotAt) return false;
+  if (f.kind === 'week') {
+    // Por CALENDARIO, como `nextCalendarDay`: un cambio de hora no mueve el borde de la semana.
+    const today = localDayOf(now, tz);
+    const day = localDayOf(slotAt, tz);
+    if (!today || !day) return false;
+    let last = today;
+    for (let i = 1; i < WEEK_DAYS; i++) last = nextCalendarDay(last);
+    return day >= today && day <= last;
+  }
   const want = targetDayOf(f, now, tz);
   return want !== null && localDayOf(slotAt, tz) === want;
 }
@@ -752,7 +769,8 @@ export function dayWindowOf(f: DayFilter, now: Date): { from: Date; to: Date } |
   if (f.kind === 'all') return null;
   const DAY = 24 * 60 * 60 * 1000;
   const base = f.kind === 'date' ? Date.parse(`${f.date}T00:00:00.000Z`) : now.getTime();
-  return { from: new Date(base - 2 * DAY), to: new Date(base + 3 * DAY) };
+  const span = f.kind === 'week' ? WEEK_DAYS + 2 : 3;
+  return { from: new Date(base - 2 * DAY), to: new Date(base + span * DAY) };
 }
 
 /**

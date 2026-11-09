@@ -50,7 +50,7 @@ export type QueueOrder = 'slot' | 'recent' | 'oldest' | 'brand' | 'verdict';
  * sigue siendo una sola decisión. `urgent_channels` trae ese número para que la pantalla lo pueda
  * decir en vez de dejar que se cuente a ojo sobre doce tarjetas.
  */
-export type UrgencyFilter = 'all' | 'urgent';
+export type UrgencyFilter = 'all' | 'urgent' | 'week';  // `week` = franjas de los próximos 7 días (2026-11-09)
 
 /** Un canal cuya franja está por vencer, con lo que hace falta y lo que hay. */
 export interface UrgentChannelInfo {
@@ -402,7 +402,7 @@ export interface FixFlow {
  */
 export type PendingState =
   'esperando' | 'recalibrar' | 'aplazada' | 'retenida' | 'por_arreglar' | 'corregida' | 'sin_imagen'
-  | 'autofix_residuo' | 'cambiada_tras_aprobar';
+  | 'autofix_residuo' | 'cambiada_tras_aprobar' | 'retenida_para_arreglo';
 
 /** Los seis, en orden. Un selector sale de aquí y nunca de una lista escrita a mano. */
 /**
@@ -413,7 +413,8 @@ export type PendingState =
 export const CALIBRATION_TAB_STATES: readonly PendingState[] = ['esperando', 'recalibrar', 'aplazada', 'retenida'];
 
 export const PENDING_STATES: readonly PendingState[] =
-  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo', 'cambiada_tras_aprobar'];
+  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo', 'cambiada_tras_aprobar',
+   'retenida_para_arreglo'];
 
 /**
  * LOS EJES QUE PIDE UNA PETICIÓN DE LA BANDEJA. Sin alcance (Calibración), el selector «Estado»
@@ -593,6 +594,32 @@ export function fetchQueue(
   if (opts.states?.length) q.set('state', opts.states.join(','));
   const qs = q.toString();
   return req<QueueResult>(`/api/calibration-queue${qs ? `?${qs}` : ''}`, token);
+}
+
+/**
+ * LA VENTANA DE PRODUCCIÓN (Sam, 2026-11-09). El carril produce sólo hasta `hasta`; desde el día 5
+ * (`preguntar`) se ofrece activar los siguientes 7 días. La regla vive en la base: aquí sólo se lee y se pide.
+ */
+export interface ProductionWindow {
+  desde: string;
+  hasta: string;
+  dias_restantes: number;
+  preguntar: boolean;
+  vencida: boolean;
+  activated_by: string;
+  phrase: string | null;
+}
+
+export async function fetchProductionWindow(token: string): Promise<ProductionWindow | null> {
+  const r = await req<{ window: ProductionWindow | null }>('/api/production-window', token);
+  return r.window ?? null;
+}
+
+/** La fila que crea la base (`intel.production_windows`): su `ends_at` es el nuevo `hasta`. */
+export async function activateNextProductionWindow(token: string, phrase?: string): Promise<{ starts_at: string; ends_at: string }> {
+  const r = await req<{ ok: boolean; window: { starts_at: string; ends_at: string } }>('/api/production-window', token,
+    { method: 'POST', body: phrase ? { phrase } : {} });
+  return r.window;
 }
 
 /** Las vistas que una concesión puede abrir (mismo vocabulario que `api/_reviewScope.ts`). */

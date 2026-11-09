@@ -166,6 +166,35 @@ export async function fetchPendingChallenges(brand?: string): Promise<JudgeCalib
   return Array.isArray(rows) ? rows : [];
 }
 
+/**
+ * LAS PIEZAS QUE EL JUEZ HA TOCADO ALGUNA VEZ (2026-11-09). Una `retenida` es un desacuerdo DEL JUEZ:
+ * sin ninguna fila suya en `judge_calibration`, la pieza no la retuvo el juez sino una sesión de
+ * arreglos o el carril, y su sitio es Arreglos. Medido el 2026-11-09: las 15 `retenida` vivas de tres
+ * marcas no tenían NI UNA fila del juez; 11 decían «Retenida por CC, sesión de fixables».
+ *
+ * `null` cuando la lectura falla: entonces nadie se mueve de pestaña por una lectura caída (la pieza
+ * sigue donde estaba, a la vista). Por lotes de 100 ids: la URL tiene techo.
+ */
+export async function fetchJudgedPieceIds(pieceIds: string[]): Promise<Set<string> | null> {
+  const ids = [...new Set(pieceIds.filter(Boolean))];
+  const out = new Set<string>();
+  for (let i = 0; i < ids.length; i += 100) {
+    const lote = ids.slice(i, i + 100).map(encodeURIComponent).join(',');
+    const url = `${SB_URL()}/rest/v1/judge_calibration?select=piece_id&piece_id=in.(${lote})&limit=${CHALLENGED_CAP}`;
+    let res: Response;
+    try {
+      res = await fetchWithTimeout('db', url, { headers: sbHeaders('intel') });
+    } catch {
+      return null;
+    }
+    if (!res.ok) return null;
+    const rows = (await res.json().catch(() => null)) as Array<{ piece_id?: string | null }> | null;
+    if (!Array.isArray(rows)) return null;
+    for (const r of rows) if (r.piece_id) out.add(r.piece_id);
+  }
+  return out;
+}
+
 /** Un arbitraje por id (para el `undo` y para responder el estado vigente). */
 export async function fetchChallenge(id: string): Promise<JudgeCalibrationRow | null> {
   const url = `${SB_URL()}/rest/v1/judge_calibration?id=eq.${encodeURIComponent(id)}&select=${CAL_SELECT}&limit=1`;

@@ -38,7 +38,7 @@ describe('los grupos de Arreglos', () => {
     const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
     // 2026-10-21 — Sam: «el carril la coloque en arreglos». El cuarto grupo va al final.
     expect(app).toMatch(
-      /groups: \[\['corregida', 'Reparadas'\], \['autofix_residuo', 'Auto-fixed'\], \['por_arreglar', 'Por reparar'\],\s*\['cambiada_tras_aprobar', 'Cambiada tras tu aprobación'\]\]/,
+      /groups: \[\['corregida', 'Reparadas'\], \['autofix_residuo', 'Auto-fixed'\], \['por_arreglar', 'Por reparar'\],\s*\['cambiada_tras_aprobar', 'Cambiada tras tu aprobación'\], \['retenida_para_arreglo', 'Retenidas para arreglo'\]\]/,
     );
   });
 });

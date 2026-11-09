@@ -1747,11 +1747,16 @@ export type PendingState =
   // 2026-10-21 — algo que Sam YA había aprobado cambió después, sin él: el trigger `vigila_lo_aprobado`
   // (unrlvl-iid-functions, migración 20261022010000) la devolvió a `challenged` y le dejó
   // `assets.approval_change`. Es de Arreglos (Sam: «el carril la coloque en arreglos»).
-  | 'cambiada_tras_aprobar';
+  | 'cambiada_tras_aprobar'
+  // 2026-11-09 — `challenged`, con imagen, sin juicio de Sam y SIN NINGUNA fila del juez: no es un
+  // desacuerdo del juez (eso es `retenida`), es una pieza apartada para arreglar —por una sesión de
+  // arreglos o por el carril—. Es de Arreglos (Sam: «si no lo están colócalas en "arreglos"»).
+  | 'retenida_para_arreglo';
 
 /** Todos los ejes, para que un selector salga de aquí y no de una lista escrita a mano. */
 export const PENDING_STATES: readonly PendingState[] =
-  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo', 'cambiada_tras_aprobar'];
+  ['esperando', 'recalibrar', 'aplazada', 'retenida', 'por_arreglar', 'corregida', 'sin_imagen', 'autofix_residuo', 'cambiada_tras_aprobar',
+   'retenida_para_arreglo'];
 
 /**
  * UNA PIEZA, UNA PESTAÑA (Sam, 2026-09-30: «las mismas piezas —awaiting_approval, arreglos, retadas,
@@ -1790,6 +1795,10 @@ export function pendingStateOf(
   // `challenged`: una pieza aprobada tiene fila en el corpus (su aprobación), y preguntar antes por el
   // corpus la mandaría a «por arreglar» como si fuera un fixable de Sam.
   cambioTrasAprobar: boolean,
+  // 2026-11-09 — OBLIGATORIO por lo mismo. `true` = la pieza no tiene NINGUNA fila en
+  // `intel.judge_calibration` (`fetchJudgedPieceIds`). Sólo decide entre `retenida` y
+  // `retenida_para_arreglo`; una lectura caída llega como `false` y la pieza no cambia de pestaña.
+  sinRegistroDelJuez: boolean,
 ): PendingState {
   const s = String(status ?? '').trim().toLowerCase();
   if (s === 'deferred') return 'aplazada';
@@ -1797,7 +1806,8 @@ export function pendingStateOf(
     if (cambioTrasAprobar) return 'cambiada_tras_aprobar';
     if (yaCalibrada) return 'por_arreglar';
     if (!conImagen) return 'sin_imagen';
-    return autofixResiduoSenal ? 'autofix_residuo' : 'retenida';
+    if (autofixResiduoSenal) return 'autofix_residuo';
+    return sinRegistroDelJuez ? 'retenida_para_arreglo' : 'retenida';
   }
   // VIVA Y CON UN RETO EN SU HISTORIA = volvió del arreglo. Va ANTES del corpus porque es más
   // específico: toda pieza retada por Sam tiene fila en `approval_calibration` —el fixable es un

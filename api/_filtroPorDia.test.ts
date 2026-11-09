@@ -103,3 +103,24 @@ describe('los endpoints filtran ANTES de paginar y de contar', () => {
     expect(src.indexOf('slotMatchesDay(')).toBeLessThan(src.indexOf('by_brand[it.brand_id]'));
   });
 });
+
+describe('«Esta semana» (Sam, 2026-11-09)', () => {
+  // «Ahora»: lunes 9 nov 15:00 UTC = 10:00 en Nueva York (EST, UTC-5).
+  const now = new Date('2026-11-09T15:00:00Z');
+  it('el parámetro `week` se entiende y se devuelve igual', () => {
+    expect(dayFilterParam('week')).toEqual({ kind: 'week' });
+    expect(dayFilterLabel({ kind: 'week' })).toBe('week');
+  });
+  it('cubre hoy y los 6 días siguientes en el reloj de la marca, ni uno más', () => {
+    const f = { kind: 'week' } as const;
+    expect(slotMatchesDay('2026-11-09T23:00:00Z', f, now, MIA)).toBe(true);   // hoy 18:00
+    expect(slotMatchesDay('2026-11-16T04:00:00Z', f, now, MIA)).toBe(true);   // domingo 15, 23:00 local
+    expect(slotMatchesDay('2026-11-16T15:00:00Z', f, now, MIA)).toBe(false);  // lunes 16: octavo día
+    expect(slotMatchesDay('2026-11-08T23:00:00Z', f, now, MIA)).toBe(false);  // ayer
+  });
+  it('sin franja no hay semana, y la ventana de lectura cubre los 7 días con margen de huso', () => {
+    expect(slotMatchesDay(null, { kind: 'week' }, now, MIA)).toBe(false);
+    const w = dayWindowOf({ kind: 'week' }, now)!;
+    expect(w.to.getTime() - now.getTime()).toBeGreaterThanOrEqual(8 * 24 * 3600 * 1000);
+  });
+});
