@@ -69,6 +69,21 @@ describe('la app instalable', () => {
     expect(svg).toMatch(/points="112,60 288,175 288,216 112,340 112,295 255\.5,195 112,104" fill="#00FFD1"/);
   });
 
+  it('la campanita sólo se pone en ámbar cuando la base guardó el dispositivo', () => {
+    // Medido el 2026-11-12: campanita activa en los dos dispositivos de Sam y cero filas en la base.
+    const src = readFileSync(join(RAIZ, 'src/services/avisosPush.ts'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const fn = (nombre: string) => {
+      const desde = src.indexOf(`export async function ${nombre}`);
+      return src.slice(desde, src.indexOf('\n}', desde));
+    };
+    for (const nombre of ['estadoDeAvisos', 'activarAvisos']) {
+      const cuerpo = fn(nombre);
+      const guardado = cuerpo.indexOf("await api(token, 'POST'");
+      expect(guardado, `${nombre} tiene que guardar en la base`).toBeGreaterThan(0);
+      expect(cuerpo.indexOf("return 'activo'"), `${nombre} no puede decir activo antes de guardar`).toBeGreaterThan(guardado);
+    }
+  });
+
   it('la campanita ya no se esconde en el móvil', () => {
     const app = readFileSync(join(RAIZ, 'src/App.tsx'), 'utf8');
     expect(app).toMatch(/<CampanaDeAvisos token=\{session\.session_token\} \/>/);
