@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutGrid, Layers, History, Bell, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send, ShieldQuestion, Archive, Wrench, MoreHorizontal, X, Image as ImageIcon } from 'lucide-react';
+import { LayoutGrid, Layers, History, Telescope, LogOut, Sprout, Dna, ClipboardCheck, Send, ShieldQuestion, Archive, Wrench, MoreHorizontal, X, Image as ImageIcon } from 'lucide-react';
 import { useFlowStore } from './store/useFlowStore';
 import { cn, GlowDot } from './ui/components';
 import HubModule from './modules/hub/HubModule';
@@ -21,6 +21,7 @@ import ProductionWindowNotice from './modules/iid/ProductionWindowNotice';
 import type { IidSession } from './services/iidInbound';
 import { fetchReviewScope, type ReviewAccess, type ReviewView } from './services/calibrationInbox';
 import { tramosDeCaja } from './logotipo';
+import CampanaDeAvisos from './modules/avisos/CampanaDeAvisos';
 
 /**
  * La versión sale de `package.json` y el commit de la plataforma; los inyecta
@@ -246,9 +247,8 @@ export default function App() {
               Interpretando...
             </div>
           )}
-          <button className="hidden md:block p-2 hover:bg-zinc-800 rounded-xl transition-colors">
-            <Bell size={15} className="text-zinc-600" />
-          </button>
+          {/* 2026-11-12 — la campanita activa los avisos push propios en este dispositivo, también en el móvil. */}
+          <CampanaDeAvisos token={session.session_token} />
           <SessionControl session={session} onLogout={logout} />
         </div>
       </header>
