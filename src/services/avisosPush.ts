@@ -11,7 +11,8 @@ export type EstadoDeAvisos =
   | 'sin_soporte'   // el navegador no tiene service worker o push (o no es contexto seguro)
   | 'bloqueado'     // el permiso de notificaciones está denegado: sólo se cambia en los ajustes del sistema
   | 'apagado'       // se puede activar
-  | 'activo';       // este dispositivo está suscrito
+  | 'sin_guardar'   // el dispositivo está suscrito, pero la base no lo confirmó: no le llegarán avisos
+  | 'activo';       // suscrito Y guardado en la base: la única señal de que los avisos llegarán
 
 export function hayPush(): boolean {
   return typeof window !== 'undefined' && window.isSecureContext && 'serviceWorker' in navigator
@@ -42,12 +43,25 @@ async function registro(): Promise<ServiceWorkerRegistration> {
   return (await navigator.serviceWorker.getRegistration('/')) ?? navigator.serviceWorker.register('/sw.js');
 }
 
-export async function estadoDeAvisos(): Promise<EstadoDeAvisos> {
+/**
+ * EL ÁMBAR SIGNIFICA «GUARDADO», NO «SUSCRITO» (2026-11-12). Medido ese día: Sam vio la campanita activa en sus dos
+ * dispositivos y `alerting.push_subscriptions` tenía cero filas, sin ninguna petición de guardado en los registros de
+ * la base. Una suscripción que sólo existe en el navegador no recibe nada, así que el estado ya no se deduce de ella:
+ * cada vez que se abre el Orchestrator, la suscripción local se vuelve a guardar (upsert por endpoint, que además
+ * reactiva una fila desactivada) y sólo una respuesta correcta pinta el ámbar.
+ */
+export async function estadoDeAvisos(token: string): Promise<EstadoDeAvisos> {
   if (!hayPush()) return 'sin_soporte';
   if (Notification.permission === 'denied') return 'bloqueado';
   const reg = await navigator.serviceWorker.getRegistration('/');
   const sub = reg ? await reg.pushManager.getSubscription() : null;
-  return sub && Notification.permission === 'granted' ? 'activo' : 'apagado';
+  if (!sub || Notification.permission !== 'granted') return 'apagado';
+  try {
+    await api(token, 'POST', { subscription: sub.toJSON(), user_agent: navigator.userAgent });
+    return 'activo';
+  } catch {
+    return 'sin_guardar';
+  }
 }
 
 /**
