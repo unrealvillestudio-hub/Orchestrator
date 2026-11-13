@@ -7,6 +7,14 @@ import { Spinner } from '../../ui/components';
 import type { VistaPartida } from './vistaPartida';
 
 export function ImagenesDeLaPieza({ vista, pieceId }: { vista: VistaPartida; pieceId: string }) {
+  if (vista.video) {
+    return (
+      <div className="rounded-xl overflow-hidden border border-zinc-800 bg-[#050508] flex justify-center">
+        <video src={vista.video.url} poster={vista.video.poster ?? undefined} controls playsInline preload="metadata"
+          aria-label={`video de la pieza ${pieceId}`} className="block max-w-full h-auto max-h-[75vh] object-contain" />
+      </div>
+    );
+  }
   if (!vista.carrusel || vista.imagenes.length < 2) {
     return (
       <div className="rounded-xl overflow-hidden border border-zinc-800 bg-[#050508] flex justify-center">
@@ -57,5 +65,5 @@ export function VistaPrevia({ artHtml, artErr, vista, pieceId }: {
 
 /** La imagen de la pieza, si el artefacto la tiene; si no (canal solo texto, o todavía no llegó), nada. */
 export function ImagenSiHay({ vista, pieceId }: { vista: VistaPartida | null; pieceId: string }) {
-  return vista && vista.imagenes.length > 0 ? <ImagenesDeLaPieza vista={vista} pieceId={pieceId} /> : null;
+  return vista && (vista.video || vista.imagenes.length > 0) ? <ImagenesDeLaPieza vista={vista} pieceId={pieceId} /> : null;
 }

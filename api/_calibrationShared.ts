@@ -143,6 +143,8 @@ export function publicArtifactUrl(brandId: string, pieceId: string): string {
 export interface PieceAssets {
   copy?: { aife_filtered?: string; raw?: string; title?: string };
   image?: { url?: string };
+  // VIDEO (2026-11-13): una pieza de video lleva su archivo y su portada; el artefacto la pinta con <video>.
+  video?: { url?: string | null; poster_url?: string | null; duration_s?: number | null } | null;
   // CARRIL AUTO-FIX (2026-10-01) — lo que el carril hizo con la pieza antes de que naciera. Lo escribe
   // `content-run-stage` (bloque AUTOFIX); aquí sólo se lee. `enabled:false` = el carril estaba apagado
   // y la clave sólo anota lo que HABRÍA entrado: no es una corrección y no se enseña como tal.
@@ -1316,6 +1318,14 @@ ${inner}
  */
 function mediaBlockOf(piece: ContentPiece): string {
   const assets = piece.assets ?? {};
+  // VIDEO (Sam, 2026-11-13: «Orchestrator ya es capaz de mostrarme vídeos? ya sería hora»). Una pieza con
+  // `assets.video.url` se ve como video, con su portada; `controls` es nativo y funciona dentro del
+  // <iframe sandbox=""> sin JS. La portada viene de `video.poster_url` o, si falta, de `image.url`.
+  const videoUrl = String(assets.video?.url ?? '').trim();
+  if (videoUrl) {
+    const poster = String(assets.video?.poster_url ?? assets.image?.url ?? '').trim();
+    return `<div class="media media--video"><video src="${esc(videoUrl)}"${poster ? ` poster="${esc(poster)}"` : ''} controls playsinline preload="metadata"></video></div>`;
+  }
   const imageUrl = assets.image?.url ?? '';
   const laminas = manualImagesOf({
     id: piece.id, brand_id: piece.brand_id, format: piece.format,

@@ -27,6 +27,13 @@ describe('la vista previa partida en imagen y texto (Sam, 2026-10-28)', () => {
     expect(partirVista(null)).toBeNull();
   });
 
+  it('un video: sale su dirección y su portada, sin imágenes, y el texto queda con el bloque oculto (Sam, 2026-11-13)', () => {
+    const v = partirVista(doc('<div class="media media--video"><video src="https://x/v.mp4?a=1&amp;b=2" poster="https://x/p.jpg" controls playsinline preload="metadata"></video></div>'))!;
+    expect(v.video).toEqual({ url: 'https://x/v.mp4?a=1&b=2', poster: 'https://x/p.jpg' });
+    expect(v.imagenes).toEqual([]);
+    expect(v.textoHtml).toContain('<style>.media{display:none!important}</style></head>');
+  });
+
   it('las imágenes en línea del cuerpo no se confunden con la de la pieza', () => {
     const v = partirVista(doc('<div class="media"><img src="https://x/a.png" /></div><figure class="inline-figure"><img src="https://x/b.png"></figure>'))!;
     expect(v.imagenes).toEqual(['https://x/a.png']);
