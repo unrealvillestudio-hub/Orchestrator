@@ -446,11 +446,26 @@ export function hayVersionAnterior(piece: { edited_at?: string | null; assets?: 
   return (Array.isArray(h) && h.length > 0) || (typeof piece?.edited_at === 'string' && !!piece.edited_at);
 }
 
+/**
+ * PIEZA DE VIDEO (2026-11-13). Sam: «desactiva el botón de regenerar imagen y texto embebido» en las piezas
+ * de video. En una pieza con `assets.video.url`, la imagen es la PORTADA del video y el texto de pantalla va
+ * quemado en los fotogramas: regenerar la imagen o recomponer su texto cambiaría la portada sin tocar el
+ * video, y la pieza quedaría mostrando una cosa y publicando otra. El copy (`edit_text`) sí se corrige: es
+ * texto de la publicación, no del video.
+ */
+export const PIEZA_DE_VIDEO =
+  'Pieza de video: la imagen es su portada y el texto de pantalla va dentro del video. Para corregirlo, pídelo en Fixable: se vuelve a renderizar el video.';
+
+export function esPiezaDeVideo(assets: unknown): boolean {
+  const url = (assets as { video?: { url?: unknown } } | null | undefined)?.video?.url;
+  return typeof url === 'string' && url.length > 0;
+}
+
 export function actionsFor(piece: {
   status?: string | null;
   discarded_at?: string | null;
   edited_at?: string | null;
-  assets?: { image?: { url?: string | null; history?: unknown } } | null;
+  assets?: { image?: { url?: string | null; history?: unknown }; video?: { url?: string | null } | null } | null;
 }): PieceActions {
   const todas = (a: PieceAction): PieceActions =>
     Object.fromEntries(ACTION_KEYS.map((k) => [k, a])) as PieceActions;
@@ -509,7 +524,7 @@ export function actionsFor(piece: {
      * ya propaga sin traducir—; el de negar de menos es una pieza que no puede arreglarse nunca.
      * Ante la duda, ofrecer y que hable quien tiene la regla.
      */
-    recompose_image: SI,
+    recompose_image: esPiezaDeVideo(piece?.assets) ? NO(PIEZA_DE_VIDEO) : SI,
     /**
      * DESHACER (Sam, 2026-10-21: «agregar un botón de undo en todas las pestañas y que vuelva la
      * versión anterior»). Vale en cualquier estado vivo, también `scheduled`: es una corrección de

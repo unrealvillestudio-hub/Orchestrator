@@ -258,6 +258,9 @@ export interface RawPiece {
     // motivo «no tiene imagen» — que sería falso. Una columna sin declarar da una
     // denegación silenciosa, igual que una sin pedir da un permiso.
     image?: { url?: string | null };
+    // 2026-11-13 — la pieza de video apaga `recompose_image` (`PIEZA_DE_VIDEO`). Sin declararlo aquí,
+    // `actionsFor` no lo vería en la bandeja de retenidas.
+    video?: { url?: string | null } | null;
     // El adaptado POR CANAL. `PIECE_SELECT` ya traia `assets` entero: el dato llegaba y
     // nadie lo declaraba, asi que nadie lo leia.
     social?: { adapted?: Array<{ copy?: string | null; platform?: string | null }> };
