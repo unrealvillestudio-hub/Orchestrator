@@ -16,6 +16,8 @@ export interface VistaPartida {
   /** Las imágenes en el orden en que se publican; vacío = no hay imagen que sacar del artefacto. */
   imagenes: string[];
   carrusel: boolean;
+  /** El video de la pieza (Sam, 2026-11-13), si el artefacto lo trae; entonces `imagenes` va vacío. */
+  video?: { url: string; poster: string | null };
   /** El artefacto con el bloque de la imagen oculto; sin imágenes, el artefacto tal cual. */
   textoHtml: string;
 }
@@ -31,6 +33,14 @@ export function partirVista(html: string | null): VistaPartida | null {
   if (abre < 0) return { imagenes: [], carrusel: false, textoHtml: html };
   const etiqueta = html.slice(abre, html.indexOf('>', abre) + 1);
   if (/media--none/.test(etiqueta)) return { imagenes: [], carrusel: false, textoHtml: html };
+  const textoSinMedia = () => (html.includes('</head>') ? html.replace('</head>', `${OCULTAR_MEDIA}</head>`) : OCULTAR_MEDIA + html);
+  if (/media--video/.test(etiqueta)) {
+    const v = html.slice(abre, html.indexOf('</div>', abre));
+    const src = /<video\s[^>]*?src="([^"]+)"/.exec(v);
+    if (!src) return { imagenes: [], carrusel: false, textoHtml: html };
+    const poster = /\sposter="([^"]+)"/.exec(v);
+    return { imagenes: [], carrusel: false, video: { url: desescapar(src[1]), poster: poster ? desescapar(poster[1]) : null }, textoHtml: textoSinMedia() };
+  }
   const carrusel = /\bcarousel\b/.test(etiqueta);
   const fin = carrusel ? html.indexOf('class="carousel-note"', abre) : html.indexOf('</div>', abre);
   const bloque = html.slice(abre, fin < 0 ? undefined : fin);
