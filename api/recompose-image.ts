@@ -52,7 +52,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
-  applyCors, extractToken, ensureArtifact, fetchPiece, PieceNotFound, SB_URL, SB_KEY,
+  applyCors, extractToken, ensureArtifact, fetchPiece, PieceNotFound, SB_URL, SB_KEY, esPiezaDeVideo, PIEZA_DE_VIDEO,
 } from './_calibrationShared.js';
 import { emphasisColorOptions, identityColorOptions, imageOverlayOf, ruleColorOptions, shadowOptionOf } from './_overlayText.js';
 import { sceneCastOf, imageHistoryOf } from './_sceneCast.js';
@@ -154,6 +154,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         detail: 'la pieza ya está sellada (descartada o con veredicto): la corrección va ANTES del veredicto, no después',
         discarded_at: piece.discarded_at,
       });
+    }
+
+    // 2026-11-13 — PIEZA DE VIDEO: ni imagen ni texto embebido se recomponen aquí (`PIEZA_DE_VIDEO`). Va antes
+    // de toda rama, también de volver a la imagen anterior y del texto de lámina: todas tocan la portada.
+    if (esPiezaDeVideo(piece.assets)) {
+      return res.status(409).json({ error: 'video_piece', detail: PIEZA_DE_VIDEO });
     }
 
     // 2026-10-20 — VOLVER A LA IMAGEN ANTERIOR. Sin directriz ni generación: sólo dato (0 USD).

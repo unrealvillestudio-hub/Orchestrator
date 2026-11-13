@@ -73,6 +73,17 @@ describe('la regeneración no toca el veredicto', () => {
       .toBeLessThan(llamada);
     expect(apiCodigo).toContain('piece_already_sealed');
   });
+
+  it('una pieza de video se rechaza antes de TODA rama: imagen, texto embebido, lámina y volver atrás (2026-11-13)', () => {
+    const guarda = apiCodigo.indexOf('esPiezaDeVideo(piece.assets)');
+    expect(guarda).toBeGreaterThan(-1);
+    for (const rama of ['body.restore_index !== undefined', 'body.slide_text !== undefined', "callEdgeFunction('content-run-stage'"]) {
+      const i = apiCodigo.indexOf(rama);
+      expect(i, rama).toBeGreaterThan(-1);
+      expect(guarda, `la guarda de video va antes de ${rama}`).toBeLessThan(i);
+    }
+    expect(apiCodigo).toContain("error: 'video_piece'");
+  });
 });
 
 // ── 2 · la directriz es la operación, no su explicación ──────────────────────────

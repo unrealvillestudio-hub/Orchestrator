@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { actionsFor, ACTION_KEYS, type PieceActions } from './_calibrationShared.js';
+import { actionsFor, ACTION_KEYS, PIEZA_DE_VIDEO, type PieceActions } from './_calibrationShared.js';
 
 /**
  * U-4 — QUÉ SE PUEDE HACER CON UNA PIEZA.
@@ -193,5 +193,26 @@ describe('ni una marca ni una bandeja en el eje de acciones', () => {
 
   it('no se ramifica por marca ni por canal', () => {
     expect(ACTIONS_FOR).not.toMatch(/brand_id|platform_key|\bdomain\b/);
+  });
+});
+
+// ── Pieza de video (2026-11-13) ──────────────────────────────────────────────────
+describe('pieza de video (assets.video.url)', () => {
+  const VIDEO = { ...CON_IMAGEN, video: { url: 'https://ejemplo.invalid/video-ficticio.mp4' } };
+
+  it('regenerar imagen NO: la imagen es la portada y el texto va dentro del video', () => {
+    const a = actionsFor({ status: 'awaiting_approval', assets: VIDEO });
+    expect(a.recompose_image.available).toBe(false);
+    expect(a.recompose_image.reason).toBe(PIEZA_DE_VIDEO);
+  });
+
+  it('el copy sí se edita, y los veredictos siguen disponibles', () => {
+    const a = actionsFor({ status: 'awaiting_approval', assets: VIDEO });
+    expect(disponibles(a)).toEqual(['approve', 'discard', 'edit_text', 'fixable', 'reject', 'research']);
+  });
+
+  it('un video sin url no cuenta como pieza de video', () => {
+    const a = actionsFor({ status: 'awaiting_approval', assets: { ...CON_IMAGEN, video: { url: '' } } });
+    expect(a.recompose_image.available).toBe(true);
   });
 });
