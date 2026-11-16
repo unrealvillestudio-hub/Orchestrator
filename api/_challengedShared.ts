@@ -36,7 +36,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
-  SB_URL, SB_KEY, channelTextOf, actionsFor,
+  SB_URL, SB_KEY, channelTextOf, actionsFor, esPiezaDeVideo,
   type PieceTextInput, type TextSource, type PieceActions,
 } from './_calibrationShared.js';
 import { readingLanguageOf, type BrandLanguageCatalog } from './_brandLanguage.js';
@@ -104,6 +104,8 @@ export interface ChallengedRow {
      * con que se ofrece tampoco puede cambiar según desde dónde se mire.
      */
     has_image: boolean;
+    /** 2026-11-16 — pieza de video (`esPiezaDeVideo`): «Editar texto» abre también el texto en pantalla. */
+    has_video: boolean;
     /** 2026-10-19 — el texto de la imagen para el editor de la tarjeta (ver `imageOverlayOf`). */
     image_overlay: ImageOverlayView | null;
     id: string;
@@ -350,6 +352,7 @@ export function toChallengedRow(
           actions: actionsFor(p),
           // Mismo criterio que `toContext`: una url vacía NO es una imagen.
           has_image: typeof p.assets?.image?.url === 'string' && !!p.assets.image.url,
+          has_video: esPiezaDeVideo(p.assets),
           image_overlay: imageOverlayOf(p.assets),
           id: p.id,
           title: pieceTitle(p),

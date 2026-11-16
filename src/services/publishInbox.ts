@@ -140,6 +140,8 @@ export interface PublishablePiece {
   metrics: PieceMetrics | null;
   /** SIN-IMAGEN-01 — si la pieza ya tiene imagen. Lo resuelve el server (`toContext`). */
   has_image: boolean;
+  /** 2026-11-16 — pieza de video: «Editar texto» abre también el texto en pantalla. Opcional ante un server viejo. */
+  has_video?: boolean;
   /**
    * INVESTIGAR (2026-10-05) — la pieza espera, cerró, nació de o fue reemplazada por un caso de
    * investigación: la tarjeta pide su estado a `/api/research-cases`. Lo resuelve el server

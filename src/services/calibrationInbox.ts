@@ -37,6 +37,7 @@ import type { CarouselTextView, SlideTextOut } from '../../api/_carouselText';
 import type { TextPlace } from '../../api/_textPlace';
 import type { TextColumn } from '../../api/_textColumn';
 import type { TextColorOptions } from '../../api/_textStyle';
+import type { CastMember, PresetsByLayer, TextLayers } from '../../api/_pieceText';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
@@ -324,6 +325,8 @@ export interface CalibrationPiece {
    * separa las dos caras de la acción de imagen: corregir una escena, o pedir la primera.
    */
   has_image: boolean;
+  /** 2026-11-16 — pieza de video: «Editar texto» abre también el texto en pantalla. Opcional ante un server viejo. */
+  has_video?: boolean;
   /** 2026-10-19 — el texto de la imagen para el editor de la tarjeta. `null` = la imagen no lleva texto. */
   image_overlay?: ImageOverlayView | null;
   /**
@@ -884,4 +887,44 @@ export function discardPiece(
     method: 'POST',
     body: { piece_id: input.piece_id, reason: input.reason ?? null },
   });
+}
+
+// ── 2026-11-16 · TEXTO EN PANTALLA (contrato v1 §4, `api/piece-text.ts`) ──────────────────────────
+/** Un gancho, una frase clave o un CTA propuesto por CopyLab. Se muestra tal cual: aquí no se reescribe. */
+export interface TextProposal { text: string; pattern_key?: string | null; why?: string | null; line_index?: number | null }
+
+export interface PieceTextProposal {
+  ok: true; piece_id: string; brand_id: string; medium: 'video' | 'image';
+  has_clean_video: boolean; clean_video_note: string | null;
+  proposals: { hooks: TextProposal[]; key_phrases: TextProposal[]; share_ctas: TextProposal[] };
+  meta: { patterns_used?: string[]; n8_filter?: string; model?: string } | null;
+  recent_pattern_keys: string[];
+  presets: PresetsByLayer | null; presets_error: string | null;
+  accent_options: EmphasisColorOption[]; strip_options: EmphasisColorOption[];
+  cast: CastMember[];
+  current: { text_layers: TextLayers | null; hook: string | null };
+  duration_ms: number | null;
+  pending: { job_id: string; requested_at: string } | null;
+}
+
+/** Pide a CopyLab (vía el Orchestrator) los ganchos, las frases clave y los CTA de la pieza. */
+export function proposePieceText(token: string, pieceId: string, goal?: string): Promise<PieceTextProposal> {
+  return req('/api/piece-text', token, { method: 'POST', body: { piece_id: pieceId, action: 'propose', ...(goal ? { goal } : {}) } });
+}
+
+/** Manda las capas elegidas a VideoLab (vía el Orchestrator). Devuelve el job que hay que sondear. */
+export function applyPieceText(token: string, pieceId: string, textLayers: TextLayers): Promise<{ ok: true; job_id: string; status: 'running' }> {
+  return req('/api/piece-text', token, { method: 'POST', body: { piece_id: pieceId, action: 'apply', text_layers: textLayers } });
+}
+
+export interface PieceTextPoll {
+  ok: true; status: 'idle' | 'running' | 'completed' | 'failed'; job_id?: string;
+  video?: { url?: string; poster_url?: string | null; version?: string } | null;
+  html?: string | null; artifact_url?: string | null;
+  error_label?: string; detail?: string;
+}
+
+/** Sondea el render de texto pendiente; al terminar, la pieza ya tiene el video nuevo. */
+export function pollPieceText(token: string, pieceId: string): Promise<PieceTextPoll> {
+  return req(`/api/piece-text?piece_id=${encodeURIComponent(pieceId)}`, token);
 }

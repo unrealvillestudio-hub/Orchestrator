@@ -56,7 +56,7 @@ export const TIMEOUT_MS: Record<FetchTarget, number> = {
   edge: 25_000,
   /**
    * El modelo: es el único destino donde tardar es normal, y aun así tiene techo. 50 s
-   * contra los 60 s de `maxDuration` de sus dos rutas deja diez segundos para que la
+   * contra los 60 s de `maxDuration` de sus rutas deja diez segundos para que la
    * función redacte el error y responda.
    */
   model: 50_000,
@@ -70,7 +70,7 @@ export const TIMEOUT_MS: Record<FetchTarget, number> = {
  * compara se rompe sin ruido. La prueba lee ESTA lista, busca cada ruta en `vercel.json`
  * y exige que el `maxDuration` real supere al plazo.
  */
-export const MODEL_ROUTES = ['api/calibrate.ts', 'api/interpret-intent.ts'] as const;
+export const MODEL_ROUTES = ['api/calibrate.ts', 'api/interpret-intent.ts', 'api/piece-text.ts'] as const;
 
 /** Código estable del corte por plazo. Se busca por este texto en los logs. */
 export const FETCH_TIMEOUT_CODE = 'FETCH_TIMEOUT';
