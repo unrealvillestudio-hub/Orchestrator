@@ -135,3 +135,7 @@
   .text-\[12px\], .text-xs { font-size: 13.5px; }
   .text-\[13px\], .text-sm { font-size: 15px; }
 }
+
+/* 2026-11-16 — VENTANA LATERAL: mientras la ventana «Texto en pantalla» está al lado, el contenido se corre a la
+   izquierda para no quedar tapado. El ancho lo pone `VentanaLateral` en `--ventana-lateral`. */
+body.con-ventana-lateral .contenido-principal { padding-right: var(--ventana-lateral, 0px); transition: padding-right 120ms ease-out; }
