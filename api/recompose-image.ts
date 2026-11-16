@@ -299,6 +299,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // 2026-11-16 — la colocación a mano, igual: un motor o un compositor que no sabe de `blocks` recompondría en el lugar
       // automático y respondería «ok». Sin acuse, la pantalla diría que se colocó algo que no se colocó.
       if (conBloques && ef.body.blocks_applied !== true) {
+        // El motor dice por qué no acusó (`blocks_ack.reason`, p. ej. BLOCKS_NOT_FOR_CAROUSEL): ese motivo manda.
+        const motivo = typeof ef.body.blocks_ack?.reason === 'string' ? ef.body.blocks_ack.reason : null;
+        if (motivo) return res.status(409).json({ error: 'blocks_unsupported', reason: motivo, detail: `el motor no aplicó la colocación a mano de los bloques: ${motivo}` });
         return res.status(409).json({
           error: 'blocks_unsupported',
           detail: 'el motor recompuso la imagen pero no aplicó la colocación a mano de los bloques: falta desplegar content-run-stage con blocks o ImageLab con blocks en /api/compose (contrato «Bloques a mano» v1 §3)',
@@ -323,7 +326,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         text_scale: ef.body.text_scale ?? null,
         // 2026-11-16 — el eco de los bloques aplicados y los avisos del compositor (`TEXT_PLACED_OVER_FACE: …`).
         blocks: ef.body.blocks ?? null,
-        text_warnings: Array.isArray(ef.body.text_warnings) ? ef.body.text_warnings : Array.isArray(ef.body.markers) ? ef.body.markers : [],
+        text_warnings: [...(Array.isArray(ef.body.text_warnings) ? ef.body.text_warnings : Array.isArray(ef.body.markers) ? ef.body.markers : []), ...(Array.isArray(ef.body.blocks_warnings) ? ef.body.blocks_warnings : [])],
         artifact_url, html, artifact_refreshed: html !== null,
       });
     }
@@ -436,8 +439,14 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
     // la ventana, que sigue sirviendo para el titular y la bajada.
     const refIds = (Array.isArray(image?.identity_refs) ? image.identity_refs : [])
       .map((r: any) => String(r?.person_id ?? '')).filter((i: string) => /^[A-Za-z0-9_-]{1,64}$/.test(i));
+    const esUuid = (i: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(i);
+    const fichaFilter = (ids: string[]) => [
+      ids.some(esUuid) ? `id.in.(${ids.filter(esUuid).join(',')})` : '',
+      ids.some((i) => !esUuid(i)) ? `blueprint_id.in.(${ids.filter((i) => !esUuid(i)).map((i) => `"${i}"`).join(',')})` : '',
+    ].filter(Boolean).join(',');
     const [fichas, marcaRows] = await Promise.all([
-      refIds.length ? leer(`person_blueprints?blueprint_id=in.(${refIds.map((i: string) => `"${i}"`).join(',')})&select=*`).catch(() => []) : Promise.resolve([]),
+      // `person_id` es `person_blueprints.id` (UUID) desde la identidad por id (2026-11-16); los ids viejos eran `blueprint_id`.
+      refIds.length ? leer(`person_blueprints?or=(${fichaFilter(refIds)})&select=*`).catch(() => []) : Promise.resolve([]),
       leer(`brands?id=eq.${b}&select=*&limit=1`).catch(() => []),
     ]);
     return res.status(200).json({

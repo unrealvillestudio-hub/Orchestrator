@@ -104,12 +104,16 @@ describe('el rol: «Nombre — Cargo — Marca» de la ficha de la persona', () 
     const assets = { image: { identity_refs: [{ name: 'Persona Uno', person_id: 'p-1', image_urls: ['u'] }] } };
     expect(imagePersonaOf(assets, [{ blueprint_id: 'p-1', role_title: 'Asesora' }])).toEqual({ person_id: 'p-1', name: 'Persona Uno', title: 'Asesora' });
     expect(imagePersonaOf(assets)).toEqual({ person_id: 'p-1', name: 'Persona Uno', title: '' });
+    const uuid = '00000000-0000-4000-8000-000000000001';
+    const porId = { image: { identity_refs: [{ name: 'Persona Uno', person_id: uuid, image_urls: ['u'] }] } };
+    expect(imagePersonaOf(porId, [{ id: uuid, blueprint_id: 'bp_uno', role_title: 'Asesora' }])).toEqual({ person_id: uuid, name: 'Persona Uno', title: 'Asesora' });
     expect(imagePersonaOf({ image: {} })).toBeNull();
     expect(imagePersonaOf({ image: { identity_refs: [{ name: '' }] } })).toBeNull();
   });
 
-  it('cargo y nombre de marca: la primera columna que lo traiga', () => {
-    expect(titleOfFicha({ title: '', job_title: 'Gerente' })).toBe('Gerente');
+  it('cargo de la ficha (role_title) y nombre de marca', () => {
+    expect(titleOfFicha({ role_title: 'Gerente' })).toBe('Gerente');
+    expect(titleOfFicha({ title: 'Otro', job_title: 'Otro' })).toBe('');
     expect(titleOfFicha(null)).toBe('');
     expect(brandNameOf({ display_name: 'Marca Visible' }, 'MarcaPrueba')).toBe('Marca Visible');
     expect(brandNameOf(null, 'MarcaPrueba')).toBe('MarcaPrueba');

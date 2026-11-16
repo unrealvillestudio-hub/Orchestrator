@@ -155,16 +155,15 @@ export function imagePersonaOf(assets: unknown, fichas: Array<Record<string, unk
   const ref = Array.isArray(refs) ? refs.find((r: any) => str(r?.name)) : null;
   if (!ref) return null;
   const person_id = str(ref.person_id) || null;
-  const ficha = fichas.find((f) => (person_id && (str(f?.blueprint_id) === person_id || str(f?.person_id) === person_id))
+  // `person_id` es `person_blueprints.id` (UUID, contrato de identidad por id, 2026-11-16).
+  const ficha = fichas.find((f) => (person_id && (str(f?.id) === person_id || str(f?.blueprint_id) === person_id))
     || str(f?.display_name) === str(ref.name)) ?? null;
   return { person_id, name: str(ref.name), title: titleOfFicha(ficha) };
 }
 
-/** El cargo en la ficha de una persona: la primera de las columnas que lo pueden llevar. PURO. */
+/** El cargo en la ficha de una persona: `person_blueprints.role_title` (migración 20261116213000). Sin cargo, ''. PURO. */
 export function titleOfFicha(f: Record<string, unknown> | null | undefined): string {
-  if (!f) return '';
-  for (const k of ['title', 'role_title', 'job_title', 'cargo', 'position']) { const v = str(f[k]); if (v) return v; }
-  return '';
+  return f ? str(f.role_title) : '';
 }
 
 /** El nombre visible de una marca, de su fila en `public.brands`. PURO. */
