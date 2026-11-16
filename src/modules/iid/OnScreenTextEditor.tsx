@@ -163,13 +163,31 @@ function Seccion({ titulo, resumen, children, disabledReason }: {
     );
   }
   return (
-    <details className="rounded-xl border border-zinc-800 bg-zinc-950/40">
-      <summary className="cursor-pointer select-none px-3 py-2 text-[12px] font-medium text-zinc-200 flex items-center justify-between gap-2">
-        <span>{titulo}</span>
+    <details data-seccion className="group rounded-xl border border-zinc-800 bg-zinc-950/40">
+      <summary className="cursor-pointer select-none list-none px-3 py-2 text-[12px] font-medium text-zinc-200 flex items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
+        {/* 2026-11-16 — el pliegue se VE: sin flecha, Sam no veía que cada sección se abre y se cierra. */}
+        <span className="flex items-center gap-1.5">
+          <span aria-hidden className="inline-block w-3 text-zinc-500 transition-transform group-open:rotate-90">▸</span>
+          {titulo}
+        </span>
         {resumen && <span className="text-[10px] font-mono text-zinc-500 truncate">{resumen}</span>}
       </summary>
       <div className="px-3 pb-3 pt-1 space-y-2">{children}</div>
     </details>
+  );
+}
+
+/**
+ * Plegar o desplegar TODAS las secciones de la ventana de una vez. Todas abren plegadas (regla de Sam): el operador
+ * elige con cuál trabaja. Actúa sobre los `<details data-seccion>` de su ventana, sin estado propio.
+ */
+function BarraSecciones({ raiz }: { raiz: React.RefObject<HTMLDivElement | null> }) {
+  const todas = (abrir: boolean) => raiz.current?.querySelectorAll<HTMLDetailsElement>('details[data-seccion]').forEach((d) => { d.open = abrir; });
+  return (
+    <div className="flex items-center justify-end gap-3 text-[10px] text-zinc-500">
+      <button type="button" onClick={() => todas(true)} className="hover:text-zinc-200">Desplegar todo</button>
+      <button type="button" onClick={() => todas(false)} className="hover:text-zinc-200">Plegar todo</button>
+    </div>
   );
 }
 
@@ -401,8 +419,10 @@ function ImageBody(p: Extract<OnScreenTextEditorProps, { medium: 'image' }>) {
   const set = (patch: Partial<ImagePlacementDraft>) => p.onDraft({ ...d, ...patch });
   const entry = controlSupport('image', 'headline', 'entry');
   const lam = p.placementDisabledReason ?? null;
+  const raiz = useRef<HTMLDivElement>(null);
   return (
-    <div className="space-y-2">
+    <div ref={raiz} className="space-y-2">
+      <BarraSecciones raiz={raiz} />
       <Seccion titulo="Vista previa" resumen="aproximada">
         <SchematicPreview aspect={p.aspect} safe={p.safeZone} items={imagePreviewItems(d, p.hasSubheadline)} />
       </Seccion>
@@ -463,6 +483,7 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
   const [job, setJob] = useState<null | { id: string; since: number }>(null);
   const [done, setDone] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const raiz = useRef<HTMLDivElement>(null);
 
   const proponer = () => {
     setLoading(true); setError(null);
@@ -520,7 +541,8 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
   const modo = (pl: Place | null) => (pl ? 'a mano' : 'automático');
 
   return (
-    <div className="space-y-2">
+    <div ref={raiz} className="space-y-2">
+      <BarraSecciones raiz={raiz} />
       {sinLimpio && (
         <p className="text-[11px] leading-snug rounded-lg px-3 py-2 border border-amber-500/40 bg-amber-500/[0.08] text-amber-200">
           {prop.clean_video_note}

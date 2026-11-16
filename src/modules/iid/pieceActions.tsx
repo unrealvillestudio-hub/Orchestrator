@@ -13,6 +13,7 @@ import { overlayEditorSeed, overlayViewAfterApply, shadowDefaultLabel, type Imag
 import { textStyleDraftOf, subMarkupOf, textStylePayload, withBlock, SUB_EDITOR_HELP, type TextStyleDraft, type TextColorOptions } from '../../../api/_textStyle';
 import { TextBlockControls } from './TextStyleControls';
 import { OnScreenTextEditor, HookProposals } from './OnScreenTextEditor';
+import { VentanaLateral } from './VentanaLateral';
 import {
   imageBlocksToSend, imagePlacementDraftOf, LAMINA_SIN_COLOCACION, NO_SAFE_ZONE, roleTextOf,
   type ImageBlocks, type ImagePlacementDraft, type SafeZone,
@@ -1842,7 +1843,9 @@ export function PieceActionsBar({
       {ICON.edit_text} Texto en pantalla
     </button>
   );
+  // 2026-11-16 — en escritorio, la ventana va AL LADO del video (`VentanaLateral`); sin sitio, debajo como antes.
   const ventanaVideo = textoVideo && pantallaVideo && (
+    <VentanaLateral>
     <div className="rounded-xl border border-violet-500/25 bg-violet-500/[0.04] p-2.5 space-y-2">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] font-medium text-violet-200">Texto en pantalla</p>
@@ -1851,7 +1854,12 @@ export function PieceActionsBar({
       <OnScreenTextEditor medium="video" pieceId={piece.piece_id} token={token}
         onApplied={(r) => onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: false, refreshed: r.html !== null, posts: 0 })} />
     </div>
+    </VentanaLateral>
   );
+  // 2026-11-16 — con el texto de una imagen abierto, el panel va AL LADO de la imagen en escritorio (`VentanaLateral`).
+  const panelVista = panelJsx && panel === 'regen' && regenTab === 'text'
+    ? <VentanaLateral key={`lateral-${panel}`}>{panelJsx}</VentanaLateral>
+    : panelJsx;
   const actionsJsx = (
           <motion.div key="actions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
             {/* Juicio y sello: primero y juntos, sin un arreglo intercalado entre ellos. */}
@@ -1875,7 +1883,7 @@ export function PieceActionsBar({
     const deTexto = arreglo.filter((b) => b.key !== 'recompose_image');
     const enZona = (z: 'imagen' | 'texto' | 'veredicto', botones: React.ReactNode) => (
       <AnimatePresence mode="wait">
-        {zona === z ? panelJsx : (
+        {zona === z ? panelVista : (
           <motion.div key={`botones-${z}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>{botones}</motion.div>
         )}
       </AnimatePresence>
@@ -1923,7 +1931,7 @@ export function PieceActionsBar({
       {notaError}
 
       <AnimatePresence mode="wait">
-        {panel ? panelJsx : actionsJsx}
+        {panel ? panelVista : actionsJsx}
       </AnimatePresence>
     </div>
   );

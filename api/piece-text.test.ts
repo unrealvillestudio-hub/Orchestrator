@@ -332,6 +332,12 @@ describe('reglas LABS y MULTIMARCA', () => {
     expect(ROUTE).not.toMatch(/active=eq\.true&select=lab_key|lab_configs[^\n]*PATCH/);
   });
 
+  it('el job padre que va a VideoLab es el lab_jobs.id que produjo el video, no el job del Orchestrator', () => {
+    // 2026-11-16: el id del Orchestrator vive en otra tabla y violaba la FK de lab_jobs.parent_job_id (23503).
+    expect(ROUTE).toContain('parentJobId: assets.video.lab_job_id');
+    expect(ROUTE).not.toMatch(/parentJobId:\s*piece\.orchestrator_job_id/);
+  });
+
   it('ni una marca del ecosistema en el código', () => {
     for (const src of [ROUTE, LIB, UI]) {
       for (const marca of ['NeuroneSCF', 'ForumPHs', 'LucienSael', 'UnrealvilleStudio', 'D7Herbal', 'fphs', 'nscf']) {
