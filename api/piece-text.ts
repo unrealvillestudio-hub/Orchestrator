@@ -223,7 +223,10 @@ async function aplicar(res: VercelResponse, piece: any, raw: unknown) {
   const videolab = await labUrl('videolab');
   if (!videolab) return res.status(503).json({ error: 'lab_not_configured', detail: 'lab_configs no declara api_endpoint para videolab' });
   const pedido = buildVideoLabBody({
-    brandId, pieceId: piece.id, platform: piece.platform, parentJobId: piece.orchestrator_job_id ?? null,
+    brandId, pieceId: piece.id, platform: piece.platform,
+    // El padre es el job de VideoLab que produjo el video (un lab_jobs.id). El job del Orchestrator vive en otra tabla y
+    // violaba la FK de lab_jobs.parent_job_id (2026-11-16).
+    parentJobId: assets.video.lab_job_id ?? null,
     cleanVideoUrl: assets.video.clean_video.url, timeline: assets.video.timeline, textLayers: v.value,
   });
   const r = await fetchWithTimeout('edge', videolab, {
