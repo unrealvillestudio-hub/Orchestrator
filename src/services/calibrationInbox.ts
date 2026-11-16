@@ -38,6 +38,7 @@ import type { TextPlace } from '../../api/_textPlace';
 import type { TextColumn } from '../../api/_textColumn';
 import type { TextColorOptions } from '../../api/_textStyle';
 import type { CastMember, PresetsByLayer, TextLayers } from '../../api/_pieceText';
+import type { ImageBlocks, SafeZone } from '../../api/_onScreenText';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
 /** Orden de la bandeja. Ejes del sistema: toda pieza tiene fecha, marca y veredicto. */
@@ -684,6 +685,8 @@ export function recomposeImage(
     text_column?: TextColumn | null;
     // 2026-10-28 — el tamaño del texto de la imagen (`api/_textScale.ts`). Solo o con el texto; no regenera.
     text_scale?: number | null;
+    // 2026-11-16 — la colocación a mano de cada bloque (contrato «Bloques a mano» §3, `api/_onScreenText.ts`).
+    blocks?: ImageBlocks;
   },
 ): Promise<{
   ok: true; piece_id: string; image_url: string | null; composed: boolean;
@@ -699,6 +702,8 @@ export function recomposeImage(
   text_column?: TextColumn | null;
   /** 2026-10-28 — el tamaño del texto que quedó guardado (null = el de la marca). */
   text_scale?: number | null;
+  /** 2026-11-16 — los bloques que quedaron aplicados (eco del compositor) y sus avisos (`TEXT_PLACED_OVER_FACE`, …). */
+  blocks?: ImageBlocks | null; text_warnings?: string[];
   artifact_url: string | null; html: string | null; artifact_refreshed: boolean;
 }> {
   return req('/api/recompose-image', token, {
@@ -714,6 +719,7 @@ export function recomposeImage(
       ...('text_place' in input ? { text_place: input.text_place ?? null } : {}),
       ...('text_column' in input ? { text_column: input.text_column ?? null } : {}),
       ...('text_scale' in input ? { text_scale: input.text_scale ?? null } : {}),
+      ...(input.blocks ? { blocks: input.blocks } : {}),
     },
   });
 }
@@ -740,6 +746,10 @@ export function fetchEmphasisColors(token: string, pieceId: string): Promise<{
   text_scale?: number | null;
   /** 2026-10-23 — los colores posibles del texto de cada bloque, con el de siempre de cada uno. */
   text_colors?: TextColorOptions;
+  /** 2026-11-16 — «Texto en pantalla»: la colocación guardada, la persona que se puede rotular y la vista previa. */
+  blocks?: ImageBlocks | null;
+  role_persona?: { person_id: string | null; name: string; title: string } | null;
+  brand_name?: string; safe_zone?: SafeZone; aspect?: number;
 }> {
   return req(`/api/recompose-image?piece_id=${encodeURIComponent(pieceId)}`, token);
 }
@@ -904,6 +914,8 @@ export interface PieceTextProposal {
   cast: CastMember[];
   current: { text_layers: TextLayers | null; hook: string | null };
   duration_ms: number | null;
+  /** 2026-11-16 — la proporción ancho/alto de la pieza, para la vista previa de la ventana. */
+  aspect?: number;
   pending: { job_id: string; requested_at: string } | null;
 }
 

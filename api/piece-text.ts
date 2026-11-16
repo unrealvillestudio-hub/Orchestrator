@@ -34,6 +34,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, extractToken, ensureArtifact, fetchPiece, SB_URL, SB_KEY } from './_calibrationShared.js';
 import { emphasisColorOptions, identityColorOptions } from './_overlayText.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
+import { aspectOf } from './_onScreenText.js';
 import { requireReviewer, guardPiece, VISTAS_DE_PIEZA } from './_reviewScope.js';
 import {
   assetsAfterFailedJob, assetsAfterTextJob, buildCopyLabBody, buildCopyLabSource, buildVideoLabBody, castOf,
@@ -187,6 +188,8 @@ async function proponer(res: VercelResponse, piece: any, goalRaw: unknown) {
     cast: medium === 'video' ? castOf(assets) : [],
     current: { text_layers: assets?.video?.text_layers ?? null, hook: source.current_hook },
     duration_ms: Number.isFinite(durS) && durS > 0 ? Math.round(durS * 1000) : null,
+    // 2026-11-16 — la proporción de la pieza, para la vista previa esquemática de la ventana «Texto en pantalla».
+    aspect: aspectOf(assets, medium),
     pending: assets?.video?.pending_text_job ?? null,
   });
 }
@@ -197,7 +200,7 @@ async function aplicar(res: VercelResponse, piece: any, raw: unknown) {
   const brandId = String(piece.brand_id ?? '');
   const assets = piece.assets ?? {};
   if (mediumOf(assets) !== 'video') {
-    return res.status(409).json({ error: 'not_a_video_piece', detail: 'el texto en pantalla se aplica a piezas de video; en una imagen se edita el titular en «Texto de la imagen»' });
+    return res.status(409).json({ error: 'not_a_video_piece', detail: 'el texto en pantalla se aplica a piezas de video; en una imagen el texto se aplica desde la misma ventana «Texto en pantalla», que recompone la imagen' });
   }
   if (!hasCleanVideo(assets)) return res.status(409).json({ error: 'no_clean_video', detail: NO_CLEAN_VIDEO });
   if (assets.video.pending_text_job?.job_id) {

@@ -15,11 +15,14 @@
  *                                  // n (2..N) de un carrusel, sin generar: ver `textoDeLaLamina` y `_carouselText.ts`
  *   text_place?: 'top' | 'bottom' | 'auto' | null   // 2026-10-22 — la ubicación del texto de la imagen (y de la portada
  *                                  // de un carrusel), sola o con `overlay_override`, sin generar: ver `_textPlace.ts`
+ *   blocks?: { headline?: { place? }, subheadline?: { place? }, role?: { enabled, text, place? } }   // 2026-11-16 —
+ *                                  // la colocación a mano por bloque (contrato «Bloques a mano» v1 §3): ver `_onScreenText.ts`
  * }
  * GET /api/recompose-image?piece_id= → { options (colores del resaltado), cast (En la escena), history (anteriores), overlay (texto vigente),
  *   shadow (la sombra de la marca), rule_options (colores del filete), identity_options (colores de la barra lateral),
  *   carousel (2026-10-22: las láminas con su texto, o null si la pieza no es un carrusel),
- *   text_place (2026-10-22: la ubicación del texto guardada en la imagen, o null) }
+ *   text_place (2026-10-22: la ubicación del texto guardada en la imagen, o null),
+ *   blocks, role_persona, brand_name, safe_zone, aspect (2026-11-16: la ventana «Texto en pantalla») }
  *
  * ─── LOS DOS MODOS (BRIEF-IMG-01 fase 4) ─────────────────────────────────────────────
  * `edit_from_current` CORRIGE SOBRE LA IMAGEN ACTUAL: el generador recibe la imagen limpia vigente
@@ -64,6 +67,7 @@ import { carouselTextViewOf, readSlideTextRequest } from './_carouselText.js';
 import { readTextPlaceRequest, textPlaceOfImage } from './_textPlace.js';
 import { readTextColumnRequest, textColumnOfImage } from './_textColumn.js';
 import { readTextScaleRequest, textScaleOfImage } from './_textScale.js';
+import { aspectOf, brandNameOf, imagePersonaOf, imageSafeZoneOf, readImageBlocksRequest, storedImageBlocks } from './_onScreenText.js';
 import { subBreaksOf, textColorOptions } from './_textStyle.js';
 import { textStyleWantsItalic, textStyleWantsColor, textStyleWantsBold } from './_textStyleShape.js';
 
@@ -107,6 +111,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     text_column?: unknown;
     // 2026-10-28 — el tamaño del texto de la imagen: un número de 0,7 a 1,3 o null (ver `_textScale.ts`).
     text_scale?: unknown;
+    // 2026-11-16 — la colocación a mano de cada bloque (contrato «Bloques a mano» v1 §3, ver `_onScreenText.ts`).
+    blocks?: unknown;
   } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* keep empty */ }
 
@@ -185,7 +191,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const conTamano = Object.prototype.hasOwnProperty.call(body, 'text_scale');
     const tamano = conTamano ? readTextScaleRequest(body.text_scale) : null;
     if (tamano && !tamano.ok) return res.status(400).json({ error: 'invalid text_scale', detail: tamano.error });
-    if (tieneImagen && !directive && !conTexto && !conUbicacion && !conColumna && !conTamano) {
+    // 2026-11-16 — LA COLOCACIÓN A MANO (X, Y, zoom por bloque y el rol): el mismo trato, por la misma vía sin generar.
+    const conBloques = body.blocks != null;
+    const bloques = conBloques ? readImageBlocksRequest(body.blocks) : null;
+    if (bloques && !bloques.ok) return res.status(400).json({ error: 'invalid blocks', detail: bloques.error });
+    if (tieneImagen && !directive && !conTexto && !conUbicacion && !conColumna && !conTamano && !conBloques) {
       return res.status(400).json({
         error: 'visual_directive required',
         detail: 'regenerar sin directriz devuelve el mismo defecto y cobra una generación por no cambiar nada. '
@@ -196,7 +206,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 2026-10-19 — EL TEXTO DE LA IMAGEN, SIN TOCAR LA ESCENA. Con `overlay_override` en el cuerpo no hay
     // directriz ni generación: se recompone sobre la escena limpia que ya existe (0 USD). El motor valida el
     // texto antes de componer; aquí sólo se exige que haya una imagen sobre la que escribir.
-    if (conTexto || conUbicacion || conColumna || conTamano) {
+    if (conTexto || conUbicacion || conColumna || conTamano || conBloques) {
       if (!tieneImagen) {
         return res.status(409).json({ error: 'no_image', detail: 'la pieza no tiene imagen: primero hay que generarla, después se escribe su texto' });
       }
@@ -207,6 +217,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ...(ubicacion && ubicacion.ok ? { text_place: ubicacion.value } : {}),
         ...(columna && columna.ok ? { text_column: columna.value } : {}),
         ...(tamano && tamano.ok ? { text_scale: tamano.value } : {}),
+        // 2026-11-16 — el motor lo pasa tal cual a ImageLab `/api/compose` (`blocks`) y lo guarda en `assets.image.blocks`.
+        ...(bloques && bloques.ok && bloques.value ? { blocks: bloques.value } : {}),
         edit_reason: editReason || null, edited_by: session.sub || 'sam',
       });
       if (!ef.body?.ok) {
@@ -284,6 +296,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           detail: 'el motor recompuso la imagen pero no aplicó el tamaño del texto: falta desplegar content-run-stage con text_scale o ImageLab con el compositor 1.19.0',
         });
       }
+      // 2026-11-16 — la colocación a mano, igual: un motor o un compositor que no sabe de `blocks` recompondría en el lugar
+      // automático y respondería «ok». Sin acuse, la pantalla diría que se colocó algo que no se colocó.
+      if (conBloques && ef.body.blocks_applied !== true) {
+        // El motor dice por qué no acusó (`blocks_ack.reason`, p. ej. BLOCKS_NOT_FOR_CAROUSEL): ese motivo manda.
+        const motivo = typeof ef.body.blocks_ack?.reason === 'string' ? ef.body.blocks_ack.reason : null;
+        if (motivo) return res.status(409).json({ error: 'blocks_unsupported', reason: motivo, detail: `el motor no aplicó la colocación a mano de los bloques: ${motivo}` });
+        return res.status(409).json({
+          error: 'blocks_unsupported',
+          detail: 'el motor recompuso la imagen pero no aplicó la colocación a mano de los bloques: falta desplegar content-run-stage con blocks o ImageLab con blocks en /api/compose (contrato «Bloques a mano» v1 §3)',
+        });
+      }
       let html: string | null = null;
       let artifact_url: string | null = null;
       try { const art = await ensureArtifact(pieceId); html = art.html; artifact_url = art.artifact_url; }
@@ -301,6 +324,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         text_column: ef.body.text_column ?? null,
         // 2026-10-28 — el tamaño del texto que quedó guardado (o null: el de la marca).
         text_scale: ef.body.text_scale ?? null,
+        // 2026-11-16 — el eco de los bloques aplicados y los avisos del compositor (`TEXT_PLACED_OVER_FACE: …`).
+        blocks: ef.body.blocks ?? null,
+        text_warnings: [...(Array.isArray(ef.body.text_warnings) ? ef.body.text_warnings : Array.isArray(ef.body.markers) ? ef.body.markers : []), ...(Array.isArray(ef.body.blocks_warnings) ? ef.body.blocks_warnings : [])],
         artifact_url, html, artifact_refreshed: html !== null,
       });
     }
@@ -408,6 +434,21 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
       ? await leer(`person_blueprints?blueprint_id=in.(${ids.map((i) => `"${encodeURIComponent(i)}"`).join(',')})&active=eq.true&select=display_name`)
       : [];
     const image = piece.assets?.image ?? null;
+    // 2026-11-16 — «Texto en pantalla»: la persona que se puede rotular (de la identidad guardada en la imagen), su cargo
+    // si su ficha lo trae y el nombre de la marca. Si estas lecturas fallan, el rol queda sin cargo o sin marca: no tumba
+    // la ventana, que sigue sirviendo para el titular y la bajada.
+    const refIds = (Array.isArray(image?.identity_refs) ? image.identity_refs : [])
+      .map((r: any) => String(r?.person_id ?? '')).filter((i: string) => /^[A-Za-z0-9_-]{1,64}$/.test(i));
+    const esUuid = (i: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(i);
+    const fichaFilter = (ids: string[]) => [
+      ids.some(esUuid) ? `id.in.(${ids.filter(esUuid).join(',')})` : '',
+      ids.some((i) => !esUuid(i)) ? `blueprint_id.in.(${ids.filter((i) => !esUuid(i)).map((i) => `"${i}"`).join(',')})` : '',
+    ].filter(Boolean).join(',');
+    const [fichas, marcaRows] = await Promise.all([
+      // `person_id` es `person_blueprints.id` (UUID) desde la identidad por id (2026-11-16); los ids viejos eran `blueprint_id`.
+      refIds.length ? leer(`person_blueprints?or=(${fichaFilter(refIds)})&select=*`).catch(() => []) : Promise.resolve([]),
+      leer(`brands?id=eq.${b}&select=*&limit=1`).catch(() => []),
+    ]);
     return res.status(200).json({
       ok: true, brand_id: brandId, options: emphasisColorOptions(tokens, palette, brandId),
       cast: sceneCastOf(persons, places, image), history: imageHistoryOf(image),
@@ -426,6 +467,12 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
       text_column: textColumnOfImage(piece.assets),
       // 2026-10-28 — el tamaño del texto guardado en la imagen (null = el de la marca).
       text_scale: textScaleOfImage(piece.assets),
+      // 2026-11-16 — «Texto en pantalla» (contrato «Bloques a mano» v1 §4).
+      blocks: storedImageBlocks(piece.assets),
+      role_persona: imagePersonaOf(piece.assets, Array.isArray(fichas) ? fichas : []),
+      brand_name: brandNameOf(Array.isArray(marcaRows) ? marcaRows[0] : null, brandId),
+      safe_zone: imageSafeZoneOf(tokens, brandId),
+      aspect: aspectOf(piece.assets, 'image'),
     });
   } catch (err) {
     console.error(`[recompose-image] GET colores ${pieceId}: ${String(err)}`);

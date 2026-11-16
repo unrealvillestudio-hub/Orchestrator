@@ -61,8 +61,9 @@ describe('el cableado', () => {
     // 2026-10-22 — la ubicación del texto (`_textPlace.ts`) va por la misma rama sin generar.
     // 2026-10-24 — la columna del texto (`_textColumn.ts`) se suma a lo que no exige directriz.
     // 2026-10-28 — el tamaño del texto (`text_scale`) entra por la misma rama sin generar.
-    expect(API).toContain('if (tieneImagen && !directive && !conTexto && !conUbicacion && !conColumna && !conTamano) {');
-    const i = API.indexOf('if (conTexto || conUbicacion || conColumna || conTamano) {');
+    // 2026-11-16 — la colocación a mano por bloque (`blocks`, `_onScreenText.ts`), igual.
+    expect(API).toContain('if (tieneImagen && !directive && !conTexto && !conUbicacion && !conColumna && !conTamano && !conBloques) {');
+    const i = API.indexOf('if (conTexto || conUbicacion || conColumna || conTamano || conBloques) {');
     expect(i).toBeGreaterThan(0);
     expect(i).toBeLessThan(API.indexOf("regenerate_image: true"), 'la rama del texto sale antes de la que regenera');
     expect(API.slice(i, i + 900)).toContain('regenerate_image: false');
@@ -101,9 +102,9 @@ describe('el cableado del editor', () => {
   const sin = (s: string) => s.split('\n').filter((l) => { const t = l.trim(); return !t.startsWith('*') && !t.startsWith('//') && !t.startsWith('{/*'); }).join('\n');
   const MOD = sin(readFileSync(new URL('../src/modules/iid/pieceActions.tsx', import.meta.url), 'utf8'));
   const API = sin(readFileSync(new URL('./recompose-image.ts', import.meta.url), 'utf8'));
-  it('«Texto de la imagen» tiene su botón y abre el editor en su pestaña', () => {
-    expect(MOD).toContain("onClick={() => { open('regen'); setRegenTab('text'); }}");
-    expect(MOD).toContain('Texto de la imagen');
+  it('«Texto en pantalla» tiene su botón y, en una imagen, abre el editor en su pestaña (2026-11-16: una sola ventana)', () => {
+    expect(MOD).toContain("open('regen'); setRegenTab('text');");
+    expect(MOD).toContain('Texto en pantalla');
   });
   it('el color viaja si se tocó un chip (también el de siempre) y hay resaltado o tramos de color', () => {
     expect(MOD).toContain('...(overlayRole && (parsed.emphasis.length || parsed.color_spans.length) ? { emphasis_role: overlayRole } : {})');

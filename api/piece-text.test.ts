@@ -6,7 +6,7 @@ import {
   nextVersion, NO_CLEAN_VIDEO, recentPatternKeysOf, validateTextLayers, RECENT_PIECES_N, VIDEO_HISTORY_MAX,
   type PresetsByLayer,
 } from './_pieceText.js';
-import { textLayersFromDraft, videoTextDraftOf, OWN } from '../src/modules/iid/VideoTextEditor';
+import { textLayersFromDraft, videoTextDraftOf, OWN } from '../src/modules/iid/OnScreenTextEditor';
 
 /**
  * TEXTO EN PANTALLA (contrato v1 §4, 2026-11-16). Las marcas, colores y personas de estas pruebas son de MENTIRA a
@@ -320,7 +320,7 @@ describe('el editor traduce lo elegido a la forma del contrato', () => {
 // ── 6 · reglas del sistema sobre la fuente ────────────────────────────────────────────────────
 const ROUTE = readFileSync(new URL('./piece-text.ts', import.meta.url), 'utf8');
 const LIB = readFileSync(new URL('./_pieceText.ts', import.meta.url), 'utf8');
-const UI = readFileSync(new URL('../src/modules/iid/VideoTextEditor.tsx', import.meta.url), 'utf8');
+const UI = readFileSync(new URL('../src/modules/iid/OnScreenTextEditor.tsx', import.meta.url), 'utf8');
 const ACTIONS = readFileSync(new URL('../src/modules/iid/pieceActions.tsx', import.meta.url), 'utf8');
 
 describe('reglas LABS y MULTIMARCA', () => {
@@ -363,14 +363,18 @@ describe('reglas LABS y MULTIMARCA', () => {
   it('las secciones abren plegadas: <details> sin `open`', () => {
     expect(UI).toContain('<details');
     expect(UI).not.toMatch(/<details[^>]*\sopen[\s>=]/);
-    for (const t of ['Gancho', 'Rol de las personas', 'Subtítulos', 'Títulos clave', 'CTA de reenvío', 'Franja', 'Ganchos propuestos', 'Escribir uno propio']) {
+    for (const t of ['Vista previa', 'Franja de la marca', 'Ganchos propuestos', 'Escribir uno propio', 'Mostrar rol', 'Automático', 'Colocar a mano']) {
       expect(UI).toContain(t);
     }
   });
 
-  it('pieceActions monta el editor de video en «Editar texto» y los ganchos en el texto de la imagen', () => {
-    expect(ACTIONS).toMatch(/panel === 'edit' && piece\.has_video/);
-    expect(ACTIONS).toContain('<VideoTextEditor');
+  it('pieceActions monta UNA sola ventana «Texto en pantalla» para imagen y video, y los ganchos en la del título', () => {
+    expect(ACTIONS).toContain('<OnScreenTextEditor medium="video"');
+    expect(ACTIONS).toMatch(/<OnScreenTextEditor\s+medium="image"/);
     expect(ACTIONS).toContain('<HookProposals');
+    // El editor viejo de video y el panel dentro de «Editar texto» ya no existen: no hay dos caminos para lo mismo.
+    expect(ACTIONS).not.toContain('VideoTextEditor');
+    expect(ACTIONS).not.toMatch(/panel === 'edit' && piece\.has_video/);
+    expect(ACTIONS).not.toContain('Texto de la imagen</');
   });
 });
