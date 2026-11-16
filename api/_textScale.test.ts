@@ -47,7 +47,7 @@ describe('el cableado', () => {
 
   it('la ruta lo valida, lo manda sin generar, exige el acuse y lo devuelve', () => {
     expect(API).toContain("const tamano = conTamano ? readTextScaleRequest(body.text_scale) : null;");
-    expect(API).toContain("if (conTexto || conUbicacion || conColumna || conTamano) {");
+    expect(API).toContain("if (conTexto || conUbicacion || conColumna || conTamano || conBloques) {");
     expect(API).toContain("...(tamano && tamano.ok ? { text_scale: tamano.value } : {}),");
     expect(API).toContain("if (conTamano && ef.body.text_scale_applied !== true) {");
     expect(API).toContain("text_scale: textScaleOfImage(piece.assets),");

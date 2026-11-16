@@ -88,7 +88,7 @@ describe('el cableado', () => {
     expect(API).toContain("const conUbicacion = Object.prototype.hasOwnProperty.call(body, 'text_place');");
     expect(API).toContain("if (ubicacion && !ubicacion.ok) return res.status(400).json({ error: 'invalid text_place', detail: ubicacion.error });");
     // 2026-10-24 — la columna del texto entra por la misma rama sin generar.
-    const i = API.indexOf('if (conTexto || conUbicacion || conColumna || conTamano) {');
+    const i = API.indexOf('if (conTexto || conUbicacion || conColumna || conTamano || conBloques) {');
     expect(i).toBeGreaterThan(0);
     expect(i).toBeLessThan(API.indexOf('regenerate_image: true'));
     const rama = API.slice(i, API.indexOf("const modeRaw"));

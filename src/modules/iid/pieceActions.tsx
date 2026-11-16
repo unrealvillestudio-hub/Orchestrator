@@ -12,7 +12,11 @@ import { effectiveFixImageMode, type FixRequestCode, type FixImageMode } from '.
 import { overlayEditorSeed, overlayViewAfterApply, shadowDefaultLabel, type ImageOverlayView, type EmphasisColorOption, type OverlayOverrideOut, type ShadowOption } from '../../../api/_overlayText';
 import { textStyleDraftOf, subMarkupOf, textStylePayload, withBlock, SUB_EDITOR_HELP, type TextStyleDraft, type TextColorOptions } from '../../../api/_textStyle';
 import { TextBlockControls } from './TextStyleControls';
-import { VideoTextEditor, HookProposals } from './VideoTextEditor';
+import { OnScreenTextEditor, HookProposals } from './OnScreenTextEditor';
+import {
+  imageBlocksToSend, imagePlacementDraftOf, LAMINA_SIN_COLOCACION, NO_SAFE_ZONE, roleTextOf,
+  type ImageBlocks, type ImagePlacementDraft, type SafeZone,
+} from '../../../api/_onScreenText';
 import { highlightPayload, HIGHLIGHT_NOTE_MAX, type HighlightInput } from '../../../api/_highlights';
 import { SCENE_SLOTS, slotDirective, SLOT_CHANGE_MODE, MODE_HELP, type SceneCast, type ImageHistoryEntry } from '../../../api/_sceneCast';
 import { fmtInZone } from './pieceUi';
@@ -99,8 +103,8 @@ export interface ActionablePiece {
    */
   has_image?: boolean;
   /**
-   * 2026-11-16 — si la pieza es de VIDEO. Lo resuelve el server (`toContext`, `esPiezaDeVideo`). Con él, «Editar
-   * texto» abre además el texto en pantalla del video (`VideoTextEditor`, contrato «Texto en pantalla» v1 §4).
+   * 2026-11-16 — si la pieza es de VIDEO. Lo resuelve el server (`toContext`, `esPiezaDeVideo`). Con él, el botón
+   * «Texto en pantalla» abre la ventana del video (`OnScreenTextEditor`, contrato «Bloques a mano» v1 §4).
    */
   has_video?: boolean;
   /**
@@ -593,6 +597,8 @@ export function PieceActionsBar({
     lugar?: string;
     // 2026-10-22 — carrusel: la lámina cuyo texto se guardó, y qué pasó con la portada al aplicar el texto de la imagen.
     lamina?: { n: number; sinCambios: boolean } | null; portada?: boolean | string | null;
+    /** 2026-11-16 — los avisos del compositor sobre la colocación a mano (`TEXT_PLACED_OVER_FACE: headline`, …). */
+    avisos?: string[];
   }>(null);
   // 2026-10-21 — qué deshizo el último Deshacer.
   const [undoNote, setUndoNote] = useState<null | { que: 'image' | 'title' | 'body'; refrescado: boolean }>(null);
@@ -644,6 +650,15 @@ export function PieceActionsBar({
   const [scaleVigente, setScaleVigente] = useState<number | null>(null);
   const [scaleSel, setScaleSel] = useState<number | null>(null);
   const scaleVisto = scaleSel ?? scaleVigente ?? 1;
+  // 2026-11-16 — «TEXTO EN PANTALLA» (contrato «Bloques a mano» v1 §4): la colocación a mano de cada bloque y el rol,
+  // lo guardado en la pieza, la persona que se puede rotular y lo que la vista previa necesita. Se leen al abrir.
+  const [bloquesVigentes, setBloquesVigentes] = useState<ImageBlocks | null>(null);
+  const [colocacion, setColocacion] = useState<ImagePlacementDraft>(imagePlacementDraftOf(null, ''));
+  const [rolPersona, setRolPersona] = useState<{ name: string; title: string } | null>(null);
+  const [pantallaZona, setPantallaZona] = useState<SafeZone>(NO_SAFE_ZONE);
+  const [pantallaAspect, setPantallaAspect] = useState(4 / 5);
+  // La ventana del video se abre aparte: un video no se recompone por el panel de imagen (`PIEZA_DE_VIDEO`).
+  const [pantallaVideo, setPantallaVideo] = useState(false);
   const elegirLamina = (n: number) => {
     setSlideN(n); setError(null); setPlaceSel(null); setColSel(null); setScaleSel(null);
     if (n > 1) {
@@ -702,6 +717,7 @@ export function PieceActionsBar({
       setPlaceSel(null);
       setColSel(null);
       setScaleSel(null);
+      setColocacion(imagePlacementDraftOf(null, ''));
       overlayTocado.current = false;
       sembrarEditor(overlayVigente);
       // Sin opciones (o si la lectura falla) el editor funciona igual, sin selector de color.
@@ -716,6 +732,13 @@ export function PieceActionsBar({
           setPlaceVigente(r.text_place ?? null);
           setColVigente(r.text_column ?? null);
           setScaleVigente(r.text_scale ?? null);
+          // 2026-11-16 — la ventana «Texto en pantalla»: lo guardado, la persona y el rol armado «Nombre — Cargo — Marca».
+          const persona = r.role_persona ?? null;
+          setRolPersona(persona);
+          setBloquesVigentes(r.blocks ?? null);
+          setColocacion(imagePlacementDraftOf(r.blocks ?? null, persona ? roleTextOf(persona, r.brand_name) : ''));
+          setPantallaZona(r.safe_zone ?? NO_SAFE_ZONE);
+          if (typeof r.aspect === 'number' && r.aspect > 0) setPantallaAspect(r.aspect);
         })
         .catch(() => { setEmColors([]); setCast(null); setHistory([]); setCarouselView(null); });
     }
@@ -826,15 +849,20 @@ export function PieceActionsBar({
       const columna = clear ? null : textColumnToSend(colSel, colVigente);
       // 2026-10-28 — y el tamaño del texto, sólo si se movió el deslizador.
       const tamano = clear ? undefined : textScaleToSend(scaleSel, scaleVigente);
+      // 2026-11-16 — la colocación a mano de cada bloque y el rol: viaja sólo si cambió respecto de lo guardado.
+      const bloques = clear ? undefined : imageBlocksToSend(rolPersona ? colocacion : { ...colocacion, role: { ...colocacion.role, enabled: false } }, bloquesVigentes);
+      if (bloques?.role?.enabled && !bloques.role.text) { setBusy(null); setError({ message: 'El rol está encendido sin texto: escribe el rótulo o apágalo.', detail: null }); return; }
       const r = await recomposeImage(token, { piece_id: piece.piece_id, visual_directive: '', overlay_override: override,
         ...(lugar ? { text_place: lugar } : {}), ...(columna ? { text_column: columna } : {}),
-        ...(tamano !== undefined ? { text_scale: tamano } : {}) });
+        ...(tamano !== undefined ? { text_scale: tamano } : {}), ...(bloques ? { blocks: bloques } : {}) });
+      if (bloques) setBloquesVigentes(r.blocks ?? bloques);
       setOverlayVigente(overlayViewAfterApply(override));
       if (lugar) setPlaceVigente(r.text_place ?? lugar);
       if (columna) setColVigente(r.text_column ?? columna);
       if (tamano !== undefined) { setScaleVigente(r.text_scale ?? tamano); setScaleSel(null); }
       onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: r.composed, refreshed: r.artifact_refreshed, posts: r.scheduled_posts_updated });
-      setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated, portada: r.carousel_recomposed ?? null });
+      setRegenNote({ compuesta: r.composed, refrescado: r.artifact_refreshed, posts: r.scheduled_posts_updated, portada: r.carousel_recomposed ?? null,
+        avisos: r.text_warnings ?? [] });
       setPanel(null);
     } catch (err) {
       setError(cardError(err, 'No se pudo recomponer el texto de la imagen.'));
@@ -1111,6 +1139,9 @@ export function PieceActionsBar({
               ? 'Imagen regenerada y compuesta.'
               : 'Escena regenerada, pero la composición falló: la pieza queda con la imagen limpia, sin titular ni franja.'}</p>
           {(() => { const c = coverNoteOf(regenNote.portada); return c ? <p className={c.tone === 'alert' ? 'text-amber-300/80' : 'text-violet-300/70'}>{c.text}</p> : null; })()}
+          {!!regenNote.avisos?.length && (
+            <p className="text-amber-300/80">El compositor avisa (decidió quien colocó, no es un error): {regenNote.avisos.join(' · ')}</p>
+          )}
           {regenNote.cambioDeModo && <p className="text-amber-300/80">Se pintó la misma escena con el cambio: {regenNote.cambioDeModo}.</p>}
           {!regenNote.refrescado && <p className="text-amber-300/80">La imagen cambió, pero el artefacto no se pudo rehacer: la vista de arriba puede estar mostrando la anterior.</p>}
           {regenNote.posts > 0 && <p className="text-violet-300/60">{regenNote.posts} post pendiente de publicar actualizado con la imagen nueva.</p>}
@@ -1180,7 +1211,7 @@ export function PieceActionsBar({
             {/* 2026-10-19 — dos pestañas en el panel de imagen: la escena o el texto que va encima. */}
             {panel === 'regen' && piece.has_image !== false && (
               <div className="flex items-center gap-1.5" role="tablist" aria-label="Qué corregir de la imagen">
-                {([['scene', 'Escena'], ['text', 'Texto de la imagen']] as const).map(([v, l]) => (
+                {([['scene', 'Escena'], ['text', 'Texto en pantalla']] as const).map(([v, l]) => (
                   <button
                     key={v}
                     role="tab"
@@ -1223,10 +1254,241 @@ export function PieceActionsBar({
               </div>
             )}
 
-            {/* 2026-10-22 — UBICACIÓN DEL TEXTO: arriba, abajo o que no tape. Vale para la lámina elegida (la 1 es la
-                imagen de la pieza) y se puede pedir sola con «Recomponer», sin cambiar el texto (0 USD). */}
+            {/* 2026-11-16 — UNA SOLA VENTANA «TEXTO EN PANTALLA» (contrato «Bloques a mano» v1 §4): una tarjeta por bloque con
+                su texto y su X, Y y Zoom; lo que no aplica a una imagen, desactivado con su motivo. Los editores del titular y
+                de la bajada son los de siempre, dentro de su tarjeta; la ubicación, la columna y el tamaño de antes quedan
+                como atajos de la colocación AUTOMÁTICA. Todo se aplica con el mismo «Aplicar texto» (0 USD). */}
             {panel === 'regen' && regenTab === 'text' && (
-              <div className="space-y-1">
+              <div className="space-y-1.5" onChangeCapture={() => { if (!laminaElegida) overlayTocado.current = true; }} onClickCapture={() => { if (!laminaElegida) overlayTocado.current = true; }}>
+                <OnScreenTextEditor
+                  medium="image"
+                  aspect={pantallaAspect}
+                  safeZone={pantallaZona}
+                  draft={colocacion}
+                  onDraft={setColocacion}
+                  roleAvailable={!!rolPersona}
+                  hasSubheadline={laminaElegida ? !!slideDraft.subheadline.trim() : !!overlaySub.trim()}
+                  placementDisabledReason={laminaElegida ? LAMINA_SIN_COLOCACION : null}
+                  headlineSlot={laminaElegida ? (
+                    <div className="space-y-1.5">
+                <input
+                  value={slideDraft.eyebrow}
+                  onChange={(e) => setSlideDraft({ ...slideDraft, eyebrow: e.target.value })}
+                  placeholder="Etiqueta (opcional)"
+                  aria-label={`Etiqueta de la lámina ${laminaElegida.n}`}
+                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
+                />
+                <textarea
+                  value={slideDraft.headline}
+                  onChange={(e) => setSlideDraft({ ...slideDraft, headline: e.target.value })}
+                  rows={2}
+                  aria-label={`Titular de la lámina ${laminaElegida.n}`}
+                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
+                />
+                <textarea
+                  value={slideDraft.steps}
+                  onChange={(e) => setSlideDraft({ ...slideDraft, steps: e.target.value })}
+                  rows={3}
+                  placeholder="Pasos (opcional): uno por línea; «!» al inicio = el crítico"
+                  aria-label={`Pasos de la lámina ${laminaElegida.n}`}
+                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
+                />
+                {/* 2026-10-23 — lo elegido por bloque en la lámina: el título (con el color de su palabra clave) y la bajada. */}
+                <TextBlockControls
+                  title="Título"
+                  draft={slideStyle.headline}
+                  onChange={(patch) => setSlideStyle(withBlock(slideStyle, 'headline', patch))}
+                  textColors={textColors?.options}
+                  textDefault={textColors?.headline_default}
+                  emphasisColors={emColors}
+                  shadowOpt={shadowOpt}
+                />
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                <p className="text-[10px] text-zinc-400 leading-snug">{OVERLAY_EDITOR_HELP}</p>
+                {/* 2026-11-16 — los ganchos de CopyLab, plegados: elegir uno llena el titular. */}
+                <HookProposals pieceId={piece.piece_id} token={token}
+                  onPick={(t) => { overlayTocado.current = true; setOverlayMarkup(t); }} />
+                <CampoConVerificacion valor={overlayMarkup} bloque="titular" sombra={overlayShadow}
+                  colorResaltado={(emColors ?? []).find((c) => (overlayRole ? c.role === overlayRole : c.is_default))?.hex ?? null}
+                  onCambio={(v) => { overlayTocado.current = true; setOverlayMarkup(v); }}>
+                  <textarea
+                    value={overlayMarkup}
+                    onChange={(e) => setOverlayMarkup(e.target.value)}
+                    rows={4}
+                    aria-label="Titular de la imagen"
+                    className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
+                  />
+                </CampoConVerificacion>
+                {/* 2026-10-23 — el TÍTULO: su color y el grosor de la sombra (el modo es el «Sombra» de arriba, que rige todo el texto). */}
+                <TextBlockControls
+                  title="Título"
+                  draft={{ ...textDraft.headline, shadow: overlayShadow }}
+                  onChange={(patch) => setTextDraft(withBlock(textDraft, 'headline', { ...patch, shadow: null }))}
+                  textColors={textColors?.options}
+                  textDefault={textColors?.headline_default}
+                  shadowOpt={shadowOpt}
+                  showShadowMode={false}
+                />
+                    </div>
+                  )}
+                  subheadlineSlot={laminaElegida ? (
+                    <div className="space-y-1.5">
+                <CampoConVerificacion valor={slideDraft.subheadline} bloque="bajada" sombra={slideStyle.sub.shadow ?? slideStyle.headline.shadow}
+                  onCambio={(v) => setSlideDraft({ ...slideDraft, subheadline: v })}>
+                  <textarea
+                    value={slideDraft.subheadline}
+                    onChange={(e) => setSlideDraft({ ...slideDraft, subheadline: e.target.value })}
+                    rows={2}
+                    placeholder="Bajada (opcional). Enter = línea aparte. ^así^ resalta, *así* sólo color, ~así~ sombra, _así_ cursiva, +así+ negrita"
+                    aria-label={`Bajada de la lámina ${laminaElegida.n}`}
+                    title={SUB_EDITOR_HELP}
+                    className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
+                  />
+                </CampoConVerificacion>
+                {!!slideDraft.subheadline.trim() && (
+                  <TextBlockControls
+                    title="Bajada"
+                    draft={slideStyle.sub}
+                    onChange={(patch) => setSlideStyle(withBlock(slideStyle, 'sub', patch))}
+                    textColors={textColors?.options}
+                    textDefault={textColors?.sub_default}
+                    emphasisColors={/[*^]/.test(slideDraft.subheadline) ? emColors : null}
+                    shadowOpt={shadowOpt}
+                  />
+                )}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                <CampoConVerificacion valor={overlaySub} bloque="bajada" sombra={textDraft.sub.shadow ?? overlayShadow}
+                  onCambio={(v) => { overlayTocado.current = true; setOverlaySub(v); }}>
+                  <textarea
+                    value={overlaySub}
+                    onChange={(e) => setOverlaySub(e.target.value)}
+                    rows={2}
+                    placeholder="Bajada (opcional). Enter = línea aparte. ^así^ resalta, *así* sólo color, ~así~ sombra, _así_ cursiva, +así+ negrita"
+                    aria-label="Bajada de la imagen"
+                    title={SUB_EDITOR_HELP}
+                    className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
+                  />
+                </CampoConVerificacion>
+                {/* 2026-10-23 — la BAJADA, aparte: su color, el de su resaltado, su sombra y su grosor. */}
+                {!!overlaySub.trim() && (
+                  <TextBlockControls
+                    title="Bajada"
+                    draft={textDraft.sub}
+                    onChange={(patch) => setTextDraft(withBlock(textDraft, 'sub', patch))}
+                    textColors={textColors?.options}
+                    textDefault={textColors?.sub_default}
+                    emphasisColors={/[*^]/.test(overlaySub) ? emColors : null}
+                    shadowOpt={shadowOpt}
+                    inheritLabel="Como el título"
+                  />
+                )}
+                    </div>
+                  )}
+                  generalSlot={laminaElegida ? null : (
+                    <div className="space-y-1.5">
+                {/* 2026-10-19 — el color del resaltado: sólo los que la marca declara para él. */}
+                {!!emColors?.length && (
+                  <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Color del resaltado">
+                    <span className="text-[10px] text-zinc-400 mr-1">Color del resaltado</span>
+                    {emColors.map((c) => {
+                      const activo = overlayRole ? overlayRole === c.role : c.is_default;
+                      return (
+                        <button
+                          key={c.role}
+                          role="radio"
+                          aria-checked={activo}
+                          aria-label={c.is_default ? `${c.role} (el de siempre)` : c.role}
+                          title={c.is_default ? `${c.role} — el de siempre` : c.role}
+                          // 2026-10-20 — el chip tocado viaja SIEMPRE, también el de siempre: sin rol, el compositor corrige el color
+                          // por contraste y lo cambia (medido en 6738a414: se eligió el de siempre y salió accent_3).
+                          onClick={() => setOverlayRole(c.role)}
+                          className={cn('w-6 h-6 rounded-full border-2 transition-transform',
+                            activo ? 'border-white scale-110' : 'border-zinc-700 hover:border-zinc-400')}
+                          style={{ backgroundColor: c.hex }}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+                {/* 2026-10-20 — la sombra de todo el texto. Sólo si la marca (o la regla del sistema) declara una. */}
+                {shadowOpt?.declared && (
+                  <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Sombra de las letras">
+                    <span className="text-[10px] text-zinc-400 mr-1">Sombra</span>
+                    {SHADOW_CHOICES.map((c) => (
+                      <button
+                        key={c.label}
+                        role="radio"
+                        aria-checked={overlayShadow === c.value}
+                        onClick={() => setOverlayShadow(c.value)}
+                        className={cn('px-2 py-0.5 rounded-lg text-[11px] border transition-colors',
+                          overlayShadow === c.value ? 'border-violet-400/70 text-violet-200 bg-violet-500/10' : 'border-zinc-700 text-zinc-400 hover:text-zinc-200')}
+                      >
+                        {c.value === null ? `Como la marca (${shadowDefaultLabel(shadowOpt)})` : c.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {/* 2026-10-20 — el color de la franja bajo el titular: su color o los accent de la marca. */}
+                {!!ruleColors?.length && (
+                  <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Color de la franja">
+                    <span className="text-[10px] text-zinc-400 mr-1">Color de la franja</span>
+                    {ruleColors.map((c) => {
+                      const activo = overlayRule ? overlayRule === c.role : c.is_default;
+                      return (
+                        <button
+                          key={c.role}
+                          role="radio"
+                          aria-checked={activo}
+                          aria-label={c.is_default ? `${c.role} (el de siempre)` : c.role}
+                          title={c.is_default ? `${c.role} — el de siempre` : c.role}
+                          onClick={() => setOverlayRule(c.role)}
+                          className={cn('w-6 h-6 rounded-full border-2 transition-transform',
+                            activo ? 'border-white scale-110' : 'border-zinc-700 hover:border-zinc-400')}
+                          style={{ backgroundColor: c.hex }}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+                {/* 2026-10-20 — el color de la barra lateral (franja de identidad): su color o los accent de la marca. */}
+                {!!identityColors?.length && (
+                  <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Color de la barra lateral">
+                    <span className="text-[10px] text-zinc-400 mr-1">Color de la barra lateral</span>
+                    {identityColors.map((c) => {
+                      const activo = overlayIdentity ? overlayIdentity === c.role : c.is_default;
+                      return (
+                        <button
+                          key={c.role}
+                          role="radio"
+                          aria-checked={activo}
+                          aria-label={c.is_default ? `${c.role} (el de siempre)` : c.role}
+                          title={c.is_default ? `${c.role} — el de siempre` : c.role}
+                          onClick={() => setOverlayIdentity(c.role)}
+                          className={cn('w-6 h-6 rounded-full border-2 transition-transform',
+                            activo ? 'border-white scale-110' : 'border-zinc-700 hover:border-zinc-400')}
+                          style={{ backgroundColor: c.hex }}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+                {overlayVigente?.written && (
+                  <button
+                    onClick={() => submitOverlay(true)}
+                    disabled={!!busy}
+                    className="text-[11px] text-zinc-400 hover:text-zinc-200 underline"
+                  >
+                    Volver al texto del copy
+                  </button>
+                )}
+                    </div>
+                  )}
+                  shortcutsSlot={
+                    <div className="space-y-1">
                 <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Ubicación del texto">
                   <span className="text-[10px] text-zinc-400 mr-1">Ubicación del texto</span>
                   {TEXT_PLACE_CHOICES.map((c) => (
@@ -1292,216 +1554,9 @@ export function PieceActionsBar({
                 {!laminaElegida && (
                   <p className="text-[10px] text-zinc-500 leading-snug">{TEXT_SCALE_HELP} Hoy: {textScaleLabel(scaleVigente)}.</p>
                 )}
-              </div>
-            )}
-
-            {panel === 'regen' && regenTab === 'text' && laminaElegida && (
-              <div className="space-y-1.5">
-                <input
-                  value={slideDraft.eyebrow}
-                  onChange={(e) => setSlideDraft({ ...slideDraft, eyebrow: e.target.value })}
-                  placeholder="Etiqueta (opcional)"
-                  aria-label={`Etiqueta de la lámina ${laminaElegida.n}`}
-                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
+                    </div>
+                  }
                 />
-                <textarea
-                  value={slideDraft.headline}
-                  onChange={(e) => setSlideDraft({ ...slideDraft, headline: e.target.value })}
-                  rows={2}
-                  aria-label={`Titular de la lámina ${laminaElegida.n}`}
-                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60"
-                />
-                <CampoConVerificacion valor={slideDraft.subheadline} bloque="bajada" sombra={slideStyle.sub.shadow ?? slideStyle.headline.shadow}
-                  onCambio={(v) => setSlideDraft({ ...slideDraft, subheadline: v })}>
-                  <textarea
-                    value={slideDraft.subheadline}
-                    onChange={(e) => setSlideDraft({ ...slideDraft, subheadline: e.target.value })}
-                    rows={2}
-                    placeholder="Bajada (opcional). Enter = línea aparte. ^así^ resalta, *así* sólo color, ~así~ sombra, _así_ cursiva, +así+ negrita"
-                    aria-label={`Bajada de la lámina ${laminaElegida.n}`}
-                    title={SUB_EDITOR_HELP}
-                    className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
-                  />
-                </CampoConVerificacion>
-                <textarea
-                  value={slideDraft.steps}
-                  onChange={(e) => setSlideDraft({ ...slideDraft, steps: e.target.value })}
-                  rows={3}
-                  placeholder="Pasos (opcional): uno por línea; «!» al inicio = el crítico"
-                  aria-label={`Pasos de la lámina ${laminaElegida.n}`}
-                  className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
-                />
-                {/* 2026-10-23 — lo elegido por bloque en la lámina: el título (con el color de su palabra clave) y la bajada. */}
-                <TextBlockControls
-                  title="Título"
-                  draft={slideStyle.headline}
-                  onChange={(patch) => setSlideStyle(withBlock(slideStyle, 'headline', patch))}
-                  textColors={textColors?.options}
-                  textDefault={textColors?.headline_default}
-                  emphasisColors={emColors}
-                  shadowOpt={shadowOpt}
-                />
-                {!!slideDraft.subheadline.trim() && (
-                  <TextBlockControls
-                    title="Bajada"
-                    draft={slideStyle.sub}
-                    onChange={(patch) => setSlideStyle(withBlock(slideStyle, 'sub', patch))}
-                    textColors={textColors?.options}
-                    textDefault={textColors?.sub_default}
-                    emphasisColors={/[*^]/.test(slideDraft.subheadline) ? emColors : null}
-                    shadowOpt={shadowOpt}
-                  />
-                )}
-              </div>
-            )}
-
-            {panel === 'regen' && regenTab === 'text' && !laminaElegida && (
-              <div className="space-y-1.5" onChangeCapture={() => { overlayTocado.current = true; }} onClickCapture={() => { overlayTocado.current = true; }}>
-                <p className="text-[10px] text-zinc-400 leading-snug">{OVERLAY_EDITOR_HELP}</p>
-                {/* 2026-11-16 — los ganchos de CopyLab, plegados: elegir uno llena el titular. */}
-                <HookProposals pieceId={piece.piece_id} token={token}
-                  onPick={(t) => { overlayTocado.current = true; setOverlayMarkup(t); }} />
-                <CampoConVerificacion valor={overlayMarkup} bloque="titular" sombra={overlayShadow}
-                  colorResaltado={(emColors ?? []).find((c) => (overlayRole ? c.role === overlayRole : c.is_default))?.hex ?? null}
-                  onCambio={(v) => { overlayTocado.current = true; setOverlayMarkup(v); }}>
-                  <textarea
-                    value={overlayMarkup}
-                    onChange={(e) => setOverlayMarkup(e.target.value)}
-                    rows={4}
-                    aria-label="Titular de la imagen"
-                    className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
-                  />
-                </CampoConVerificacion>
-                <CampoConVerificacion valor={overlaySub} bloque="bajada" sombra={textDraft.sub.shadow ?? overlayShadow}
-                  onCambio={(v) => { overlayTocado.current = true; setOverlaySub(v); }}>
-                  <textarea
-                    value={overlaySub}
-                    onChange={(e) => setOverlaySub(e.target.value)}
-                    rows={2}
-                    placeholder="Bajada (opcional). Enter = línea aparte. ^así^ resalta, *así* sólo color, ~así~ sombra, _así_ cursiva, +así+ negrita"
-                    aria-label="Bajada de la imagen"
-                    title={SUB_EDITOR_HELP}
-                    className="w-full bg-zinc-950/60 border border-zinc-800 rounded-xl px-3 py-1.5 text-sm text-zinc-200 font-mono focus:outline-none focus:border-violet-500/60"
-                  />
-                </CampoConVerificacion>
-                {/* 2026-10-19 — el color del resaltado: sólo los que la marca declara para él. */}
-                {!!emColors?.length && (
-                  <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Color del resaltado">
-                    <span className="text-[10px] text-zinc-400 mr-1">Color del resaltado</span>
-                    {emColors.map((c) => {
-                      const activo = overlayRole ? overlayRole === c.role : c.is_default;
-                      return (
-                        <button
-                          key={c.role}
-                          role="radio"
-                          aria-checked={activo}
-                          aria-label={c.is_default ? `${c.role} (el de siempre)` : c.role}
-                          title={c.is_default ? `${c.role} — el de siempre` : c.role}
-                          // 2026-10-20 — el chip tocado viaja SIEMPRE, también el de siempre: sin rol, el compositor corrige el color
-                          // por contraste y lo cambia (medido en 6738a414: se eligió el de siempre y salió accent_3).
-                          onClick={() => setOverlayRole(c.role)}
-                          className={cn('w-6 h-6 rounded-full border-2 transition-transform',
-                            activo ? 'border-white scale-110' : 'border-zinc-700 hover:border-zinc-400')}
-                          style={{ backgroundColor: c.hex }}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
-                {/* 2026-10-20 — la sombra de todo el texto. Sólo si la marca (o la regla del sistema) declara una. */}
-                {shadowOpt?.declared && (
-                  <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Sombra de las letras">
-                    <span className="text-[10px] text-zinc-400 mr-1">Sombra</span>
-                    {SHADOW_CHOICES.map((c) => (
-                      <button
-                        key={c.label}
-                        role="radio"
-                        aria-checked={overlayShadow === c.value}
-                        onClick={() => setOverlayShadow(c.value)}
-                        className={cn('px-2 py-0.5 rounded-lg text-[11px] border transition-colors',
-                          overlayShadow === c.value ? 'border-violet-400/70 text-violet-200 bg-violet-500/10' : 'border-zinc-700 text-zinc-400 hover:text-zinc-200')}
-                      >
-                        {c.value === null ? `Como la marca (${shadowDefaultLabel(shadowOpt)})` : c.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {/* 2026-10-23 — el TÍTULO: su color y el grosor de la sombra (el modo es el «Sombra» de arriba, que rige todo el texto). */}
-                <TextBlockControls
-                  title="Título"
-                  draft={{ ...textDraft.headline, shadow: overlayShadow }}
-                  onChange={(patch) => setTextDraft(withBlock(textDraft, 'headline', { ...patch, shadow: null }))}
-                  textColors={textColors?.options}
-                  textDefault={textColors?.headline_default}
-                  shadowOpt={shadowOpt}
-                  showShadowMode={false}
-                />
-                {/* 2026-10-23 — la BAJADA, aparte: su color, el de su resaltado, su sombra y su grosor. */}
-                {!!overlaySub.trim() && (
-                  <TextBlockControls
-                    title="Bajada"
-                    draft={textDraft.sub}
-                    onChange={(patch) => setTextDraft(withBlock(textDraft, 'sub', patch))}
-                    textColors={textColors?.options}
-                    textDefault={textColors?.sub_default}
-                    emphasisColors={/[*^]/.test(overlaySub) ? emColors : null}
-                    shadowOpt={shadowOpt}
-                    inheritLabel="Como el título"
-                  />
-                )}
-                {/* 2026-10-20 — el color de la franja bajo el titular: su color o los accent de la marca. */}
-                {!!ruleColors?.length && (
-                  <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Color de la franja">
-                    <span className="text-[10px] text-zinc-400 mr-1">Color de la franja</span>
-                    {ruleColors.map((c) => {
-                      const activo = overlayRule ? overlayRule === c.role : c.is_default;
-                      return (
-                        <button
-                          key={c.role}
-                          role="radio"
-                          aria-checked={activo}
-                          aria-label={c.is_default ? `${c.role} (el de siempre)` : c.role}
-                          title={c.is_default ? `${c.role} — el de siempre` : c.role}
-                          onClick={() => setOverlayRule(c.role)}
-                          className={cn('w-6 h-6 rounded-full border-2 transition-transform',
-                            activo ? 'border-white scale-110' : 'border-zinc-700 hover:border-zinc-400')}
-                          style={{ backgroundColor: c.hex }}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
-                {/* 2026-10-20 — el color de la barra lateral (franja de identidad): su color o los accent de la marca. */}
-                {!!identityColors?.length && (
-                  <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label="Color de la barra lateral">
-                    <span className="text-[10px] text-zinc-400 mr-1">Color de la barra lateral</span>
-                    {identityColors.map((c) => {
-                      const activo = overlayIdentity ? overlayIdentity === c.role : c.is_default;
-                      return (
-                        <button
-                          key={c.role}
-                          role="radio"
-                          aria-checked={activo}
-                          aria-label={c.is_default ? `${c.role} (el de siempre)` : c.role}
-                          title={c.is_default ? `${c.role} — el de siempre` : c.role}
-                          onClick={() => setOverlayIdentity(c.role)}
-                          className={cn('w-6 h-6 rounded-full border-2 transition-transform',
-                            activo ? 'border-white scale-110' : 'border-zinc-700 hover:border-zinc-400')}
-                          style={{ backgroundColor: c.hex }}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
-                {overlayVigente?.written && (
-                  <button
-                    onClick={() => submitOverlay(true)}
-                    disabled={!!busy}
-                    className="text-[11px] text-zinc-400 hover:text-zinc-200 underline"
-                  >
-                    Volver al texto del copy
-                  </button>
-                )}
               </div>
             )}
 
@@ -1700,16 +1755,8 @@ export function PieceActionsBar({
 
             {/* El TÍTULO también se edita (2026-10-01: «ni body, ni hashtags, ni title»). Los
                 hashtags viven dentro del cuerpo, así que se corrigen en el cuadro de abajo. */}
-            {/* 2026-11-16 — PIEZA DE VIDEO: «Editar texto» abre también el texto en pantalla, con sus secciones plegadas.
-                Las propuestas son de CopyLab y el dibujo es de VideoLab; el copy de la publicación sigue debajo. */}
-            {panel === 'edit' && piece.has_video && (
-              <div className="rounded-xl border border-violet-500/25 bg-violet-500/[0.04] p-2.5 space-y-2">
-                <p className="text-[11px] font-medium text-violet-200">Texto en pantalla del video</p>
-                <VideoTextEditor pieceId={piece.piece_id} token={token}
-                  onApplied={(r) => onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: false, refreshed: r.html !== null, posts: 0 })} />
-                <p className="text-[11px] font-medium text-zinc-300 pt-1">Texto de la publicación</p>
-              </div>
-            )}
+            {/* 2026-11-16 — el texto en pantalla del video ya no vive aquí: se abre con el botón «Texto en pantalla», la
+                misma ventana que la de una imagen (`OnScreenTextEditor`). «Editar texto» es sólo el texto de la publicación. */}
             {panel === 'edit' && (
               <>
                 <label className="block text-[11px] font-medium text-zinc-300">Título</label>
@@ -1779,15 +1826,31 @@ export function PieceActionsBar({
   ) : null;
   // 2026-10-19 — el editor del texto de la imagen, a la vista (Sam no lo encontraba dentro de «Regenerar imagen»). Es
   // el mismo panel, abierto en su pestaña; cuesta 0 USD.
-  const botonTextoImagen = texto && (
+  // 2026-11-16 — UNA SOLA VENTANA «TEXTO EN PANTALLA» para imagen y video (contrato «Bloques a mano» v1 §4). El mismo
+  // botón en las dos: en una imagen abre su panel (recompone sobre la foto, 0 USD); en un video, la ventana con el
+  // render de VideoLab. Un video NO va por el panel de imagen: su portada no se recompone (`PIEZA_DE_VIDEO`).
+  const textoVideo = !!piece.has_video;
+  const botonTextoImagen = (texto || textoVideo) && !(textoVideo && pantallaVideo) && (
     <button
-      onClick={() => { open('regen'); setRegenTab('text'); }}
+      onClick={() => { if (textoVideo) { setPantallaVideo(true); setPanel(null); } else { open('regen'); setRegenTab('text'); } }}
       disabled={!!busy}
-      title="Cambia el texto que va sobre la imagen: líneas, palabras resaltadas y su color. No regenera la escena (0 USD)."
+      title={textoVideo
+        ? 'El texto sobre el video: gancho, títulos clave, CTA, rol y subtítulos, con su lugar y tamaño. Sólo se redibuja el texto sobre el video limpio.'
+        : 'El texto sobre la imagen: título, subtítulo y rol, con su lugar y tamaño. No regenera la escena (0 USD).'}
       className={cn('flex items-center justify-center gap-2 transition-colors', WEIGHT_SHAPE.tertiary, BUTTON_STYLE.recompose_image)}
     >
-      {ICON.edit_text} Texto de la imagen
+      {ICON.edit_text} Texto en pantalla
     </button>
+  );
+  const ventanaVideo = textoVideo && pantallaVideo && (
+    <div className="rounded-xl border border-violet-500/25 bg-violet-500/[0.04] p-2.5 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-medium text-violet-200">Texto en pantalla</p>
+        <button type="button" onClick={() => setPantallaVideo(false)} className="text-[11px] text-zinc-400 hover:text-zinc-200">Cerrar</button>
+      </div>
+      <OnScreenTextEditor medium="video" pieceId={piece.piece_id} token={token}
+        onApplied={(r) => onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: false, refreshed: r.html !== null, posts: 0 })} />
+    </div>
   );
   const actionsJsx = (
           <motion.div key="actions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
@@ -1800,6 +1863,7 @@ export function PieceActionsBar({
                 {botonTextoImagen}
               </div>
             )}
+            {ventanaVideo}
           </motion.div>
   );
 
@@ -1822,12 +1886,13 @@ export function PieceActionsBar({
         <div className="space-y-2">
           {notaImagen}
           {zona === 'imagen' && notaError}
-          {enZona('imagen', (deImagen.length > 0 || texto) && (
+          {enZona('imagen', (deImagen.length > 0 || texto || textoVideo) && (
             <div className="flex gap-1.5 flex-wrap items-center">
               {deImagen.map(pintar)}
               {botonTextoImagen}
             </div>
           ))}
+          {ventanaVideo}
         </div>
         {textView}
         {reader}

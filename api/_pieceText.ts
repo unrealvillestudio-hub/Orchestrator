@@ -15,6 +15,8 @@
  * y para su franja (los mismos que ya ofrece el editor de imagen), y el idioma sale de `public.brands`.
  */
 
+import { readPlace, type Place, type ZoomOnly } from './_onScreenText.js';
+
 // ── Tipos del dato ─────────────────────────────────────────────────────────────────────────────
 
 export const TEXT_LAYERS = ['hook', 'role', 'caption', 'key_title', 'cta'] as const;
@@ -37,13 +39,17 @@ export interface CopyLabSource {
   cast: CastMember[];
 }
 
-/** Lo que VideoLab recibe en `previousOutputs.text_layers` (contrato §3.2). */
+/**
+ * Lo que VideoLab recibe en `previousOutputs.text_layers` (contrato §3.2). 2026-11-16 — contrato «Bloques de texto
+ * colocados a mano» v1 §2: cada capa lleva `place` opcional (`_onScreenText.ts`); sin él, la capa es automática como
+ * siempre. Los subtítulos, sólo `{ zoom }`.
+ */
 export interface TextLayers {
-  hook: { text: string; preset_key: string; start_ms: number; end_ms: number; emphasis: string[]; pattern_key?: string | null } | null;
-  roles: Array<{ person_id: string; text: string; show: boolean; at_ms: number; dur_ms: number; preset_key: string }>;
-  captions: { enabled: boolean; preset_key: string; accent_role: string } | null;
-  key_titles: Array<{ text: string; at_ms: number; dur_ms: number; preset_key: string }>;
-  cta: { text: string; at_ms: number; preset_key: string; pattern_key?: string | null } | null;
+  hook: { text: string; preset_key: string; start_ms: number; end_ms: number; emphasis: string[]; pattern_key?: string | null; place?: Place } | null;
+  roles: Array<{ person_id: string; text: string; show: boolean; at_ms: number; dur_ms: number; preset_key: string; place?: Place }>;
+  captions: { enabled: boolean; preset_key: string; accent_role: string; place?: ZoomOnly } | null;
+  key_titles: Array<{ text: string; at_ms: number; dur_ms: number; preset_key: string; place?: Place }>;
+  cta: { text: string; at_ms: number; preset_key: string; pattern_key?: string | null; place?: Place } | null;
   identity: { strip: boolean; strip_role: string | null };
 }
 
@@ -256,6 +262,12 @@ export function validateTextLayers(
     if (ctx.presets && !ctx.presets[layer].some((p) => p.preset_key === k)) errors.push(`${campo}: el preset «${k}» no existe o no es de la capa ${layer}`);
     return k;
   };
+  // 2026-11-16 — `place` por capa (contrato «Bloques a mano» §2): ausente = automática; mal formado = error, no se acota.
+  const lugar = (v: unknown, campo: string, zoomOnly = false): { place?: any } => {
+    const p = readPlace(v, campo, { zoomOnly });
+    if (!p.ok) { errors.push(p.error); return {}; }
+    return p.value ? { place: p.value } : {};
+  };
   const texto = (v: unknown, campo: string, max: number): string => {
     const t = str(v);
     if (!t) errors.push(`${campo}: falta el texto`);
@@ -276,6 +288,7 @@ export function validateTextLayers(
         start_ms: start, end_ms: end,
         emphasis: Array.isArray(h.emphasis) ? h.emphasis.map(str).filter(Boolean).slice(0, 3) : [],
         pattern_key: str(h.pattern_key) || null,
+        ...lugar(h.place, 'hook'),
       };
     }
   }
@@ -291,7 +304,7 @@ export function validateTextLayers(
     const at = ms(r.at_ms), dur = ms(r.dur_ms);
     dentro(at, `${campo}.at_ms`);
     if (!(dur > 0)) errors.push(`${campo}.dur_ms debe ser mayor que 0`);
-    roles.push({ person_id, text: texto(r.text, campo, LINE_TEXT_MAX), show: r.show !== false, at_ms: at, dur_ms: dur, preset_key: preset('role', r.preset_key, campo) });
+    roles.push({ person_id, text: texto(r.text, campo, LINE_TEXT_MAX), show: r.show !== false, at_ms: at, dur_ms: dur, preset_key: preset('role', r.preset_key, campo), ...lugar(r.place, campo) });
   }
 
   let captions: TextLayers['captions'] = null;
@@ -302,7 +315,7 @@ export function validateTextLayers(
       const accent = str(c.accent_role);
       if (!accent) errors.push('captions: falta accent_role');
       else if (!ctx.accentRoles.includes(accent)) errors.push(`captions: el color «${accent}» no es uno de los que la marca ofrece`);
-      captions = { enabled: c.enabled !== false, preset_key: preset('caption', c.preset_key, 'captions'), accent_role: accent };
+      captions = { enabled: c.enabled !== false, preset_key: preset('caption', c.preset_key, 'captions'), accent_role: accent, ...lugar(c.place, 'captions', true) };
     }
   }
 
@@ -316,7 +329,7 @@ export function validateTextLayers(
     const at = ms(k.at_ms), dur = ms(k.dur_ms);
     dentro(at, `${campo}.at_ms`);
     if (!(dur > 0)) errors.push(`${campo}.dur_ms debe ser mayor que 0`);
-    key_titles.push({ text: texto(k.text, campo, LINE_TEXT_MAX), at_ms: at, dur_ms: dur, preset_key: preset('key_title', k.preset_key, campo) });
+    key_titles.push({ text: texto(k.text, campo, LINE_TEXT_MAX), at_ms: at, dur_ms: dur, preset_key: preset('key_title', k.preset_key, campo), ...lugar(k.place, campo) });
   }
 
   let cta: TextLayers['cta'] = null;
@@ -326,7 +339,7 @@ export function validateTextLayers(
     else {
       const at = ms(c.at_ms);
       dentro(at, 'cta.at_ms');
-      cta = { text: texto(c.text, 'cta', LINE_TEXT_MAX), at_ms: at, preset_key: preset('cta', c.preset_key, 'cta'), pattern_key: str(c.pattern_key) || null };
+      cta = { text: texto(c.text, 'cta', LINE_TEXT_MAX), at_ms: at, preset_key: preset('cta', c.preset_key, 'cta'), pattern_key: str(c.pattern_key) || null, ...lugar(c.place, 'cta') };
     }
   }
 
