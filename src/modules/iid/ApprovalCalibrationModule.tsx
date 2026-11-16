@@ -430,7 +430,7 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
     title: piece.title,
     // SIN-IMAGEN-01 — decide si la acción de imagen dice «generar» o «regenerar», y si
     // la directriz se exige. Ver `panelCopyFor`.
-    has_image: piece.has_image, research_hint: piece.research_hint, image_overlay: piece.image_overlay ?? null,
+    has_image: piece.has_image, has_video: piece.has_video, research_hint: piece.research_hint, image_overlay: piece.image_overlay ?? null,
   };
   const alRecomponer = (r: { html: string | null; artifact_url: string | null }) => {
     if (r.html) { rehecha.current = true; setArtHtml(r.html); setArtErr(null); }

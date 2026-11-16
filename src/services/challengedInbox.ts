@@ -43,6 +43,8 @@ export interface ChallengedPiece {
   actions: PieceActions;
   /** SIN-IMAGEN-01 — si la pieza ya tiene imagen. Lo resuelve el server. */
   has_image: boolean;
+  /** 2026-11-16 — pieza de video: «Editar texto» abre también el texto en pantalla. Opcional ante un server viejo. */
+  has_video?: boolean;
   /** 2026-10-19 — el texto de la imagen para el editor de la tarjeta. */
   image_overlay?: ImageOverlayView | null;
 }

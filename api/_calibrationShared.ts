@@ -622,6 +622,11 @@ export interface PieceContext {
    */
   has_image: boolean;
   /**
+   * 2026-11-16 — si la pieza es de VIDEO (`esPiezaDeVideo`). Decide qué abre «Editar texto»: además del copy, el
+   * texto en pantalla del video (`api/piece-text.ts`). Lo dice el server, como `has_image`.
+   */
+  has_video: boolean;
+  /**
    * 2026-10-19 — EL TEXTO DE LA IMAGEN, para el editor de la tarjeta: lo escrito a mano
    * (`assets.image.overlay_override`) o, si no hay, lo que se compuso. `null` = la imagen no lleva texto.
    */
@@ -719,6 +724,7 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     // SIN-IMAGEN-01 — mismo criterio que usaba `actionsFor` hasta hoy: una url vacía NO es una
     // imagen. Se conserva al pie de la letra, sólo que ahora informa en vez de cerrar una puerta.
     has_image: tieneImagen(piece),
+    has_video: esPiezaDeVideo(piece.assets),
     image_overlay: imageOverlayOf(piece.assets),
     // INVESTIGAR — si la tarjeta tiene que pedir el estado de un caso de investigación.
     research_hint: researchHintOf(piece),

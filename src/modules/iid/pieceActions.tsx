@@ -12,6 +12,7 @@ import { effectiveFixImageMode, type FixRequestCode, type FixImageMode } from '.
 import { overlayEditorSeed, overlayViewAfterApply, shadowDefaultLabel, type ImageOverlayView, type EmphasisColorOption, type OverlayOverrideOut, type ShadowOption } from '../../../api/_overlayText';
 import { textStyleDraftOf, subMarkupOf, textStylePayload, withBlock, SUB_EDITOR_HELP, type TextStyleDraft, type TextColorOptions } from '../../../api/_textStyle';
 import { TextBlockControls } from './TextStyleControls';
+import { VideoTextEditor, HookProposals } from './VideoTextEditor';
 import { highlightPayload, HIGHLIGHT_NOTE_MAX, type HighlightInput } from '../../../api/_highlights';
 import { SCENE_SLOTS, slotDirective, SLOT_CHANGE_MODE, MODE_HELP, type SceneCast, type ImageHistoryEntry } from '../../../api/_sceneCast';
 import { fmtInZone } from './pieceUi';
@@ -97,6 +98,11 @@ export interface ActionablePiece {
    * que nunca produce una generación tirada.
    */
   has_image?: boolean;
+  /**
+   * 2026-11-16 — si la pieza es de VIDEO. Lo resuelve el server (`toContext`, `esPiezaDeVideo`). Con él, «Editar
+   * texto» abre además el texto en pantalla del video (`VideoTextEditor`, contrato «Texto en pantalla» v1 §4).
+   */
+  has_video?: boolean;
   /**
    * INVESTIGAR (2026-10-05) — la pieza tiene que ver con un caso de investigación: sólo entonces la
    * tarjeta pide su estado. Lo resuelve el server (`researchHintOf`); `undefined` = no se pide.
@@ -1352,6 +1358,9 @@ export function PieceActionsBar({
             {panel === 'regen' && regenTab === 'text' && !laminaElegida && (
               <div className="space-y-1.5" onChangeCapture={() => { overlayTocado.current = true; }} onClickCapture={() => { overlayTocado.current = true; }}>
                 <p className="text-[10px] text-zinc-400 leading-snug">{OVERLAY_EDITOR_HELP}</p>
+                {/* 2026-11-16 — los ganchos de CopyLab, plegados: elegir uno llena el titular. */}
+                <HookProposals pieceId={piece.piece_id} token={token}
+                  onPick={(t) => { overlayTocado.current = true; setOverlayMarkup(t); }} />
                 <CampoConVerificacion valor={overlayMarkup} bloque="titular" sombra={overlayShadow}
                   colorResaltado={(emColors ?? []).find((c) => (overlayRole ? c.role === overlayRole : c.is_default))?.hex ?? null}
                   onCambio={(v) => { overlayTocado.current = true; setOverlayMarkup(v); }}>
@@ -1691,6 +1700,16 @@ export function PieceActionsBar({
 
             {/* El TÍTULO también se edita (2026-10-01: «ni body, ni hashtags, ni title»). Los
                 hashtags viven dentro del cuerpo, así que se corrigen en el cuadro de abajo. */}
+            {/* 2026-11-16 — PIEZA DE VIDEO: «Editar texto» abre también el texto en pantalla, con sus secciones plegadas.
+                Las propuestas son de CopyLab y el dibujo es de VideoLab; el copy de la publicación sigue debajo. */}
+            {panel === 'edit' && piece.has_video && (
+              <div className="rounded-xl border border-violet-500/25 bg-violet-500/[0.04] p-2.5 space-y-2">
+                <p className="text-[11px] font-medium text-violet-200">Texto en pantalla del video</p>
+                <VideoTextEditor pieceId={piece.piece_id} token={token}
+                  onApplied={(r) => onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: false, refreshed: r.html !== null, posts: 0 })} />
+                <p className="text-[11px] font-medium text-zinc-300 pt-1">Texto de la publicación</p>
+              </div>
+            )}
             {panel === 'edit' && (
               <>
                 <label className="block text-[11px] font-medium text-zinc-300">Título</label>

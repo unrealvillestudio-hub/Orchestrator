@@ -26,6 +26,9 @@
     },
     "api/media-decide.ts": {
       "maxDuration": 30
+    },
+    "api/piece-text.ts": {
+      "maxDuration": 60
     }
   }
 }
