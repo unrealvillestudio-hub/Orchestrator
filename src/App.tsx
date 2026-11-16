@@ -22,6 +22,7 @@ import type { IidSession } from './services/iidInbound';
 import { fetchReviewScope, type ReviewAccess, type ReviewView } from './services/calibrationInbox';
 import { tramosDeCaja } from './logotipo';
 import CampanaDeAvisos from './modules/avisos/CampanaDeAvisos';
+import { MenuDeLabs } from './modules/labs/MenuDeLabs';
 
 /**
  * La versión sale de `package.json` y el commit de la plataforma; los inyecta
@@ -187,9 +188,13 @@ export default function App() {
       {/* ── TOP NAV ── */}
       <header className="h-14 border-b border-zinc-800/60 px-4 md:px-5 flex items-center justify-between gap-3 sticky top-0 bg-[#050508]/95 backdrop-blur-xl z-50">
         <div className="flex items-center gap-3 md:gap-6 min-w-0">
+          {/* 2026-11-16 — el menú de labs, junto al logotipo: abre las apps de los otros labs (dato de lab_configs). */}
+          <div className="flex items-center gap-1.5 shrink-0">
+          <MenuDeLabs />
           <button onClick={goHub} className="hover:opacity-80 transition-opacity shrink-0">
             <Logo />
           </button>
+          </div>
           {/* En el teléfono la barra de navegación vive abajo: la cabecera dice DÓNDE estás. */}
           <span className="md:hidden text-sm font-semibold text-zinc-200 truncate">{breadcrumb[view]}</span>
 
@@ -257,6 +262,7 @@ export default function App() {
       <AnimatePresence mode="wait">
         <motion.div
           key={view}
+          className="contenido-principal"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}

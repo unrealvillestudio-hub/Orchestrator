@@ -1,22 +1,33 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { ladoLibre, LADO_MIN_PX, LADO_MAX_PX, LADO_MARGEN_PX } from '../src/modules/iid/VentanaLateral';
+import { anchoVentana, anchoPorArrastre, VENTANA_MIN_PX, COLUMNA_MIN_PX, MARGEN_PX, VENTANA_INICIAL_PX } from '../src/modules/iid/VentanaLateral';
 
-/** VENTANA LATERAL (2026-11-16): en escritorio, la ventana «Texto en pantalla» va al lado de la pieza si hay sitio. */
-describe('ladoLibre', () => {
-  it('con sitio a la derecha y ratón, va al lado, pegada a la columna', () => {
-    // Pantalla de 1280 px con la columna de la pieza terminando en 880 px: 368 px libres.
-    expect(ladoLibre(1280, 880, true)).toEqual({ left: 880 + LADO_MARGEN_PX, width: 1280 - 880 - 2 * LADO_MARGEN_PX });
+/** VENTANA LATERAL (2026-11-16): al lado de la pieza en escritorio, con ancho que se arrastra y se recalcula con el zoom. */
+describe('anchoVentana', () => {
+  it('con ratón y sitio, respeta el ancho elegido', () => {
+    expect(anchoVentana(1280, 500, true)).toBe(500);
   });
-  it('el ancho tiene tope', () => {
-    expect(ladoLibre(2560, 900, true)?.width).toBe(LADO_MAX_PX);
+  it('acota el ancho para que la pieza conserve su columna legible', () => {
+    const max = 1280 - COLUMNA_MIN_PX - 3 * MARGEN_PX;
+    expect(anchoVentana(1280, 5000, true)).toBe(max);
+    expect(anchoVentana(1280, 10, true)).toBe(VENTANA_MIN_PX);
   });
-  it('sin sitio suficiente, se queda en la columna', () => {
-    expect(ladoLibre(1100, 880, true)).toBeNull();
-    expect(ladoLibre(880 + LADO_MIN_PX + 2 * LADO_MARGEN_PX - 1, 880, true)).toBeNull();
+  it('con zoom (pantalla más angosta en px CSS) se reduce y, si no cabe, vuelve debajo de la pieza', () => {
+    const angosta = COLUMNA_MIN_PX + VENTANA_MIN_PX + 3 * MARGEN_PX;
+    expect(anchoVentana(angosta, 500, true)).toBe(VENTANA_MIN_PX);
+    expect(anchoVentana(angosta - 1, 500, true)).toBeNull();
   });
-  it('en pantalla táctil (móvil, tableta), se queda en la columna', () => {
-    expect(ladoLibre(2560, 900, false)).toBeNull();
+  it('en pantalla táctil se queda debajo de la pieza', () => {
+    expect(anchoVentana(2560, 500, false)).toBeNull();
+  });
+  it('sin ancho elegido válido, parte del inicial', () => {
+    expect(anchoVentana(1600, Number.NaN, true)).toBe(VENTANA_INICIAL_PX);
+  });
+});
+
+describe('anchoPorArrastre', () => {
+  it('el ancho va del puntero al borde derecho, menos el margen', () => {
+    expect(anchoPorArrastre(1280, 800)).toBe(1280 - MARGEN_PX - 800);
   });
 });
 
@@ -29,5 +40,14 @@ describe('las secciones de la ventana', () => {
     expect(UI).toContain('Desplegar todo');
     expect(UI).toContain('Plegar todo');
     expect(UI).toContain('group-open:rotate-90');
+  });
+});
+
+describe('el contenido se corre a la izquierda mientras la ventana está al lado', () => {
+  it('la regla CSS y la clase del contenedor existen', () => {
+    const css = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    expect(css).toMatch(/body\.con-ventana-lateral \.contenido-principal \{ padding-right: var\(--ventana-lateral/);
+    expect(app).toContain('className="contenido-principal"');
   });
 });
