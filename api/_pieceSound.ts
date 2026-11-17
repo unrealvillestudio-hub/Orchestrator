@@ -113,11 +113,14 @@ export function groupSoundPresets(rows: unknown, brandId: string): SoundPresets 
   return out;
 }
 
-/** La librería tal como la lista VoiceLab, con lo que la ventana usa; filas sin `sound_key` o sin `fn`, fuera. PURO. */
-export function libraryOf(raw: unknown): LibrarySound[] {
+/**
+ * La librería tal como la lista VoiceLab (`{ status: 'ok', sounds: [...] }`, contrato VoiceLab v1.2 §3 ter), con lo que
+ * la ventana usa; filas sin `sound_key` o sin `fn`, fuera. Otra forma = `null`: no se sabe, y no se lee como vacía. PURO.
+ */
+export function libraryOf(raw: unknown): LibrarySound[] | null {
   const r0 = raw as any;
-  const rows = Array.isArray(r0?.sounds) ? r0.sounds : Array.isArray(r0?.library) ? r0.library : Array.isArray(r0) ? r0 : [];
-  return rows
+  if (r0?.status !== 'ok' || !Array.isArray(r0?.sounds)) return null;
+  return r0.sounds
     .map((r: any) => ({
       sound_key: str(r?.sound_key), fn: str(r?.fn), description: str(r?.description),
       duration_ms: num(r?.duration_ms), loudness_lufs: num(r?.loudness_lufs), license: str(r?.license) || null,

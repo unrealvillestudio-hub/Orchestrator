@@ -151,7 +151,9 @@ async function libreriaDeSonidos(brandId: string): Promise<{ library: LibrarySou
     if (!base) return { library: null, error: 'lab_configs no tiene la dirección de VoiceLab' };
     const r = await fetchWithTimeout('db', `${base}/api/sound-library?brandId=${encodeURIComponent(brandId)}`, {});
     if (!r.ok) return { library: null, error: `VoiceLab no dio la librería de sonidos (${r.status})` };
-    return { library: libraryOf(await r.json().catch(() => null)), error: null };
+    const data = await r.json().catch(() => null);
+    const library = libraryOf(data);
+    return library ? { library, error: null } : { library: null, error: `VoiceLab respondió la librería con otra forma${data?.error_label ? ` (${data.error_label})` : ''}` };
   } catch (err) {
     return { library: null, error: `VoiceLab no dio la librería de sonidos: ${String(err instanceof Error ? err.message : err)}` };
   }

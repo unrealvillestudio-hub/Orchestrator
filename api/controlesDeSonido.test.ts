@@ -36,13 +36,13 @@ const FILAS = [
 ];
 const P = groupSoundPresets(FILAS, 'MarcaA');
 const PRESETS: SoundPresets = { bed: P.bed, effects: P.effects };
-const LIB = libraryOf({ sounds: [
+const LIB = libraryOf({ status: 'ok', sounds: [
   { sound_key: 'cama_1', fn: 'music_bed', description: 'Cama uno', duration_ms: 9000, url: 'https://ejemplo.invalid/cama_1.wav' },
   { sound_key: 'cama_9', fn: 'music_bed', description: 'Cama nueve', url: 'http://no-https.invalid/x.wav' },
   { sound_key: 'e_1', fn: 'block_entry' }, { sound_key: 'e_2', fn: 'block_entry' },
   { sound_key: 'c_1', fn: 'cta' }, { sound_key: 'c_2', fn: 'cta' }, { sound_key: 'd_1', fn: 'digit_land' },
   { fn: 'cta' }, { sound_key: 'sin_fn' },
-] });
+] })!;
 
 describe('presets por familia y librería, como dato', () => {
   it('separa fondo y efectos; la fila de la marca manda; otra marca y la forma anterior quedan fuera; los retirados aparte', () => {
@@ -60,6 +60,11 @@ describe('presets por familia y librería, como dato', () => {
     expect(LIB.map((s) => s.sound_key)).toEqual(['cama_1', 'cama_9', 'e_1', 'e_2', 'c_1', 'c_2', 'd_1']);
     expect(LIB[0].url).toBe('https://ejemplo.invalid/cama_1.wav');
     expect(LIB[1].url).toBeNull();
+  });
+  it('otra forma de respuesta no se lee como librería vacía', () => {
+    expect(libraryOf([{ sound_key: 'x', fn: 'cta' }])).toBeNull();
+    expect(libraryOf({ status: 'error', error_label: 'DB_ERROR' })).toBeNull();
+    expect(libraryOf({ status: 'ok', sounds: [] })).toEqual([]);
   });
 });
 
