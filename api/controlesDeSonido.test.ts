@@ -13,6 +13,9 @@ import {
   cueCountsOf, BED_LEVEL, FX_GAIN, type SoundPresets,
 } from './_pieceSound';
 import { PRESET_CATALOG_TABLES } from './text-preset-status';
+// Las filas de `videolab_sound_presets` en producción el 2026-11-17 (contrato v1.10.0, unrlvl-iid-functions#622), en su
+// forma real: si el motor cambia la forma del dato, falla este test y no la ventana.
+import REALES from './_sonidoPresets.fixtures.json';
 
 const CUES = (o: Record<string, string>) => ({
   cues: {
@@ -65,6 +68,19 @@ describe('presets por familia y librería, como dato', () => {
     expect(libraryOf([{ sound_key: 'x', fn: 'cta' }])).toBeNull();
     expect(libraryOf({ status: 'error', error_label: 'DB_ERROR' })).toBeNull();
     expect(libraryOf({ status: 'ok', sounds: [] })).toEqual([]);
+  });
+});
+
+describe('las filas reales de producción (v1.10.0)', () => {
+  const R = groupSoundPresets(REALES, 'MarcaA');
+  it('6 de fondo y 6 de efectos; la forma anterior (mixed) en ninguna lista', () => {
+    expect(R.bed.map((p) => p.name)).toEqual(['Pulso suave', 'Calma cálida', 'Animado y claro', 'Marimba amable', 'Tensión contenida', 'Teclas relajadas']);
+    expect(R.effects.map((p) => p.name)).toEqual(['Discreto', 'Cálido', 'Brillante', 'Para cifras', 'Amable', 'Mínimo']);
+  });
+  it('cada fondo trae su cama; cada efecto, su sonido por momento; «Mínimo» sólo cifra y CTA (los demás vienen en null)', () => {
+    expect(R.bed[0]).toMatchObject({ bed_sound: 'bed_soft_pulse', under_voice_lu: 14 });
+    expect(R.effects[0].sounds_by_fn).toEqual({ block_entry: 'sfx_block_entry_whoosh', cta: 'sfx_cta_chime', word_pop: 'sfx_word_pop', impact: 'sfx_stamp_impact', digit_land: 'sfx_digit_tick', shot_cut: 'sfx_cut_swish' });
+    expect(R.effects[5].sounds_by_fn).toEqual({ cta: 'sfx_cta_chime', digit_land: 'sfx_digit_tick' });
   });
 });
 
