@@ -601,8 +601,9 @@ export function fetchQueue(
 }
 
 /**
- * LA VENTANA DE PRODUCCIÓN (Sam, 2026-11-09). El carril produce sólo hasta `hasta`; desde el día 5
- * (`preguntar`) se ofrece activar los siguientes 7 días. La regla vive en la base: aquí sólo se lee y se pide.
+ * LA VENTANA DE PRODUCCIÓN (Sam, 2026-11-09; por marca y de 3 días desde 2026-11-17). El carril
+ * produce para cada marca sólo hasta su `hasta`; la víspera del fin (`preguntar`) se ofrece activar la
+ * siguiente. La regla y la duración viven en la base: aquí sólo se lee y se pide.
  */
 export interface ProductionWindow {
   desde: string;
@@ -614,16 +615,53 @@ export interface ProductionWindow {
   phrase: string | null;
 }
 
-export async function fetchProductionWindow(token: string): Promise<ProductionWindow | null> {
-  const r = await req<{ window: ProductionWindow | null }>('/api/production-window', token);
-  return r.window ?? null;
+/** Una fila de `intel.v_production_windows_by_brand`: la ventana efectiva de la marca. */
+export interface BrandProductionWindow {
+  brand_id: string;
+  hasta: string | null;
+  dias_restantes: number | null;
+  vencida: boolean;
+  preguntar: boolean;
+  se_puede_activar: boolean;
+  siguiente_hasta: string;
+  activated_by: string | null;
+  phrase: string | null;
+  activada_en: string | null;
+  es_global: boolean | null;
 }
 
-/** La fila que crea la base (`intel.production_windows`): su `ends_at` es el nuevo `hasta`. */
-export async function activateNextProductionWindow(token: string, phrase?: string): Promise<{ starts_at: string; ends_at: string }> {
-  const r = await req<{ ok: boolean; window: { starts_at: string; ends_at: string } }>('/api/production-window', token,
-    { method: 'POST', body: phrase ? { phrase } : {} });
-  return r.window;
+export interface ProductionWindowState {
+  window: ProductionWindow | null;
+  /** null = la vista por marca aún no existe (migración sin aplicar). */
+  brands: BrandProductionWindow[] | null;
+}
+
+export async function fetchProductionWindow(token: string): Promise<ProductionWindowState> {
+  const r = await req<{ window: ProductionWindow | null; brands?: BrandProductionWindow[] | null }>('/api/production-window', token);
+  return { window: r.window ?? null, brands: r.brands ?? null };
+}
+
+export interface ProductionWindowActivation {
+  brand_id: string | null;
+  ok: boolean;
+  window?: { starts_at: string; ends_at: string };
+  error?: string;
+  detail?: string;
+}
+
+/**
+ * Activa la siguiente ventana de cada marca elegida (sin marcas: la global). La duración la pone la
+ * base. Devuelve una línea por marca: una que aún no está en la víspera vuelve con `ventana_ya_activa`.
+ */
+export async function activateNextProductionWindow(
+  token: string, brandIds?: string[], phrase?: string,
+): Promise<ProductionWindowActivation[]> {
+  const body: Record<string, unknown> = {};
+  if (brandIds) body.brand_ids = brandIds;
+  if (phrase) body.phrase = phrase;
+  const r = await req<{ ok: boolean; results?: ProductionWindowActivation[]; window?: { starts_at: string; ends_at: string } }>(
+    '/api/production-window', token, { method: 'POST', body });
+  return r.results ?? [{ brand_id: null, ok: r.ok, window: r.window }];
 }
 
 /** Las vistas que una concesión puede abrir (mismo vocabulario que `api/_reviewScope.ts`). */
