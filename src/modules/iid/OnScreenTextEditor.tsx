@@ -5,9 +5,9 @@ import {
   type PieceTextProposal, type TextProposal,
 } from '../../services/calibrationInbox';
 import type { CastMember, PresetsByLayer, PresetView, TextAlign, TextLayers } from '../../../api/_pieceText';
-import { MARK_KINDS, pruneMarks, type BlockMarks } from './textoMarcas';
+import { MARK_KINDS, pruneMarks, parseMarkup, mergeMarks, type BlockMarks } from './textoMarcas';
 import { dragTargetsOf, type BlockRef, type DraftBlocks } from './arrastre';
-import { Alineacion, FranjaModo, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel } from './TextoVisual';
+import { Alineacion, EsquemaDeEscena, FranjaModo, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel } from './TextoVisual';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
 import {
   BLOCK_LABELS, CAPTIONS_BAND, PCT_STEP, PREVIEW_AUTO, PREVIEW_NOTE, ROLE_NO_PERSONA, VIDEO_SAFE_ZONE_APPROX,
@@ -90,11 +90,12 @@ export function videoTextDraftOf(p: Pick<PieceTextProposal, 'presets' | 'cast' |
   const zoomCap = cur?.captions?.place?.zoom;
   return {
     hook: {
-      choice: cur?.hook?.text ? OWN : null, own: cur?.hook?.text ?? '',
+      choice: cur?.hook?.text ? OWN : null, own: parseMarkup(cur?.hook?.text ?? '').text,
       preset_key: cur?.hook?.preset_key ?? defaultKey(p, 'hook'),
       dur_s: cur?.hook ? Math.max(0.5, (cur.hook.end_ms - cur.hook.start_ms) / 1000) : 2.6,
       place: placeOf(cur?.hook?.place),
-      style: blockStyleOf(cur?.hook),
+      // Un texto guardado con el marcado escrito a mano (2026-11-17) abre limpio y con sus marcas.
+      style: (() => { const st = blockStyleOf(cur?.hook); return { ...st, marks: mergeMarks(st.marks, parseMarkup(cur?.hook?.text ?? '').marks) }; })(),
     },
     roles: (p.cast ?? []).map((c, i) => {
       const r = rolDe(c);
@@ -430,14 +431,18 @@ function Presets({ list, value, onChange, label, previews, suggested }: {
   const retirados = admin && capa ? admin.retirados.filter((r) => r.layer === capa) : [];
   if (!list?.length && !retirados.length) return <p className="text-[10px] text-amber-300/80">No hay estilos disponibles para esta capa.</p>;
   const elegido = list?.find((x) => x.preset_key === value) ?? null;
+  // 2026-11-17 (Sam): con un estilo elegido, la rejilla se pliega a ese estilo; «Cambiar» la vuelve a abrir.
+  const [abierta, setAbierta] = useState(!elegido);
+  const visibles = (list ?? []).filter((p) => abierta || p.preset_key === value);
+  const elegir = (k: string) => { onChange(k); setAbierta(false); };
   return (
     <div className="space-y-1.5">
       {previews && (
         <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))' }} role="radiogroup" aria-label={label}>
-          {(list ?? []).map((p) => {
+          {visibles.map((p) => {
             const m = previews.byKey[p.preset_key];
             return (
-              <button key={p.preset_key} type="button" role="radio" aria-checked={value === p.preset_key} onClick={() => onChange(p.preset_key)}
+              <button key={p.preset_key} type="button" role="radio" aria-checked={value === p.preset_key} onClick={() => elegir(p.preset_key)}
                 title={`${p.description}${p.description ? ' · ' : ''}Estado: ${STATUS_LABEL[p.status ?? ''] ?? p.status ?? 'sin estado'}`}
                 className={cn('relative flex flex-col gap-1 p-1 rounded-lg border text-left',
                   value === p.preset_key ? 'border-violet-500 ring-1 ring-violet-500 bg-violet-500/10' : 'border-zinc-800 bg-zinc-950/40 hover:border-zinc-600')}>
@@ -461,6 +466,11 @@ function Presets({ list, value, onChange, label, previews, suggested }: {
             );
           })}
         </div>
+      )}
+      {previews && elegido && (list?.length ?? 0) > 1 && (
+        <button type="button" onClick={() => setAbierta((v) => !v)} className="text-[11px] text-violet-300 hover:text-violet-200">
+          {abierta ? 'Plegar los estilos' : `Cambiar de estilo (${list!.length})`}
+        </button>
       )}
       {previews?.error && <p className="text-[10px] text-amber-300/90">{previews.error}</p>}
       {!previews && <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={label}>
@@ -539,27 +549,79 @@ function Segundo({ value, onChange, label }: { value: number; onChange: (n: numb
 function Propuestas({ list, choice, own, onChoice, onOwn, propio }: {
   list: TextProposal[]; choice: Choice; own: string; onChoice: (c: Choice) => void; onOwn: (t: string) => void; propio: string;
 }) {
+  // 2026-11-17 (Sam): con una propuesta elegida, las demás se pliegan para que la vista grande quede a la vista.
+  const [verTodas, setVerTodas] = useState(choice === null);
+  const elegir = (c: Choice) => { onChoice(c); setVerTodas(c === null); };
+  const visibles = list.map((h, i) => ({ h, i })).filter(({ i }) => verTodas || choice === i);
   return (
     <div className="space-y-1.5">
-      {list.map((h, i) => (
-        <button key={i} type="button" onClick={() => onChoice(choice === i ? null : i)} aria-pressed={choice === i}
+      {visibles.map(({ h, i }) => (
+        <button key={i} type="button" onClick={() => elegir(choice === i ? null : i)} aria-pressed={choice === i}
           className={cn('w-full text-left rounded-lg border px-2.5 py-1.5 text-[12px] transition-colors',
             choice === i ? 'border-violet-500/70 bg-violet-500/10 text-white' : 'border-zinc-800 text-zinc-300 hover:border-zinc-600')}>
           <span>{h.text}</span>
           {h.why && <span className="block text-[10px] text-zinc-500 mt-0.5">{h.why}</span>}
         </button>
       ))}
-      <button type="button" onClick={() => onChoice(choice === OWN ? null : OWN)} aria-pressed={choice === OWN}
-        className={cn('w-full text-left rounded-lg border px-2.5 py-1.5 text-[12px]',
-          choice === OWN ? 'border-violet-500/70 bg-violet-500/10 text-white' : 'border-dashed border-zinc-700 text-zinc-400 hover:border-zinc-500')}>
-        {propio}
-      </button>
-      {choice === OWN && (
-        <input value={own} onChange={(e) => onOwn(e.target.value)} autoFocus aria-label={propio}
-          className="w-full bg-zinc-950/60 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60" />
+      {(verTodas || choice === OWN) && (
+        <button type="button" onClick={() => elegir(choice === OWN ? null : OWN)} aria-pressed={choice === OWN}
+          className={cn('w-full text-left rounded-lg border px-2.5 py-1.5 text-[12px]',
+            choice === OWN ? 'border-violet-500/70 bg-violet-500/10 text-white' : 'border-dashed border-zinc-700 text-zinc-400 hover:border-zinc-500')}>
+          {propio}
+        </button>
+      )}
+      {choice === OWN && <TextoPropio value={own} onChange={onOwn} label={propio} />}
+      {choice !== null && (
+        <button type="button" onClick={() => setVerTodas((v) => !v)} className="text-[11px] text-violet-300 hover:text-violet-200">
+          {verTodas ? 'Plegar las otras propuestas' : `Ver las otras propuestas (${list.length + (choice === OWN ? 0 : 1)})`}
+        </button>
       )}
     </div>
   );
+}
+
+/**
+ * El texto propio de un bloque: varias líneas (Enter = salto de línea; VideoLab respeta `\n` hasta el máximo de líneas
+ * del estilo) y el marcado del editor de imagen (`^ _ + *`), que al cerrarse cada par pasa a marcas. 2026-11-17 (Sam).
+ */
+function TextoPropio({ value, onChange, label }: { value: string; onChange: (t: string) => void; label: string }) {
+  return (
+    <div className="space-y-1">
+      <textarea value={value} onChange={(e) => onChange(e.target.value)} autoFocus aria-label={label} rows={Math.min(4, Math.max(2, value.split('\n').length))}
+        className="w-full resize-y bg-zinc-950/60 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/60" />
+      <p className="text-[10px] text-zinc-500">Enter: salto de línea. Marcado: ^resaltado^ _cursiva_ +negrita+ *color* (al cerrar el par pasa a «Marcas»). {value.replace(/\s+/g, ' ').trim().length} caracteres.</p>
+    </div>
+  );
+}
+
+/** Un bloque que se abre y se cierra (Sam, 2026-11-17: «abrir y cerrar según se requiera»). Cerrado de entrada. */
+function Plegable({ titulo, resumen, children }: { titulo: string; resumen?: string | null; children: React.ReactNode }) {
+  const [abierto, setAbierto] = useState(false);
+  return (
+    <div className="rounded-lg border border-zinc-800/70">
+      <button type="button" onClick={() => setAbierto((v) => !v)} aria-expanded={abierto}
+        className="w-full flex items-center gap-2 px-2 min-h-9 text-left text-[11px] text-zinc-300">
+        <span aria-hidden className="text-zinc-500">{abierto ? '▾' : '▸'}</span>{titulo}
+        {resumen && <span className="ml-auto text-[10px] text-zinc-500 truncate">{resumen}</span>}
+      </button>
+      {abierto && <div className="space-y-2 px-2 pb-2">{children}</div>}
+    </div>
+  );
+}
+
+/** Lo que dice la cabecera plegada de «Marcas, alineación y color». PURO. */
+export function resumenEstilo(st: BlockStyle): string {
+  const n = MARK_KINDS.reduce((a, k) => a + (st.marks[k]?.length ?? 0), 0);
+  const partes = [n ? `${n} marca${n === 1 ? '' : 's'}` : 'sin marcas'];
+  if (st.align) partes.push(st.align === 'left' ? 'izquierda' : st.align === 'right' ? 'derecha' : 'centro');
+  if (st.emphasis_role) partes.push(st.emphasis_role);
+  return partes.join(' · ');
+}
+
+/** El texto propio con el marcado ya convertido en marcas: lo que se guarda en el borrador. PURO. */
+export function ownWithMarkup(t: string, st: BlockStyle): { own: string; style: BlockStyle } {
+  const r = parseMarkup(t);
+  return { own: r.text, style: { ...st, marks: mergeMarks(st.marks, r.marks) } };
 }
 
 /** Las tarjetas que no aplican a este formato, pintadas desactivadas en su sitio. */
@@ -666,6 +728,8 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<null | { id: string; since: number }>(null);
+  // 2026-11-17 — mientras el pedido viaja, «Aplicar» no se puede volver a pulsar: dos pedidos seguidos creaban dos renders.
+  const [enviando, setEnviando] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const raiz = useRef<HTMLDivElement>(null);
@@ -758,10 +822,12 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
 
   const aplicar = () => {
     if (!prop || !draft) return;
-    setError(null); setDone(null);
+    if (enviando) return;
+    setError(null); setDone(null); setEnviando(true);
     applyPieceText(token, pieceId, textLayersFromDraft(draft, prop.proposals, prop.duration_ms))
       .then((r) => setJob({ id: r.job_id, since: Date.now() }))
-      .catch((err) => setError(errorDe(err, 'No se pudo mandar el texto a VideoLab.')));
+      .catch((err) => setError(errorDe(err, 'No se pudo mandar el texto a VideoLab.')))
+      .finally(() => setEnviando(false));
   };
 
   if (loading && !prop) return <p className="flex items-center gap-2 text-[11px] text-zinc-400"><Spinner size={12} /> CopyLab está proponiendo los textos…</p>;
@@ -783,7 +849,7 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
   const modo = (pl: Place | null) => (pl ? 'a mano' : 'automático');
   /** Marcas por palabra, alineación y color del resaltado de un bloque (gancho, título clave, CTA). */
   const controlesDeEstilo = (texto: string, st: BlockStyle, onSt: (s: BlockStyle) => void) => (
-    <div className="space-y-2 rounded-lg border border-zinc-800/70 p-2">
+    <Plegable titulo="Marcas, alineación y color" resumen={resumenEstilo(st)}>
       <p className="text-[10px] text-zinc-500">Marcas</p>
       <MarcasDeTexto text={texto} marks={st.marks} onChange={(m) => onSt({ ...st, marks: m })} />
       <p className="text-[10px] text-zinc-500">Alineación</p>
@@ -791,7 +857,7 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
       <p className="text-[10px] text-zinc-500">Color del resaltado</p>
       <Muestras opts={prop.accent_options} value={st.emphasis_role} nullable label="Color del resaltado"
         onChange={(r) => onSt({ ...st, emphasis_role: r })} />
-    </div>
+    </Plegable>
   );
   const sug = prop.suggested_presets ?? {};
 
@@ -815,19 +881,32 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
       )}
 
       {prop.clean_video_url && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-2">
-          <VistaFiel videoUrl={prop.clean_video_url} result={vista.result} loading={vista.loading} error={vista.error} width={240}
-            targets={vista.result?.ok && vista.result.scene ? dragTargetsOf(vista.result.scene, draftBlocksOf(draft, prop.proposals, prop.duration_ms ?? null)) : []}
-            onPlace={enCurso ? undefined : (ref, place) => setDraft(withPlace(draft, ref, place))} />
+        // 2026-11-17 (Sam): la vista grande se queda arriba al desplazarse (en pantallas anchas) y el esquema va a su
+        // lado, con las medidas reales de la escena; si VideoLab no pudo preparar la escena, el esquema aproximado.
+        <div className="md:sticky md:top-0 z-20 rounded-xl border border-zinc-800 bg-zinc-950 p-2 shadow-lg shadow-black/40">
+          <div className="flex flex-wrap items-start gap-3">
+            <div className="shrink-0" style={{ width: 170 }}>
+              <VistaFiel videoUrl={prop.clean_video_url} result={vista.result} loading={vista.loading} error={vista.error} width={170}
+                targets={vista.result?.ok && vista.result.scene ? dragTargetsOf(vista.result.scene, draftBlocksOf(draft, prop.proposals, prop.duration_ms ?? null)) : []}
+                onPlace={enCurso ? undefined : (ref, place) => setDraft(withPlace(draft, ref, place))} />
+            </div>
+            <div className="shrink-0">
+              {vista.result?.ok && vista.result.scene
+                ? <EsquemaDeEscena scene={vista.result.scene} width={118} />
+                : <SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} />}
+            </div>
+          </div>
         </div>
       )}
-      <Seccion titulo={prop.clean_video_url ? 'Esquema de posiciones' : 'Vista previa'} resumen="aproximada">
-        <SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} />
-      </Seccion>
+      {!prop.clean_video_url && (
+        <Seccion titulo="Vista previa" resumen="aproximada">
+          <SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} />
+        </Seccion>
+      )}
 
       <Seccion titulo={BLOCK_LABELS.headline} resumen={hookElegido ? `${hookElegido.text} · ${modo(draft.hook.place)}` : null} onOpen={() => pedirMiniaturas('hook')}>
         <Propuestas list={prop.proposals.hooks} choice={draft.hook.choice} own={draft.hook.own} propio="Escribir uno propio"
-          onChoice={(c) => set({ hook: { ...draft.hook, choice: c } })} onOwn={(t) => set({ hook: { ...draft.hook, own: t } })} />
+          onChoice={(c) => set({ hook: { ...draft.hook, choice: c } })} onOwn={(t) => set({ hook: { ...draft.hook, ...ownWithMarkup(t, draft.hook.style) } })} />
         <p className="text-[10px] text-zinc-500">Animación</p>
         <Presets list={p?.hook} value={draft.hook.preset_key} label="Animación del gancho" onChange={(k) => set({ hook: { ...draft.hook, preset_key: k } })}
           previews={prop.clean_video_url ? minis.hook ?? { loading: false, byKey: {}, error: null } : undefined} suggested={sug.hook} />
@@ -846,8 +925,9 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
               <label className="flex items-start gap-2 text-[12px] text-zinc-200">
                 <input type="checkbox" className="mt-0.5" checked={k.on} onChange={(e) => upd({ on: e.target.checked })} />
                 {k.own
-                  ? <input value={k.text} onChange={(e) => upd({ text: e.target.value })} aria-label="Título clave propio"
-                      className="flex-1 bg-zinc-950/60 border border-zinc-800 rounded px-2 py-0.5 text-[12px] text-zinc-200" />
+                  ? <textarea value={k.text} rows={Math.min(3, Math.max(1, k.text.split('\n').length))} aria-label="Título clave propio"
+                      onChange={(e) => { const r = ownWithMarkup(e.target.value, k.style); upd({ text: r.own, style: r.style }); }}
+                      className="flex-1 resize-y bg-zinc-950/60 border border-zinc-800 rounded px-2 py-0.5 text-[12px] text-zinc-200" />
                   : <span>{k.text}</span>}
               </label>
               {k.on && (
@@ -875,7 +955,7 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
       <Seccion titulo={BLOCK_LABELS.cta} resumen={ctaElegido ? `${ctaElegido.text} · ${modo(draft.cta.place)}` : null} onOpen={() => pedirMiniaturas('cta')}>
         {!prop.proposals.share_ctas.length && <p className="text-[11px] text-zinc-500">CopyLab no propuso CTA de reenvío para esta pieza.</p>}
         <Propuestas list={prop.proposals.share_ctas} choice={draft.cta.choice} own={draft.cta.own} propio="Escribir uno propio"
-          onChoice={(c) => set({ cta: { ...draft.cta, choice: c } })} onOwn={(t) => set({ cta: { ...draft.cta, own: t } })} />
+          onChoice={(c) => set({ cta: { ...draft.cta, choice: c } })} onOwn={(t) => set({ cta: { ...draft.cta, ...ownWithMarkup(t, draft.cta.style) } })} />
         <p className="text-[10px] text-zinc-500">Formato</p>
         <Presets list={p?.cta} value={draft.cta.preset_key} label="Formato del CTA" onChange={(k) => set({ cta: { ...draft.cta, preset_key: k } })}
           previews={prop.clean_video_url ? minis.cta ?? { loading: false, byKey: {}, error: null } : undefined} suggested={sug.cta} />
@@ -959,10 +1039,10 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
         <p className="flex items-center gap-2 text-[11px] text-zinc-300"><Spinner size={12} /> VideoLab está aplicando el texto sobre el video limpio…</p>
       )}
       <div className="flex gap-2">
-        <button type="button" onClick={aplicar} disabled={sinLimpio || enCurso || !p}
+        <button type="button" onClick={aplicar} disabled={sinLimpio || enCurso || enviando || !p}
           title={sinLimpio ? prop.clean_video_note ?? undefined : undefined}
           className="flex-1 py-2 rounded-lg text-sm font-semibold text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed">
-          Aplicar
+          {enviando ? 'Enviando…' : 'Aplicar'}
         </button>
         <button type="button" onClick={proponer} disabled={loading || enCurso}
           className="px-3 py-2 rounded-lg text-[12px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">

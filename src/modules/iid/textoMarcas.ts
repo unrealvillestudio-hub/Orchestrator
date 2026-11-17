@@ -121,3 +121,32 @@ export function keywordShare(words: string[], keywords: string[]): number {
   const limpia = (w: string) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').toLocaleLowerCase();
   return Math.round((words.filter((w) => set.has(limpia(w))).length / words.length) * 100);
 }
+
+/**
+ * El marcado escrito a mano en el texto (`^resaltado^ _cursiva_ +negrita+ *color*`, el mismo del editor de imagen)
+ * pasa a marcas: quita los símbolos de cada par COMPLETO y deja el texto limpio. Un símbolo sin su pareja se queda
+ * tal cual (quien escribe todavía no cerró el tramo). Los tramos vacíos no cuentan. PURO.
+ */
+export function parseMarkup(text: string): { text: string; marks: BlockMarks } {
+  let limpio = text;
+  const marks: BlockMarks = {};
+  for (const k of MARK_KINDS) {
+    const [a] = MARK_SYMBOL[k];
+    const esc = a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`${esc}([^${esc.replace(/\\/g, '\\\\')}\\n]+?)${esc}`, 'g');
+    const tramos: string[] = [];
+    limpio = limpio.replace(re, (_m, dentro: string) => { const t = dentro.trim(); if (t) tramos.push(t); return dentro; });
+    if (tramos.length) marks[k] = tramos;
+  }
+  return { text: limpio, marks };
+}
+
+/** Une marcas nuevas a las que ya había (sin repetir tramos). PURO. */
+export function mergeMarks(base: BlockMarks, extra: BlockMarks): BlockMarks {
+  const out: BlockMarks = { ...base };
+  for (const k of MARK_KINDS) {
+    if (!extra[k]?.length) continue;
+    out[k] = [...new Set([...(base[k] ?? []), ...extra[k]!])];
+  }
+  return out;
+}

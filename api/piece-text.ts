@@ -94,9 +94,13 @@ async function labUrl(labKey: string): Promise<string | null> {
  * Escribe `assets` con ancla en el video que se leyó: si entre la lectura y la escritura otra mano cambió el video,
  * no se pisa nada y vuelve `false`.
  */
-async function guardarAssets(pieceId: string, assets: unknown, anclaUrl: string): Promise<boolean> {
+async function guardarAssets(pieceId: string, assets: unknown, anclaUrl: string, opts: { sinPendiente?: boolean } = {}): Promise<boolean> {
+  // `sinPendiente` (2026-11-17): al enlazar un render nuevo, sólo si nadie enlazó otro entretanto. Dos «Aplicar» casi a la
+  // vez leían la pieza sin pendiente y el segundo pisaba al primero: su render bueno quedaba huérfano (pieza bfb10eb3,
+  // jobs 906ce648 y 1ccd7b6f). Con el ancla, gana el primero y el segundo recibe 409.
   const url = `${SB_URL()}/rest/v1/content_pieces?id=eq.${encodeURIComponent(pieceId)}`
-    + `&assets->video->>url=eq.${encodeURIComponent(anclaUrl)}&select=id`;
+    + `&assets->video->>url=eq.${encodeURIComponent(anclaUrl)}`
+    + (opts.sinPendiente ? '&assets->video->>pending_text_job=is.null' : '') + '&select=id';
   const r = await fetchWithTimeout('db', url, {
     method: 'PATCH',
     headers: headers('content', { 'Content-Type': 'application/json', 'Content-Profile': 'content', Prefer: 'return=representation' }),
@@ -222,7 +226,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (body.action === 'sound_catalog') return catalogoDeSonido(res, piece, esAdmin(session.role));
     if (body.action === 'apply_sound') {
       // El texto es el vigente; sólo cambia el sonido. `sound: null` quita el sonido.
-      const vigente = piece.assets?.video?.text_layers ?? SIN_TEXTO;
+      const vigente = (piece.assets as any)?.video?.text_layers ?? SIN_TEXTO;
       const { sound: _fuera, ...texto } = vigente as any;
       return aplicar(res, piece, texto, { sound: body.sound ?? null });
     }
@@ -437,9 +441,9 @@ async function aplicar(res: VercelResponse, piece: any, raw: unknown, sonido?: {
   }
 
   const nuevos = { ...assets, video: { ...assets.video, pending_text_job: { job_id: jobId, requested_at: new Date().toISOString(), text_layers: capas } } };
-  const guardado = await guardarAssets(piece.id, nuevos, assets.video.url);
+  const guardado = await guardarAssets(piece.id, nuevos, assets.video.url, { sinPendiente: true });
   if (!guardado) {
-    return res.status(409).json({ error: 'video_changed', detail: 'el video de la pieza cambió mientras se pedía el texto: el render sigue, pero no quedó enlazado a la pieza', job_id: jobId });
+    return res.status(409).json({ error: 'text_job_pending', detail: 'ya había otro cambio en curso para este video (o el video cambió): este pedido no se enlazó a la pieza. Espera a que termine el que está en curso.', job_id: jobId });
   }
   return res.status(202).json({ ok: true, piece_id: piece.id, job_id: jobId, status: 'running' });
 }

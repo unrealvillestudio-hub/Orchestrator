@@ -238,10 +238,12 @@ export function ControlesDeSonido({ pieceId, token, onApplied }: {
   );
 
   const aplicar = () => {
-    setError(null); setAviso(null);
+    if (ocupado) return;
+    setError(null); setAviso(null); setOcupado(true);
     applyPieceSound(token, pieceId, soundFromDraft(draft, presets))
       .then((r) => setJob(r.job_id))
-      .catch((err) => setError(errorDe(err, 'No se pudo mandar el sonido a VideoLab.')));
+      .catch((err) => setError(errorDe(err, 'No se pudo mandar el sonido a VideoLab.')))
+      .finally(() => setOcupado(false));
   };
 
   const fondos = (lib ?? []).filter((s) => s.fn === BED_FN);
@@ -367,7 +369,7 @@ export function ControlesDeSonido({ pieceId, token, onApplied }: {
       {aviso && <p className="text-[11px] text-emerald-300">{aviso}</p>}
       <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
         <span className="mr-auto text-[11px] text-zinc-500">{enCurso ? 'VideoLab está mezclando el sonido…' : 'Al aplicar, el video se vuelve a mezclar con esta elección. El texto no cambia.'}</span>
-        <button type="button" onClick={aplicar} disabled={enCurso || !cat.has_clean_video}
+        <button type="button" onClick={aplicar} disabled={enCurso || ocupado || !cat.has_clean_video}
           className="px-4 min-h-11 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-[13px] font-semibold disabled:opacity-40 flex items-center gap-2">
           {enCurso && <Spinner size={12} />} Aplicar
         </button>
