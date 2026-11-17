@@ -151,7 +151,7 @@ const LAYERS_OK = {
   captions: { enabled: true, preset_key: 'caption_karaoke_accent', accent_role: 'accent_a' },
   key_titles: [{ text: 'El 51 % decide', at_ms: 12000, dur_ms: 2500, preset_key: 'key_title_rule' }],
   cta: { text: 'Reenvíalo', at_ms: 52000, preset_key: 'cta_pill_shimmer' },
-  identity: { strip: true, strip_role: 'strip_a' },
+  identity: { strip: true, identity_role: 'strip_a' },
 };
 
 describe('apply valida lo elegido antes de pagar un render', () => {
@@ -285,6 +285,14 @@ describe('el editor traduce lo elegido a la forma del contrato', () => {
     current: { text_layers: null, hook: null },
   };
 
+  it('una pieza guardada con strip_role (alias legacy) reabre con su color y se guarda como identity_role', () => {
+    const d = videoTextDraftOf({ ...prop, strip_options: [...prop.strip_options, { role: 'strip_b', hex: '#333333', is_default: false }],
+      current: { hook: null, text_layers: { hook: null, roles: [], captions: null, key_titles: [], cta: null, identity: { strip: true, strip_role: 'strip_b' } } } } as any);
+    expect(d.strip).toEqual({ on: true, role: 'strip_b' });
+    const l = textLayersFromDraft(d, prop.proposals, 61160);
+    expect(l.identity).toEqual({ strip: true, identity_role: 'strip_b' });
+  });
+
   it('abre sin nada elegido y con el primer estilo de cada capa', () => {
     const d = videoTextDraftOf(prop);
     expect(d.hook.choice).toBeNull();
@@ -309,7 +317,8 @@ describe('el editor traduce lo elegido a la forma del contrato', () => {
     expect(l.roles).toEqual([{ person_id: 'p-1', text: 'Persona Uno — Conductora', show: true, at_ms: 400, dur_ms: 3800, preset_key: 'role_chip_slide' }]);
     expect(l.key_titles).toEqual([{ text: 'Frase clave', at_ms: 12000, dur_ms: 2500, preset_key: 'key_title_rule' }]);
     expect(l.cta).toMatchObject({ at_ms: 55160, pattern_key: 'share_1' });
-    expect(l.identity).toEqual({ strip: true, strip_role: 'strip_a' });
+    expect(l.identity).toEqual({ strip: true, identity_role: 'strip_a' });
+    expect(JSON.stringify(l)).not.toContain('strip_role');
     expect(validateTextLayers(l, CTX).ok).toBe(true);
 
     d.hook.choice = OWN; d.hook.own = 'Mi gancho';
@@ -382,5 +391,31 @@ describe('reglas LABS y MULTIMARCA', () => {
     expect(ACTIONS).not.toContain('VideoTextEditor');
     expect(ACTIONS).not.toMatch(/panel === 'edit' && piece\.has_video/);
     expect(ACTIONS).not.toContain('Texto de la imagen</');
+  });
+});
+
+// ── 7 · franja de identidad: identity_role manda, strip_role es alias legacy (retiro, paso 1 de 3) ──────────────
+describe('identity_role se escribe; strip_role sólo se lee', () => {
+  const sin = { ...LAYERS_OK, identity: undefined as unknown };
+  it('identity_role pasa y sale tal cual', () => {
+    const v = validateTextLayers({ ...sin, identity: { strip: true, identity_role: 'strip_a' } }, CTX);
+    expect(v.ok && v.value.identity).toEqual({ strip: true, identity_role: 'strip_a' });
+  });
+  it('strip_role solo (lo ya guardado) se lee y sale como identity_role', () => {
+    const v = validateTextLayers({ ...sin, identity: { strip: true, strip_role: 'strip_a' } }, CTX);
+    expect(v.ok && v.value.identity).toEqual({ strip: true, identity_role: 'strip_a' });
+    expect(v.ok && JSON.stringify(v.value)).not.toContain('strip_role');
+  });
+  it('los dos con el mismo color pasan', () => {
+    expect(validateTextLayers({ ...sin, identity: { strip: true, identity_role: 'strip_a', strip_role: 'strip_a' } }, CTX).ok).toBe(true);
+  });
+  it('los dos con colores distintos es un error, como en VideoLab', () => {
+    const v = validateTextLayers({ ...sin, identity: { strip: true, identity_role: 'strip_a', strip_role: 'otro' } }, CTX);
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.errors.join(' | ')).toMatch(/dicen colores distintos/);
+  });
+  it('sin franja no viaja color', () => {
+    const v = validateTextLayers({ ...sin, identity: { strip: false, identity_role: 'strip_a' } }, CTX);
+    expect(v.ok && v.value.identity).toEqual({ strip: false, identity_role: null });
   });
 });

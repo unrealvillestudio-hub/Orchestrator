@@ -87,7 +87,7 @@ export function videoTextDraftOf(p: Pick<PieceTextProposal, 'presets' | 'cast' |
       preset_key: cur?.cta?.preset_key ?? firstKey(p.presets, 'cta'), at_s: cur?.cta ? cur.cta.at_ms / 1000 : 0,
       place: placeOf(cur?.cta?.place),
     },
-    strip: { on: cur?.identity?.strip ?? false, role: cur?.identity?.strip_role ?? defaultRole(p.strip_options ?? []) },
+    strip: { on: cur?.identity?.strip ?? false, role: cur?.identity?.identity_role ?? cur?.identity?.strip_role ?? defaultRole(p.strip_options ?? []) },
   };
 }
 
@@ -117,7 +117,7 @@ export function textLayersFromDraft(d: VideoTextDraft, proposals: PieceTextPropo
       : null,
     key_titles: d.key_titles.filter((k) => k.on && k.text.trim()).map((k) => ({ text: k.text.trim(), at_ms: ms(k.at_s), dur_ms: ms(k.dur_s), preset_key: k.preset_key, ...conPlace(k.place) })),
     cta: cta ? { text: cta.text, at_ms: ctaAt, preset_key: d.cta.preset_key, pattern_key: cta.pattern_key ?? null, ...conPlace(d.cta.place) } : null,
-    identity: { strip: d.strip.on, strip_role: d.strip.on ? d.strip.role || null : null },
+    identity: { strip: d.strip.on, identity_role: d.strip.on ? d.strip.role || null : null },
   };
 }
 
