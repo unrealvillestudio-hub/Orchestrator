@@ -19,6 +19,8 @@ import {
   MARK_KINDS, MARK_LABEL, MARK_SYMBOL, contrastOnDark, keywordShare, markupOf, marksByWord, toggleMark, wordRanges,
   type BlockMarks, type MarkKind,
 } from './textoMarcas';
+import { isDrag, placeAfterDrag, safeOf, visibleAt, type BlockRef, type DragTarget } from './arrastre';
+import type { Place } from '../../../api/_onScreenText';
 
 // ── El runtime de VideoLab: se carga una vez por versión ─────────────────────────────────────────
 
@@ -137,8 +139,10 @@ const avisoDe = (w: unknown) => {
  * LA VISTA GRANDE: el video limpio de la pieza con el texto encima, dibujado por VideoLab. Cambia mientras se elige,
  * sin «Aplicar». Si aún no hay escena (cargando, error), lo dice; el video se ve igual.
  */
-export function VistaFiel({ videoUrl, result, loading, error, width }: {
+export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace }: {
   videoUrl: string; result: SceneResult | null; loading: boolean; error: string | null; width: number;
+  /** Los bloques que se pueden arrastrar (ver `arrastre.ts`). Sin `onPlace`, no se arrastra nada. */
+  targets?: DragTarget[]; onPlace?: (ref: BlockRef, place: Place) => void;
 }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const W = Number(result?.scene?.canvas?.width) || 1080;
@@ -164,6 +168,9 @@ export function VistaFiel({ videoUrl, result, loading, error, width }: {
             <ScenePlayer scene={result.scene} runtimeUrl={result.runtime_url} width={width} video={video} />
           </div>
         )}
+        {onPlace && result?.ok && result.scene && (
+          <Arrastrables scene={result.scene} targets={targets} video={video} escala={width / W} onPlace={onPlace} />
+        )}
         {loading && <span className="absolute top-2 right-2"><Spinner size={14} /></span>}
       </div>
       <VideoBarra video={video} />
@@ -175,6 +182,66 @@ export function VistaFiel({ videoUrl, result, loading, error, width }: {
       {error && <p className="text-[11px] text-amber-300/90 leading-snug">{error}</p>}
       {result && !result.ok && <p className="text-[11px] text-amber-300/90 leading-snug">VideoLab no pudo preparar la vista ({result.error}): {result.detail}</p>}
       {!!avisos.length && <ul className="text-[10px] text-amber-200/80 list-disc pl-4">{avisos.map((a) => <li key={a}>{a}</li>)}</ul>}
+      {onPlace && !!targets.length && (
+        <p className="text-[10px] text-zinc-500">Arrastra un texto sobre el video para moverlo. Queda colocado a mano; «Automático» lo devuelve.</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Los bloques visibles en este momento, cada uno con un asa del mismo tamaño que el texto que dibuja VideoLab. Se
+ * arrastra con ratón o con el dedo; al soltar, el bloque queda colocado a mano donde se soltó. Mientras VideoLab no
+ * devuelve la escena nueva, el contorno se queda donde se soltó para que no parezca que volvió atrás.
+ */
+function Arrastrables({ scene, targets, video, escala, onPlace }: {
+  scene: any; targets: DragTarget[]; video: HTMLVideoElement | null; escala: number;
+  onPlace: (ref: BlockRef, place: Place) => void;
+}) {
+  const [ms, setMs] = useState(0);
+  const [mov, setMov] = useState<{ i: number; x0: number; y0: number; dx: number; dy: number } | null>(null);
+  const [soltado, setSoltado] = useState<{ i: number; dx: number; dy: number } | null>(null);
+  useEffect(() => { setSoltado(null); }, [scene]);
+  useEffect(() => {
+    if (!video) return;
+    const u = () => setMs(video.currentTime * 1000);
+    const ev = ['timeupdate', 'seeked', 'loadedmetadata'];
+    ev.forEach((e) => video.addEventListener(e, u)); u();
+    return () => ev.forEach((e) => video.removeEventListener(e, u));
+  }, [video]);
+  const safe = safeOf(scene);
+  if (!safe) return null;
+  return (
+    <div className="absolute inset-0 pointer-events-none">
+      {targets.map((t, i) => {
+        const activo = mov?.i === i;
+        if (!activo && !visibleAt(t, ms)) return null;
+        const d = activo ? { dx: mov!.dx, dy: mov!.dy } : soltado?.i === i ? soltado : { dx: 0, dy: 0 };
+        return (
+          <div key={`${t.ref.block}-${'index' in t.ref ? t.ref.index : 0}`} role="button" aria-label={`Mover ${t.label}`} title={`Arrastra para mover: ${t.label}`}
+            className={cn('absolute pointer-events-auto touch-none cursor-grab rounded-md border border-dashed',
+              activo ? 'cursor-grabbing border-violet-300 bg-violet-400/10' : 'border-white/30 hover:border-violet-300/80')}
+            style={{ left: (t.rect.x + d.dx) * escala, top: (t.rect.y + d.dy) * escala, width: t.rect.w * escala, height: t.rect.h * escala }}
+            onPointerDown={(e) => {
+              e.preventDefault(); e.stopPropagation();
+              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              video?.pause();
+              setMov({ i, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0 });
+            }}
+            onPointerMove={(e) => {
+              if (!mov || mov.i !== i) return;
+              setMov({ ...mov, dx: (e.clientX - mov.x0) / escala, dy: (e.clientY - mov.y0) / escala });
+            }}
+            onPointerUp={(e) => {
+              if (!mov || mov.i !== i) return;
+              const m = mov; setMov(null);
+              if (!isDrag(e.clientX - m.x0, e.clientY - m.y0)) return;
+              setSoltado({ i, dx: m.dx, dy: m.dy });
+              onPlace(t.ref, placeAfterDrag(t.rect, safe, m.dx, m.dy, t.zoom));
+            }}
+            onPointerCancel={() => setMov(null)} />
+        );
+      })}
     </div>
   );
 }
