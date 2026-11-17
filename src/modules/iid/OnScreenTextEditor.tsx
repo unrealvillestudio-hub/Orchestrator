@@ -4,7 +4,7 @@ import {
   proposePieceText, applyPieceText, pollPieceText, undoPieceVideo, changePresetStatus, previewPieceText, CalibrationError, type SceneResult,
   type PieceTextProposal, type TextProposal,
 } from '../../services/calibrationInbox';
-import type { CastMember, PresetsByLayer, PresetView, TextAlign, TextLayers } from '../../../api/_pieceText';
+import type { CastMember, PresetsByLayer, PresetView, TextAlign, TextFit, TextLayers } from '../../../api/_pieceText';
 import { MARK_KINDS, pruneMarks, parseMarkup, mergeMarks, type BlockMarks } from './textoMarcas';
 import { dragTargetsOf, type BlockRef, type DraftBlocks } from './arrastre';
 import { BarraDeshacer } from './BarraDeshacer';
@@ -606,6 +606,36 @@ function TextoPropio({ value, onChange, label }: { value: string; onChange: (t: 
   );
 }
 
+/**
+ * El medidor de un bloque (VideoLab v1.12.0): si la escena salió, el `fit` de ese bloque; si VideoLab dijo que no cabe,
+ * el `fit` del error cuando es de ese bloque. `layer`: 'hook' | 'cta' | 'key_title'; un título clave se reconoce por su
+ * hora de entrada (`at_ms`), o por su índice en el error (`key_titles[i]`). PURO.
+ */
+export function fitFor(result: SceneResult | null | undefined, layer: 'hook' | 'cta' | 'key_title', opts: { at_ms?: number; index?: number } = {}): TextFit | null {
+  if (!result) return null;
+  if (result.ok) {
+    const f = (result.fits ?? []).filter((x) => x.layer === layer);
+    if (layer !== 'key_title') return f[0]?.fit ?? null;
+    return f.find((x) => x.start_ms === opts.at_ms)?.fit ?? null;
+  }
+  const e = result.fit;
+  if (!e) return null;
+  const etiqueta = layer === 'key_title' ? `key_titles[${opts.index ?? -1}]` : layer;
+  return e.label === etiqueta || (!e.label && e.layer === layer) ? e : null;
+}
+
+/** «Caben hasta N caracteres»: lo que mide VideoLab con este estilo (mismo cálculo que decide si cabe). */
+function Medidor({ fit }: { fit: TextFit | null }) {
+  if (!fit) return null;
+  return (
+    <p className={cn('text-[11px] font-mono', fit.fits ? 'text-zinc-400' : 'text-amber-300')} role="status">
+      {fit.fits
+        ? `Cabe con este estilo: ${fit.chars} caracteres, máx. ${fit.max_lines} línea${fit.max_lines === 1 ? '' : 's'}.`
+        : `No cabe: con este estilo caben hasta ${fit.chars_fit} de sus ${fit.chars} caracteres (máx. ${fit.max_lines} línea${fit.max_lines === 1 ? '' : 's'}). Acorta el texto o elige otro estilo.`}
+    </p>
+  );
+}
+
 /** Un bloque que se abre y se cierra (Sam, 2026-11-17: «abrir y cerrar según se requiera»). Cerrado de entrada. */
 function Plegable({ titulo, resumen, children }: { titulo: string; resumen?: string | null; children: React.ReactNode }) {
   const [abierto, setAbierto] = useState(false);
@@ -958,6 +988,7 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
       <Seccion titulo={BLOCK_LABELS.headline} resumen={hookElegido ? `${hookElegido.text} · ${modo(draft.hook.place)}` : null} onOpen={() => pedirMiniaturas('hook')}>
         <Propuestas list={prop.proposals.hooks} choice={draft.hook.choice} own={draft.hook.own} propio="Escribir uno propio"
           onChoice={(c) => set({ hook: { ...draft.hook, choice: c } })} onOwn={(t) => set({ hook: { ...draft.hook, ...ownWithMarkup(t, draft.hook.style) } })} />
+        <Medidor fit={hookElegido ? fitFor(vista.result, 'hook') : null} />
         <p className="text-[10px] text-zinc-500">Animación</p>
         <Presets list={p?.hook} value={draft.hook.preset_key} label="Animación del gancho" onChange={(k) => set({ hook: { ...draft.hook, preset_key: k } })}
           previews={prop.clean_video_url ? minis.hook ?? { loading: false, byKey: {}, error: null } : undefined} suggested={sug.hook} />
@@ -983,6 +1014,10 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
               </label>
               {k.on && (
                 <div className="space-y-1.5 pl-5">
+                  {k.text.trim() && <Medidor fit={fitFor(vista.result, 'key_title', {
+                    at_ms: ms(k.at_s),
+                    index: draft.key_titles.slice(0, i).filter((x) => x.on && x.text.trim()).length,
+                  })} />}
                   <div className="flex gap-3 flex-wrap items-center">
                     <Segundo label="En el segundo" value={k.at_s} onChange={(n) => upd({ at_s: n })} />
                     <Segundo label="Dura" value={k.dur_s} onChange={(n) => upd({ dur_s: n })} />
@@ -1007,6 +1042,7 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
         {!prop.proposals.share_ctas.length && <p className="text-[11px] text-zinc-500">CopyLab no propuso CTA de reenvío para esta pieza.</p>}
         <Propuestas list={prop.proposals.share_ctas} choice={draft.cta.choice} own={draft.cta.own} propio="Escribir uno propio"
           onChoice={(c) => set({ cta: { ...draft.cta, choice: c } })} onOwn={(t) => set({ cta: { ...draft.cta, ...ownWithMarkup(t, draft.cta.style) } })} />
+        <Medidor fit={ctaElegido ? fitFor(vista.result, 'cta') : null} />
         <p className="text-[10px] text-zinc-500">Formato</p>
         <Presets list={p?.cta} value={draft.cta.preset_key} label="Formato del CTA" onChange={(k) => set({ cta: { ...draft.cta, preset_key: k } })}
           previews={prop.clean_video_url ? minis.cta ?? { loading: false, byKey: {}, error: null } : undefined} suggested={sug.cta} />

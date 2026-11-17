@@ -39,7 +39,7 @@
  * enumerado son clases de red, no marcas ni endpoints, y un destino nuevo (una cola, un
  * proveedor de imagen) entra como entrada nueva con su plazo y su razón.
  */
-export type FetchTarget = 'db' | 'edge' | 'model';
+export type FetchTarget = 'db' | 'edge' | 'model' | 'lab_sync';
 
 /** Cuánto se espera a cada destino, y por qué ese número y no otro. */
 export const TIMEOUT_MS: Record<FetchTarget, number> = {
@@ -60,6 +60,12 @@ export const TIMEOUT_MS: Record<FetchTarget, number> = {
    * función redacte el error y responda.
    */
   model: 50_000,
+  /**
+   * Un lab que trabaja de forma síncrona y declara su tope: la escucha exacta de VideoLab (`/api/sound-preview`, tope
+   * 60 s según su contrato v1.12.0 §4 ter.10; estimado 8 a 15 s). 50 s contra los 60 s de `maxDuration` de
+   * `api/piece-text.ts`, por la misma razón que el modelo: diez segundos para responder el error. 2026-11-17.
+   */
+  lab_sync: 50_000,
 };
 
 /**

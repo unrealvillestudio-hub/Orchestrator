@@ -256,7 +256,8 @@ describe('multimarca — un plazo no sabe de marcas', () => {
   it('los destinos se nombran por lo que SON, no por el endpoint que los estrenó', () => {
     // `approve` o `calibrate` como nombre de destino cerraría el eje al caso que lo pidió
     // primero, y la siguiente ruta tendría que elegir el plazo de otra.
-    expect(Object.keys(TIMEOUT_MS).sort()).toEqual(['db', 'edge', 'model']);
+    // 2026-11-17: `lab_sync` = un lab que responde de forma síncrona con su propio tope (la escucha exacta de VideoLab).
+    expect(Object.keys(TIMEOUT_MS).sort()).toEqual(['db', 'edge', 'lab_sync', 'model']);
     for (const k of Object.keys(TIMEOUT_MS))
       expect(k).not.toMatch(/approve|calibrat|publish|challeng|intent|trigger/i);
   });
