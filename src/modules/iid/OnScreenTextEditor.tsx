@@ -4,7 +4,7 @@ import {
   proposePieceText, applyPieceText, pollPieceText, undoPieceVideo, changePresetStatus, previewPieceText, CalibrationError, type SceneResult,
   type PieceTextProposal, type TextProposal,
 } from '../../services/calibrationInbox';
-import type { CastMember, PresetsByLayer, PresetView, TextAlign, TextLayers } from '../../../api/_pieceText';
+import type { CastMember, PresetsByLayer, PresetView, TextAlign, TextFit, TextLayers } from '../../../api/_pieceText';
 import { MARK_KINDS, pruneMarks, parseMarkup, mergeMarks, type BlockMarks } from './textoMarcas';
 import { dragTargetsOf, type BlockRef, type DraftBlocks } from './arrastre';
 import { BarraDeshacer } from './BarraDeshacer';
@@ -606,6 +606,50 @@ function TextoPropio({ value, onChange, label }: { value: string; onChange: (t: 
   );
 }
 
+/**
+ * El medidor de un bloque (VideoLab v1.12.0): si la escena salió, el `fit` de ese bloque; si VideoLab dijo que no cabe,
+ * el `fit` del error cuando es de ese bloque. `layer`: 'hook' | 'cta' | 'key_title'; un título clave se reconoce por su
+ * hora de entrada (`at_ms`), o por su índice en el error (`key_titles[i]`). PURO.
+ */
+export function fitFor(result: SceneResult | null | undefined, layer: 'hook' | 'cta' | 'key_title', opts: { at_ms?: number; index?: number } = {}): TextFit | null {
+  if (!result) return null;
+  if (result.ok) {
+    const f = (result.fits ?? []).filter((x) => x.layer === layer);
+    if (layer !== 'key_title') return f[0]?.fit ?? null;
+    return f.find((x) => x.start_ms === opts.at_ms)?.fit ?? null;
+  }
+  const e = result.fit;
+  if (!e) return null;
+  const etiqueta = layer === 'key_title' ? `key_titles[${opts.index ?? -1}]` : layer;
+  return e.label === etiqueta || (!e.label && e.layer === layer) ? e : null;
+}
+
+// ── El tamaño de la vista grande (2026-11-17) ──────────────────────────────────────────────────────
+export const VISTA_ANCHO_MIN = 110;
+export const VISTA_ANCHO_MAX = 320;
+export const VISTA_ANCHO_INICIAL = 170;
+/** El ancho de la vista dentro de su rango; un valor que no es número vuelve al inicial. PURO. */
+export function clampAncho(n: number): number {
+  if (!Number.isFinite(n)) return VISTA_ANCHO_INICIAL;
+  return Math.round(Math.min(VISTA_ANCHO_MAX, Math.max(VISTA_ANCHO_MIN, n)));
+}
+const leerPreferencia = (k: string, porDefecto: string): string => {
+  try { return globalThis.localStorage?.getItem(k) ?? porDefecto; } catch { return porDefecto; }
+};
+const guardarPreferencia = (k: string, v: string) => { try { globalThis.localStorage?.setItem(k, v); } catch { /* sin almacenamiento */ } };
+
+/** «Caben hasta N caracteres»: lo que mide VideoLab con este estilo (mismo cálculo que decide si cabe). */
+function Medidor({ fit }: { fit: TextFit | null }) {
+  if (!fit) return null;
+  return (
+    <p className={cn('text-[11px] font-mono', fit.fits ? 'text-zinc-400' : 'text-amber-300')} role="status">
+      {fit.fits
+        ? `Cabe con este estilo: ${fit.chars} caracteres, máx. ${fit.max_lines} línea${fit.max_lines === 1 ? '' : 's'}.`
+        : `No cabe: con este estilo caben hasta ${fit.chars_fit} de sus ${fit.chars} caracteres (máx. ${fit.max_lines} línea${fit.max_lines === 1 ? '' : 's'}). Acorta el texto o elige otro estilo.`}
+    </p>
+  );
+}
+
 /** Un bloque que se abre y se cierra (Sam, 2026-11-17: «abrir y cerrar según se requiera»). Cerrado de entrada. */
 function Plegable({ titulo, resumen, children }: { titulo: string; resumen?: string | null; children: React.ReactNode }) {
   const [abierto, setAbierto] = useState(false);
@@ -747,6 +791,12 @@ function ImageBody(p: Extract<OnScreenTextEditorProps, { medium: 'image' }>) {
 function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPendiente, onEnviado }: Extract<OnScreenTextEditorProps, { medium: 'video' }>) {
   const [prop, setProp] = useState<PieceTextProposal | null>(null);
   const [draft, setDraft] = useState<VideoTextDraft | null>(null);
+  // 2026-11-17 (Sam): la vista se fija o se suelta, y su tamaño se cambia arrastrando el borde inferior. Se recuerda en
+  // este navegador (comodidad de quien edita; si el navegador no deja guardar, vale lo de siempre).
+  const [vistaFija, setVistaFija] = useState<boolean>(() => leerPreferencia('orchestrator.vista.fija', 'si') === 'si');
+  const [anchoVista, setAnchoVista] = useState<number>(() => clampAncho(Number(leerPreferencia('orchestrator.vista.ancho', String(VISTA_ANCHO_INICIAL)))));
+  const cambiarFija = (v: boolean) => { setVistaFija(v); guardarPreferencia('orchestrator.vista.fija', v ? 'si' : 'no'); };
+  const cambiarAncho = (n: number) => { const a = clampAncho(n); setAnchoVista(a); guardarPreferencia('orchestrator.vista.ancho', String(a)); };
   /** Lo guardado en la pieza, como borrador: contra esto se sabe si hay cambios sin aplicar y a esto vuelve «Descartar». */
   const base = useRef<VideoTextDraft | null>(null);
   const [confirmarDeshacer, setConfirmarDeshacer] = useState(false);
@@ -932,20 +982,39 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
       )}
 
       {prop.clean_video_url && (
-        // 2026-11-17 (Sam): la vista grande se queda arriba al desplazarse (en pantallas anchas) y el esquema va a su
-        // lado, con las medidas reales de la escena; si VideoLab no pudo preparar la escena, el esquema aproximado.
-        <div className="md:sticky md:top-0 z-20 rounded-xl border border-zinc-800 bg-zinc-950 p-2 shadow-lg shadow-black/40">
-          <div className="flex flex-wrap items-start gap-3">
-            <div className="shrink-0" style={{ width: 170 }}>
-              <VistaFiel videoUrl={prop.clean_video_url} result={vista.result} loading={vista.loading} error={vista.error} width={170}
-                targets={vista.result?.ok && vista.result.scene ? dragTargetsOf(vista.result.scene, draftBlocksOf(draft, prop.proposals, prop.duration_ms ?? null)) : []}
-                onPlace={enCurso ? undefined : (ref, place) => setDraft(withPlace(draft, ref, place))} />
-            </div>
-            <div className="shrink-0">
-              {vista.result?.ok && vista.result.scene
-                ? <EsquemaDeEscena scene={vista.result.scene} width={118} />
-                : <SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} />}
-            </div>
+        // 2026-11-17 (Sam): la vista grande arriba, con el esquema, la barra de reproducción y las notas AL LADO del video
+        // (ocupa sólo el alto del video). Se puede fijar o soltar, y su borde inferior se arrastra para hacerla más
+        // grande o más chica: lo de abajo se reacomoda.
+        <div className={cn('z-20 rounded-xl border border-zinc-800 bg-zinc-950 shadow-lg shadow-black/40', vistaFija && 'md:sticky md:top-0')}>
+          <div className="p-2">
+            <VistaFiel videoUrl={prop.clean_video_url} result={vista.result} loading={vista.loading} error={vista.error} width={anchoVista}
+              targets={vista.result?.ok && vista.result.scene ? dragTargetsOf(vista.result.scene, draftBlocksOf(draft, prop.proposals, prop.duration_ms ?? null)) : []}
+              onPlace={enCurso ? undefined : (ref, place) => setDraft(withPlace(draft, ref, place))}
+              lado={
+                <div className="flex flex-wrap items-start gap-3">
+                  {vista.result?.ok && vista.result.scene
+                    ? <EsquemaDeEscena scene={vista.result.scene} width={Math.round(anchoVista * 0.62)} />
+                    : <SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} />}
+                  <button type="button" onClick={() => cambiarFija(!vistaFija)} aria-pressed={vistaFija}
+                    className="hidden md:inline-flex ml-auto px-2 min-h-8 rounded-md border border-zinc-700 text-[11px] text-zinc-300 hover:text-white"
+                    title={vistaFija ? 'La vista sigue arriba al desplazarse. Pulsa para soltarla.' : 'Pulsa para que la vista siga arriba al desplazarse.'}>
+                    {vistaFija ? 'Fijada arriba · soltar' : 'Fijar arriba'}
+                  </button>
+                </div>
+              } />
+          </div>
+          <div role="separator" aria-orientation="horizontal" aria-label="Arrastra para cambiar el tamaño de la vista" tabIndex={0}
+            title="Arrastra hacia arriba o hacia abajo para achicar o agrandar la vista"
+            onKeyDown={(e) => { if (e.key === 'ArrowUp') cambiarAncho(anchoVista - 10); if (e.key === 'ArrowDown') cambiarAncho(anchoVista + 10); }}
+            onPointerDown={(e) => {
+              e.preventDefault(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              const y0 = e.clientY; const a0 = anchoVista;
+              const mover = (ev: PointerEvent) => cambiarAncho(a0 + (ev.clientY - y0) * (9 / 16));
+              const soltar = () => { window.removeEventListener('pointermove', mover); window.removeEventListener('pointerup', soltar); };
+              window.addEventListener('pointermove', mover); window.addEventListener('pointerup', soltar);
+            }}
+            className="h-3 cursor-row-resize touch-none rounded-b-xl flex items-center justify-center hover:bg-violet-500/20 focus:bg-violet-500/20 focus:outline-none">
+            <span aria-hidden className="block w-10 h-1 rounded-full bg-zinc-700" />
           </div>
         </div>
       )}
@@ -958,6 +1027,7 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
       <Seccion titulo={BLOCK_LABELS.headline} resumen={hookElegido ? `${hookElegido.text} · ${modo(draft.hook.place)}` : null} onOpen={() => pedirMiniaturas('hook')}>
         <Propuestas list={prop.proposals.hooks} choice={draft.hook.choice} own={draft.hook.own} propio="Escribir uno propio"
           onChoice={(c) => set({ hook: { ...draft.hook, choice: c } })} onOwn={(t) => set({ hook: { ...draft.hook, ...ownWithMarkup(t, draft.hook.style) } })} />
+        <Medidor fit={hookElegido ? fitFor(vista.result, 'hook') : null} />
         <p className="text-[10px] text-zinc-500">Animación</p>
         <Presets list={p?.hook} value={draft.hook.preset_key} label="Animación del gancho" onChange={(k) => set({ hook: { ...draft.hook, preset_key: k } })}
           previews={prop.clean_video_url ? minis.hook ?? { loading: false, byKey: {}, error: null } : undefined} suggested={sug.hook} />
@@ -983,6 +1053,10 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
               </label>
               {k.on && (
                 <div className="space-y-1.5 pl-5">
+                  {k.text.trim() && <Medidor fit={fitFor(vista.result, 'key_title', {
+                    at_ms: ms(k.at_s),
+                    index: draft.key_titles.slice(0, i).filter((x) => x.on && x.text.trim()).length,
+                  })} />}
                   <div className="flex gap-3 flex-wrap items-center">
                     <Segundo label="En el segundo" value={k.at_s} onChange={(n) => upd({ at_s: n })} />
                     <Segundo label="Dura" value={k.dur_s} onChange={(n) => upd({ dur_s: n })} />
@@ -1007,6 +1081,7 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
         {!prop.proposals.share_ctas.length && <p className="text-[11px] text-zinc-500">CopyLab no propuso CTA de reenvío para esta pieza.</p>}
         <Propuestas list={prop.proposals.share_ctas} choice={draft.cta.choice} own={draft.cta.own} propio="Escribir uno propio"
           onChoice={(c) => set({ cta: { ...draft.cta, choice: c } })} onOwn={(t) => set({ cta: { ...draft.cta, ...ownWithMarkup(t, draft.cta.style) } })} />
+        <Medidor fit={ctaElegido ? fitFor(vista.result, 'cta') : null} />
         <p className="text-[10px] text-zinc-500">Formato</p>
         <Presets list={p?.cta} value={draft.cta.preset_key} label="Formato del CTA" onChange={(k) => set({ cta: { ...draft.cta, preset_key: k } })}
           previews={prop.clean_video_url ? minis.cta ?? { loading: false, byKey: {}, error: null } : undefined} suggested={sug.cta} />

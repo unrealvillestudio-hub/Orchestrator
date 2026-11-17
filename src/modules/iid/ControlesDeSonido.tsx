@@ -13,7 +13,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { cn, Spinner } from '../../ui/components';
 import {
-  soundCatalog, applyPieceSound, pollPieceText, changePresetStatus, undoPieceVideo, CalibrationError, type PieceSoundCatalog,
+  soundCatalog, applyPieceSound, pollPieceText, changePresetStatus, undoPieceVideo, previewPieceSound, CalibrationError, type PieceSoundCatalog,
 } from '../../services/calibrationInbox';
 import {
   EFFECT_FNS, BED_FN, soundDraftOf, soundFromDraft, effectSoundNow, bedSoundNow, approxGains,
@@ -405,6 +405,9 @@ export function ControlesDeSonido({ pieceId, token, onApplied, borrador, onBorra
       )}
 
       {cat.clean_video_url && <EscuchaAproximada videoUrl={cat.clean_video_url} cues={cat.cue_times ?? []} draft={draft} presets={presets} lib={lib} />}
+      {cat.clean_video_url && (bed.on || fx.on) && (
+        <EscuchaExacta pieceId={pieceId} token={token} videoUrl={cat.clean_video_url} sound={soundFromDraft(draft, presets)} texto={textoPendiente ?? null} />
+      )}
       {error && <p className="text-[11px] text-rose-300">{error}</p>}
       {aviso && <p className="text-[11px] text-emerald-300">{aviso}</p>}
       {textoPendiente && !enCurso && (
@@ -490,6 +493,73 @@ function EscuchaAproximada({ videoUrl, cues, draft, presets, lib }: {
         </button>
       </div>
       <p className="text-[11px] text-zinc-500">La voz del video, el fondo debajo y cada efecto en su momento, mezclados en el navegador. El volumen y el instante exactos salen del render.</p>
+    </section>
+  );
+}
+
+// ── Escucha exacta (2026-11-17, VideoLab v1.12.0 §4 ter.10) ─────────────────────────────────────
+
+/**
+ * La mezcla que hace VideoLab con el MISMO módulo que el render: la voz del video limpio, el fondo y los efectos. Tarda
+ * unos segundos (sin job ni costo). Se oye con el video en silencio al lado, sincronizados. Si se cambia algo, la
+ * escucha anterior deja de valer y se vuelve a pedir.
+ */
+function EscuchaExacta({ pieceId, token, videoUrl, sound, texto }: {
+  pieceId: string; token: string; videoUrl: string; sound: SoundLayer; texto: TextLayers | null;
+}) {
+  const firma = JSON.stringify([sound, texto]);
+  const [estado, setEstado] = useState<{ firma: string; url: string; elapsed: number | null; lufs: number | null } | null>(null);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sonando, setSonando] = useState(false);
+  const video = useRef<HTMLVideoElement | null>(null);
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const vigente = estado && estado.firma === firma ? estado : null;
+  const parar = () => { audio.current?.pause(); video.current?.pause(); setSonando(false); };
+  useEffect(() => () => { parar(); if (estado?.url) URL.revokeObjectURL(estado.url); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { parar(); setError(null); }, [firma]); // eslint-disable-line react-hooks/exhaustive-deps
+  const tocar = (url: string) => {
+    const v = video.current; if (!v) return;
+    audio.current?.pause();
+    const a = new Audio(url); audio.current = a;
+    v.muted = true; v.currentTime = 0; a.currentTime = 0;
+    a.onended = () => parar();
+    void v.play(); void a.play().catch(() => setSonando(false));
+    setSonando(true);
+  };
+  const pedir = () => {
+    if (sonando) { parar(); return; }
+    if (vigente) { tocar(vigente.url); return; }
+    setCargando(true); setError(null);
+    previewPieceSound(token, pieceId, sound, texto)
+      .then((r) => {
+        const bin = Uint8Array.from(atob(r.audio.base64), (c) => c.charCodeAt(0));
+        const url = URL.createObjectURL(new Blob([bin], { type: r.audio.mime || 'audio/mp4' }));
+        if (estado?.url) URL.revokeObjectURL(estado.url);
+        setEstado({ firma, url, elapsed: r.elapsed_ms ?? null, lufs: r.sound?.master?.lufs ?? null });
+        tocar(url);
+      })
+      .catch((err) => setError(errorDe(err, 'VideoLab no pudo preparar la escucha exacta.')))
+      .finally(() => setCargando(false));
+  };
+  return (
+    <section className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 space-y-2">
+      <h4 className="flex flex-wrap items-baseline gap-2 text-[11px] font-semibold tracking-wider uppercase text-zinc-400">
+        Escuchar la mezcla <span className="ml-auto normal-case tracking-normal font-normal text-[10.5px] text-cyan-300">exacta, igual que el render</span>
+      </h4>
+      <div className="flex items-center gap-3">
+        <video ref={video} src={videoUrl} playsInline muted preload="metadata" className="w-20 rounded-md bg-black" aria-label="Video limpio de la pieza, en silencio" />
+        <button type="button" onClick={pedir} disabled={cargando}
+          className="px-4 min-h-11 rounded-lg border border-cyan-400/50 bg-zinc-900 text-[13px] text-zinc-100 hover:border-cyan-300 disabled:opacity-60 flex items-center gap-2">
+          {cargando ? <><Spinner size={12} /> VideoLab está mezclando…</> : sonando ? '■ Parar' : vigente ? '▶ Volver a escuchar' : '▶ Escuchar exacta'}
+        </button>
+      </div>
+      <p className="text-[11px] text-zinc-500">
+        {vigente
+          ? `Mezclada por VideoLab en ${vigente.elapsed != null ? `${(vigente.elapsed / 1000).toFixed(1).replace('.', ',')} s` : 'unos segundos'}${vigente.lufs != null ? ` · sonoridad final ${String(vigente.lufs).replace('.', ',')} LUFS` : ''}. Si cambias algo, se vuelve a pedir.`
+          : 'VideoLab mezcla la voz, el fondo y los efectos con el mismo código que el render. Tarda unos segundos y no cuesta.'}
+      </p>
+      {error && <p className="text-[11px] text-amber-300/90">{error}</p>}
     </section>
   );
 }

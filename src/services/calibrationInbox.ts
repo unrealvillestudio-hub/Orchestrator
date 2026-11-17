@@ -38,7 +38,7 @@ import type { TextPlace } from '../../api/_textPlace';
 import type { TextColumn } from '../../api/_textColumn';
 import type { TextColorOptions } from '../../api/_textStyle';
 import type { CueTime, EffectFn, LibrarySound, SoundLayer, SoundPresets, SoundPresetView } from '../../api/_pieceSound';
-import type { CastMember, PresetsByLayer, PresetView, TextLayers } from '../../api/_pieceText';
+import type { CastMember, PresetsByLayer, PresetView, TextFit, TextLayers } from '../../api/_pieceText';
 import type { ImageBlocks, SafeZone } from '../../api/_onScreenText';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
@@ -1001,6 +1001,16 @@ export function applyPieceSound(token: string, pieceId: string, sound: SoundLaye
 export interface SceneResult {
   ok: boolean; engine?: 'html' | 'ass' | null; fidelity?: 'same_engine' | 'approximate' | null; runtime_url?: string;
   scene?: any; warnings?: string[]; error?: string; detail?: string;
+  /** VideoLab v1.12.0: el medidor de cada bloque (si cabe) o el del bloque que no cabe (si falla). */
+  fits?: Array<{ layer: string; start_ms: number; fit: TextFit }>; fit?: TextFit | null;
+}
+
+/** La escucha exacta (VideoLab v1.12.0 §4 ter.10): sólo el audio de la mezcla, igual que el render. Sólo lee. */
+export function previewPieceSound(token: string, pieceId: string, sound: SoundLayer, textLayers?: TextLayers | null): Promise<{
+  ok: true; audio: { mime: string; base64: string; bytes: number | null };
+  sound: { master?: { lufs?: number; true_peak_db?: number } } & Record<string, any> | null; elapsed_ms: number | null;
+}> {
+  return req('/api/piece-text', token, { method: 'POST', body: { piece_id: pieceId, action: 'sound_preview', sound, ...(textLayers ? { text_layers: textLayers } : {}) } });
 }
 /** La escena resuelta de VideoLab para la vista grande y, por variante, la de cada miniatura de estilo. Sólo lee. */
 export function previewPieceText(token: string, pieceId: string, textLayers: TextLayers, variants: Array<{ layer: string; preset_key: string }> = []):

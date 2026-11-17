@@ -691,3 +691,28 @@ export function assetsAfterUndoVideo(assets: any, by: string, nowIso: string):
   a.video_history = [{ ...actual, replaced_at: nowIso }, ...resto].slice(0, VIDEO_HISTORY_MAX);
   return { ok: true, assets: a, from_version: actual.version ?? null, to_version: restaurado.version ?? null };
 }
+
+// ── MEDIDOR DE CARACTERES (2026-11-17, VideoLab v1.12.0 §4 ter.6) ─────────────────────────────
+
+/** Lo que VideoLab mide de un bloque: cuántos caracteres caben con ese estilo (corte entre palabras). */
+export interface TextFit {
+  layer: string; max_lines: number; max_width_px: number; min_px: number; chars: number; chars_fit: number; fits: boolean;
+  /** Sólo en el error: la capa que no entra (`hook`, `key_titles[i]`, `cta`). */
+  label?: string;
+}
+
+const esFit = (f: any): f is TextFit => !!f && typeof f === 'object' && typeof f.layer === 'string'
+  && Number.isFinite(Number(f.chars_fit)) && Number.isFinite(Number(f.chars));
+
+/** Los medidores de una escena: uno por bloque de `scene.layout` (gancho, títulos clave, CTA), en orden de entrada. PURO. */
+export function fitsOfScene(scene: any): Array<{ layer: string; start_ms: number; fit: TextFit }> {
+  const lay: any[] = Array.isArray(scene?.layout) ? scene.layout : [];
+  return lay.filter((b) => esFit(b?.fit))
+    .map((b) => ({ layer: String(b.layer ?? b.fit.layer), start_ms: Number(b.start_ms ?? 0), fit: b.fit as TextFit }))
+    .sort((a, b) => a.start_ms - b.start_ms);
+}
+
+/** El medidor que trae un error `VIDEOLAB_TEXT_DOES_NOT_FIT`, o null. PURO. */
+export function fitOfError(d: any): TextFit | null {
+  return esFit(d?.fit) ? (d.fit as TextFit) : null;
+}

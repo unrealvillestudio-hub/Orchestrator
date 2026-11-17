@@ -31,6 +31,10 @@
  * «Aplicar juntos» (Sam, 2026-11-17): 'apply' acepta `sound` además de `text_layers`, y 'apply_sound' acepta
  * `text_layers` además de `sound`: lo editado en una ventana sin aplicar viaja con lo de la otra en un solo render.
  *
+ * POST /api/piece-text { piece_id, action: 'sound_preview', sound, text_layers? }   (2026-11-17, VideoLab v1.12.0 §4 ter.10)
+ *   → la ESCUCHA EXACTA: VideoLab mezcla sólo el audio (voz del video limpio, fondo y efectos) con el mismo módulo que el
+ *     render. Sólo lee; sin job ni costo. 200: { ok, audio: { mime, base64, bytes }, sound, elapsed_ms }
+ *
  * GET /api/piece-text?piece_id=
  *   → sondea `lab_jobs` del pedido pendiente. Terminado: el video de ahora pasa a `assets.video_history[]` y la pieza
  *     queda con el nuevo (versión siguiente, `text_layers`, `hook_pattern_key`) y el artefacto rehecho. Fallido: se
@@ -56,7 +60,7 @@ import {
   assetsAfterFailedJob, assetsAfterTextJob, buildCopyLabBody, buildCopyLabSource, buildVideoLabBody, castOf,
   copyLabLanguageOf, errorLabelOf, goalOf, groupPresets, hasCleanVideo, labExecuteUrl, mediumOf, NO_CLEAN_VIDEO,
   RECENT_PIECES_N, recentPatternKeysOf, retiredPresetsOf, validateTextLayers, labBaseUrl, suggestedPresetsOf,
-  buildSceneBody, keywordCandidatesOf, layersForVariant, SCENE_VARIANTS_MAX, TEXT_LAYERS, undoInfoOf, assetsAfterUndoVideo,
+  buildSceneBody, keywordCandidatesOf, layersForVariant, SCENE_VARIANTS_MAX, TEXT_LAYERS, undoInfoOf, assetsAfterUndoVideo, fitsOfScene, fitOfError,
   type PresetsByLayer, type PresetView, type SuggestedPresets, type TextLayer,
 } from './_pieceText.js';
 import {
@@ -207,6 +211,51 @@ async function catalogoDeSonido(res: VercelResponse, piece: any, admin: boolean)
   });
 }
 
+/**
+ * La escucha exacta (VideoLab v1.12.0 §4 ter.10): el texto editado (o el vigente) con el sonido elegido, mezclado por
+ * VideoLab con el mismo módulo que el render. Sólo lee. Se valida igual que «Aplicar» para no pedir lo que fallaría.
+ */
+async function escuchaExacta(res: VercelResponse, piece: any, rawText: unknown, rawSound: unknown) {
+  const brandId = String(piece.brand_id ?? '');
+  const assets = piece.assets ?? {};
+  if (mediumOf(assets) !== 'video') return res.status(409).json({ error: 'not_a_video_piece', detail: 'la escucha es de piezas de video' });
+  if (!hasCleanVideo(assets)) return res.status(409).json({ error: 'no_clean_video', detail: NO_CLEAN_VIDEO });
+  if (!piece.platform) return res.status(409).json({ error: 'piece_without_platform', detail: 'la pieza no declara plataforma' });
+  const [colores, presets, ps, lib] = await Promise.all([coloresDeMarca(brandId), presetsDe(brandId), presetsDeSonido(brandId), libreriaDeSonidos(brandId)]);
+  if (!presets.presets) return res.status(503).json({ error: 'presets_unavailable', detail: presets.error });
+  const s = validateSound(rawSound, { presets: ps.presets, library: lib.library });
+  if (!s.ok) return res.status(400).json({ error: 'invalid sound', detail: s.errors.join(' · '), errors: s.errors });
+  if (!s.value) return res.status(400).json({ error: 'invalid sound', detail: 'no hay sonido que escuchar' });
+  const durS = Number(assets.video.duration_s);
+  const durationMs = Number.isFinite(durS) && durS > 0 ? Math.round(durS * 1000) : null;
+  const vigente = rawText ?? assets.video?.text_layers ?? SIN_TEXTO;
+  const { sound: _fuera, ...texto } = vigente as any;
+  const v = validateTextLayers(texto, {
+    presets: presets.presets, accentRoles: colores.accent.map((c) => c.role), stripRoles: colores.strip.map((c) => c.role),
+    durationMs, castIds: castOf(assets).map((c) => c.person_id),
+  });
+  if (!v.ok) return res.status(400).json({ error: 'invalid text_layers', detail: v.errors.join(' · '), errors: v.errors });
+  const rows = await leer('lab_configs?lab_key=eq.videolab&select=api_endpoint&limit=1');
+  const base = labBaseUrl(Array.isArray(rows) ? rows[0] : null);
+  if (!base) return res.status(503).json({ error: 'lab_not_configured', detail: 'lab_configs no declara api_endpoint para videolab' });
+  const pedido = buildSceneBody({ brandId, platform: piece.platform, timeline: assets.video.timeline, durationMs, textLayers: { ...v.value, sound: s.value } as any });
+  const cuerpo = { ...pedido, previousOutputs: { ...pedido.previousOutputs, base_video: { url: assets.video.clean_video.url } } };
+  try {
+    const r = await fetchWithTimeout('lab_sync', `${base}/api/sound-preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo),
+    });
+    const d: any = await r.json().catch(() => ({}));
+    if (!r.ok || d?.status !== 'ok' || typeof d?.audio?.base64 !== 'string') {
+      return res.status(r.status >= 400 && r.status < 500 ? 400 : 502).json({
+        error: String(d?.error_label ?? `HTTP ${r.status}`), detail: String(d?.error ?? d?.message ?? 'VideoLab no devolvió la mezcla'), fit: fitOfError(d),
+      });
+    }
+    return res.status(200).json({ ok: true, audio: { mime: String(d.audio.mime ?? 'audio/mp4'), base64: d.audio.base64, bytes: d.audio.bytes ?? null }, sound: d.sound ?? null, elapsed_ms: d.elapsed_ms ?? null });
+  } catch (err) {
+    return res.status(503).json({ error: 'videolab_unreachable', detail: String(err instanceof Error ? err.message : err) });
+  }
+}
+
 /** Deshacer lo aplicado: un paso atrás, sin render. Ancla en el video leído y en «sin pendiente». */
 async function deshacerVideo(res: VercelResponse, piece: any, by: string) {
   const assets = piece.assets ?? {};
@@ -238,19 +287,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const pieceId = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';
   if (!pieceId) return res.status(400).json({ error: 'piece_id required' });
   if (!(await guardPiece(res, session, pieceId))) return;
-  if (!['propose', 'apply', 'scenes', 'sound_catalog', 'apply_sound', 'undo_video'].includes(String(body.action))) {
-    return res.status(400).json({ error: 'invalid action', detail: "action debe ser 'propose', 'apply', 'scenes', 'sound_catalog', 'apply_sound' o 'undo_video'" });
+  if (!['propose', 'apply', 'scenes', 'sound_catalog', 'apply_sound', 'undo_video', 'sound_preview'].includes(String(body.action))) {
+    return res.status(400).json({ error: 'invalid action', detail: "action debe ser 'propose', 'apply', 'scenes', 'sound_catalog', 'apply_sound', 'undo_video' o 'sound_preview'" });
   }
 
   try {
     const piece = await fetchPiece(pieceId);
     if (!piece) return res.status(404).json({ error: 'piece_not_found', detail: `la pieza ${pieceId} no existe` });
-    if (piece.discarded_at && body.action !== 'scenes' && body.action !== 'sound_catalog') {
+    if (piece.discarded_at && !['scenes', 'sound_catalog', 'sound_preview'].includes(String(body.action))) {
       return res.status(409).json({ error: 'piece_already_sealed', detail: 'la pieza ya está sellada: su texto ya no se edita', discarded_at: piece.discarded_at });
     }
     if (body.action === 'scenes') return escenas(res, piece, body.text_layers, (body as any).variants);
     if (body.action === 'sound_catalog') return catalogoDeSonido(res, piece, esAdmin(session.role));
     if (body.action === 'undo_video') return deshacerVideo(res, piece, session.sub || 'admin');
+    if (body.action === 'sound_preview') return escuchaExacta(res, piece, body.text_layers, body.sound);
     if (body.action === 'apply_sound') {
       // El texto: el editado sin aplicar si viene (aplicar juntos); si no, el vigente. `sound: null` quita el sonido.
       const vigente = body.text_layers ?? (piece.assets as any)?.video?.text_layers ?? SIN_TEXTO;
@@ -389,12 +439,14 @@ async function escenas(res: VercelResponse, piece: any, raw: unknown, variantsRa
       body: JSON.stringify(buildSceneBody({ brandId, platform: piece.platform, timeline: assets.video.timeline, durationMs, textLayers })),
     });
     const d: any = await r.json().catch(() => ({}));
-    if (!r.ok || d?.status !== 'ok') return { ok: false as const, error: String(d?.error_label ?? `HTTP ${r.status}`), detail: String(d?.message ?? d?.error ?? '') };
+    // v1.12.0: un texto que no cabe trae su medidor (cuántos caracteres entran con ese estilo).
+    if (!r.ok || d?.status !== 'ok') return { ok: false as const, error: String(d?.error_label ?? `HTTP ${r.status}`), detail: String(d?.message ?? d?.error ?? ''), fit: fitOfError(d) };
     const rt = String(d.runtime_url ?? '');
     return {
       ok: true as const, engine: d.engine ?? null, fidelity: d.fidelity ?? null,
       runtime_url: /^https:\/\//.test(rt) ? rt : `${base}${rt.startsWith('/') ? rt : `/${rt}`}`,
       scene: d.scene ?? null, warnings: Array.isArray(d?.text_layout?.warnings) ? d.text_layout.warnings : [],
+      fits: fitsOfScene(d.scene),
     };
   };
 
