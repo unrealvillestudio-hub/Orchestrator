@@ -394,6 +394,32 @@ export function labExecuteUrl(row: { api_endpoint?: unknown; execute_path?: unkn
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
+// ── La rotación de estilos (2026-11-17) ───────────────────────────────────────────────────────────
+
+/** La raíz https de un lab, de `lab_configs.api_endpoint`. Sin ella, `null`: quien llama no inventa una URL. PURO. */
+export function labBaseUrl(row: { api_endpoint?: unknown } | null | undefined): string | null {
+  const base = str(row?.api_endpoint).replace(/\/+$/, '');
+  return /^https:\/\//.test(base) ? base : null;
+}
+
+export type SuggestedPresets = Partial<Record<TextLayer, string>>;
+
+/**
+ * La sugerencia de rotación de VideoLab (`GET /api/text-styles`, contrato §4 ter.7), reducida a lo que el selector
+ * ofrece: por capa, la `preset_key` sugerida sólo si está entre los estilos que se ofrecen a la marca (uno retirado o
+ * desconocido se ignora y la capa queda con el primero, como antes). Respuesta inválida → `null`. PURO.
+ */
+export function suggestedPresetsOf(resp: unknown, presets: PresetsByLayer | null): SuggestedPresets | null {
+  const r = resp as any;
+  if (!r || r.status !== 'ok' || !r.suggested || typeof r.suggested !== 'object' || !presets) return null;
+  const out: SuggestedPresets = {};
+  for (const layer of TEXT_LAYERS) {
+    const key = str(r.suggested?.[layer]?.preset_key);
+    if (key && (presets[layer] ?? []).some((p) => p.preset_key === key)) out[layer] = key;
+  }
+  return out;
+}
+
 // ── El job terminado ───────────────────────────────────────────────────────────────────────────
 
 /** El código de error de un job fallido: el del `output_parsed`, o el prefijo `ETIQUETA:` de `error_msg`. PURO. */

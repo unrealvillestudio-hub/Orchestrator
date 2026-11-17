@@ -39,7 +39,7 @@ import { requireReviewer, guardPiece, VISTAS_DE_PIEZA } from './_reviewScope.js'
 import {
   assetsAfterFailedJob, assetsAfterTextJob, buildCopyLabBody, buildCopyLabSource, buildVideoLabBody, castOf,
   copyLabLanguageOf, errorLabelOf, goalOf, groupPresets, hasCleanVideo, labExecuteUrl, mediumOf, NO_CLEAN_VIDEO,
-  RECENT_PIECES_N, recentPatternKeysOf, validateTextLayers, type PresetsByLayer,
+  RECENT_PIECES_N, recentPatternKeysOf, validateTextLayers, labBaseUrl, suggestedPresetsOf, type PresetsByLayer, type SuggestedPresets,
 } from './_pieceText.js';
 
 const headers = (profile: 'public' | 'content' | 'intel', extra: Record<string, string> = {}) =>
@@ -49,6 +49,24 @@ async function leer(path: string, profile: 'public' | 'content' | 'intel' = 'pub
   const r = await fetchWithTimeout('db', `${SB_URL()}/rest/v1/${path}`, { headers: headers(profile) });
   if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status} ${(await r.text().catch(() => '')).slice(0, 200)}`), { status: r.status });
   return r.json();
+}
+
+/**
+ * La sugerencia de rotación de estilos de VideoLab para una marca (contrato §4 ter.7). Sólo se pide cuando la pieza
+ * todavía no tiene `text_layers`: la sugerencia se congela en lo que se aplica y no se vuelve a pedir al editar ni al
+ * re-renderizar («mismo pedido → mismo video»). Si falla, `null` y su motivo: el editor usa el primer estilo, como antes.
+ */
+async function sugerenciaDeEstilos(brandId: string, presets: PresetsByLayer | null): Promise<{ suggested: SuggestedPresets | null; note: string | null }> {
+  try {
+    const rows = await leer('lab_configs?lab_key=eq.videolab&select=api_endpoint&limit=1');
+    const base = labBaseUrl(Array.isArray(rows) ? rows[0] : null);
+    if (!base) return { suggested: null, note: 'lab_configs no tiene la dirección de VideoLab: estilos por defecto sin rotación' };
+    const r = await fetchWithTimeout('db', `${base}/api/text-styles?brandId=${encodeURIComponent(brandId)}`, {});
+    if (!r.ok) return { suggested: null, note: `VideoLab no dio la rotación de estilos (${r.status}): estilos por defecto sin rotación` };
+    return { suggested: suggestedPresetsOf(await r.json().catch(() => null), presets), note: null };
+  } catch (err) {
+    return { suggested: null, note: `VideoLab no dio la rotación de estilos: ${String(err instanceof Error ? err.message : err)}` };
+  }
 }
 
 /** Dónde vive un lab, de `lab_configs`. Sin fila o sin endpoint, `null`: quien llama lo dice y no inventa una URL. */
@@ -169,6 +187,10 @@ async function proponer(res: VercelResponse, piece: any, goalRaw: unknown) {
   const [colores, presets] = medium === 'video'
     ? await Promise.all([coloresDeMarca(brandId), presetsDe(brandId)])
     : [{ accent: [], strip: [] }, { presets: null, error: null }];
+  // Rotación (2026-11-17): sólo en una generación nueva, sin `text_layers` todavía.
+  const rotacion = medium === 'video' && !assets?.video?.text_layers && presets.presets
+    ? await sugerenciaDeEstilos(brandId, presets.presets)
+    : { suggested: null, note: null };
   const conLimpio = medium === 'video' && hasCleanVideo(assets);
   const durS = Number(assets?.video?.duration_s);
 
@@ -184,6 +206,7 @@ async function proponer(res: VercelResponse, piece: any, goalRaw: unknown) {
     meta: data?.meta ?? null,
     recent_pattern_keys: recentPatternKeys,
     presets: presets.presets, presets_error: presets.error,
+    suggested_presets: rotacion.suggested, rotation_note: rotacion.note,
     accent_options: colores.accent, strip_options: colores.strip,
     cast: medium === 'video' ? castOf(assets) : [],
     current: { text_layers: assets?.video?.text_layers ?? null, hook: source.current_hook },

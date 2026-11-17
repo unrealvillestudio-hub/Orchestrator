@@ -910,6 +910,8 @@ export interface PieceTextProposal {
   meta: { patterns_used?: string[]; n8_filter?: string; model?: string } | null;
   recent_pattern_keys: string[];
   presets: PresetsByLayer | null; presets_error: string | null;
+  /** 2026-11-17 — la rotación de VideoLab: el estilo por defecto de cada capa en una generación nueva (se congela al aplicar). */
+  suggested_presets?: Partial<Record<keyof PresetsByLayer, string>> | null; rotation_note?: string | null;
   accent_options: EmphasisColorOption[]; strip_options: EmphasisColorOption[];
   cast: CastMember[];
   current: { text_layers: TextLayers | null; hook: string | null };
