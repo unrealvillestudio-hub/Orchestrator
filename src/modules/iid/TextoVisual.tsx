@@ -440,3 +440,46 @@ export function FranjaModo({ mode, hex }: { mode: string | null; hex: string | n
     </div>
   );
 }
+
+// ── El esquema de la escena (2026-11-17) ───────────────────────────────────────────────────────
+
+const CAPA_NOMBRE: Record<string, string> = {
+  hook: 'Gancho', key_title: 'Título clave', cta: 'CTA', role: 'Rol', caption_band: 'Subtítulos',
+};
+
+/**
+ * El esquema de posiciones con la geometría REAL de VideoLab: la zona segura y el rectángulo de cada bloque tal como
+ * los resolvió la escena (Sam, 2026-11-17: al lado de la vista grande, y que se redibuje al elegir un estilo). Morado =
+ * colocado a mano; punteado = automático. `foco` resalta la capa que se está editando.
+ */
+export function EsquemaDeEscena({ scene, width, foco }: { scene: any; width: number; foco?: string | null }) {
+  const W = Number(scene?.canvas?.width) || 1080;
+  const H = Number(scene?.canvas?.height) || 1920;
+  const k = width / W;
+  const safe = scene?.safe;
+  const blocks: any[] = Array.isArray(scene?.blocks) ? scene.blocks : [];
+  const pct = (v: number, total: number) => `${(v / total) * 100}%`;
+  return (
+    <div className="space-y-1">
+      <div className="relative rounded-md border border-zinc-700 bg-zinc-900 overflow-hidden" style={{ width, height: Math.round(H * k) }}
+        role="img" aria-label="Esquema de posiciones de la escena">
+        {safe && <div className="absolute border border-dashed border-emerald-500/60" title="Zona segura: el espacio disponible para el texto"
+          style={{ left: pct(safe.x, W), top: pct(safe.y, H), width: pct(safe.w, W), height: pct(safe.h, H) }} />}
+        {blocks.filter((b) => b?.rect).map((b, i) => {
+          const manual = b.placed === 'manual';
+          const enFoco = foco && b.layer === foco;
+          return (
+            <div key={i} title={`${CAPA_NOMBRE[b.layer] ?? b.layer} · ${manual ? 'a mano' : 'automático'} · ${Math.round(b.rect.w)}×${Math.round(b.rect.h)} px`}
+              className={cn('absolute rounded-sm border text-[8px] leading-tight px-0.5 overflow-hidden',
+                manual ? 'border-violet-400 bg-violet-500/25 text-violet-100' : 'border-dashed border-zinc-400/70 bg-zinc-500/10 text-zinc-300',
+                enFoco && 'ring-1 ring-cyan-300')}
+              style={{ left: pct(b.rect.x, W), top: pct(b.rect.y, H), width: pct(b.rect.w, W), height: pct(b.rect.h, H) }}>
+              {CAPA_NOMBRE[b.layer] ?? b.layer}
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[9.5px] text-zinc-500 leading-snug" style={{ width }}>Verde: zona segura. Morado: a mano. Punteado: automático. Medidas reales de VideoLab.</p>
+    </div>
+  );
+}
