@@ -12,7 +12,9 @@ import { effectiveFixImageMode, type FixRequestCode, type FixImageMode } from '.
 import { overlayEditorSeed, overlayViewAfterApply, shadowDefaultLabel, type ImageOverlayView, type EmphasisColorOption, type OverlayOverrideOut, type ShadowOption } from '../../../api/_overlayText';
 import { textStyleDraftOf, subMarkupOf, textStylePayload, withBlock, SUB_EDITOR_HELP, type TextStyleDraft, type TextColorOptions } from '../../../api/_textStyle';
 import { TextBlockControls } from './TextStyleControls';
-import { OnScreenTextEditor, HookProposals } from './OnScreenTextEditor';
+import { OnScreenTextEditor, HookProposals, type VideoTextDraft } from './OnScreenTextEditor';
+import type { TextLayers } from '../../../api/_pieceText';
+import type { SoundDraft, SoundLayer } from '../../../api/_pieceSound';
 import { ControlesDeSonido } from './ControlesDeSonido';
 import { VentanaLateral } from './VentanaLateral';
 import {
@@ -663,6 +665,11 @@ export function PieceActionsBar({
   const [pantallaVideo, setPantallaVideo] = useState(false);
   // 2026-11-17 — la ventana «Controles de sonido» (boceto aprobado por Sam). Una ventana a la vez: texto o sonido.
   const [sonidoVideo, setSonidoVideo] = useState(false);
+  // 2026-11-17 (Sam: «sí a aplicar juntos»). Lo editado sin aplicar en cada ventana vive aquí: sobrevive a cerrar la
+  // ventana y un solo «Aplicar» (en cualquiera de las dos) manda texto y sonido juntos.
+  const [borradorTexto, setBorradorTexto] = useState<{ draft: VideoTextDraft; layers: TextLayers } | null>(null);
+  const [borradorSonido, setBorradorSonido] = useState<{ draft: SoundDraft; layer: SoundLayer } | null>(null);
+  const vaciarBorradores = () => { setBorradorTexto(null); setBorradorSonido(null); };
   const elegirLamina = (n: number) => {
     setSlideN(n); setError(null); setPlaceSel(null); setColSel(null); setScaleSel(null);
     if (n > 1) {
@@ -1865,6 +1872,8 @@ export function PieceActionsBar({
         <button type="button" onClick={() => setSonidoVideo(false)} className="text-[11px] text-zinc-400 hover:text-zinc-200">Cerrar</button>
       </div>
       <ControlesDeSonido pieceId={piece.piece_id} token={token}
+        borrador={borradorSonido?.draft ?? null} onBorrador={setBorradorSonido}
+        textoPendiente={borradorTexto?.layers ?? null} onEnviado={vaciarBorradores}
         onApplied={(r) => onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: false, refreshed: r.html !== null, posts: 0 })} />
     </div>
     </VentanaLateral>
@@ -1878,6 +1887,8 @@ export function PieceActionsBar({
         <button type="button" onClick={() => setPantallaVideo(false)} className="text-[11px] text-zinc-400 hover:text-zinc-200">Cerrar</button>
       </div>
       <OnScreenTextEditor medium="video" pieceId={piece.piece_id} token={token}
+        borrador={borradorTexto?.draft ?? null} onBorrador={setBorradorTexto}
+        sonidoPendiente={borradorSonido?.layer ?? null} onEnviado={vaciarBorradores}
         onApplied={(r) => onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: false, refreshed: r.html !== null, posts: 0 })} />
     </div>
     </VentanaLateral>

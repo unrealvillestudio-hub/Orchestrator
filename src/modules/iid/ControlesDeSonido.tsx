@@ -13,12 +13,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { cn, Spinner } from '../../ui/components';
 import {
-  soundCatalog, applyPieceSound, pollPieceText, changePresetStatus, CalibrationError, type PieceSoundCatalog,
+  soundCatalog, applyPieceSound, pollPieceText, changePresetStatus, undoPieceVideo, CalibrationError, type PieceSoundCatalog,
 } from '../../services/calibrationInbox';
 import {
-  EFFECT_FNS, BED_FN, soundDraftOf, soundFromDraft, effectSoundNow, bedSoundNow,
-  type EffectFn, type LibrarySound, type SoundDraft, type SoundPresetView,
+  EFFECT_FNS, BED_FN, soundDraftOf, soundFromDraft, effectSoundNow, bedSoundNow, approxGains,
+  type EffectFn, type LibrarySound, type SoundDraft, type SoundLayer, type SoundPresetView, type SoundPresets,
 } from '../../../api/_pieceSound';
+import type { TextLayers } from '../../../api/_pieceText';
+import { BarraDeshacer } from './BarraDeshacer';
 
 const POLL_MS = 4000;
 const errorDe = (err: unknown, caida: string) => (err instanceof CalibrationError ? err.message : caida);
@@ -165,9 +167,15 @@ function Seccion({ titulo, pista, children }: { titulo: string; pista?: string |
 
 // ── La ventana ─────────────────────────────────────────────────────────────────────────────────
 
-export function ControlesDeSonido({ pieceId, token, onApplied }: {
+export function ControlesDeSonido({ pieceId, token, onApplied, borrador, onBorrador, textoPendiente, onEnviado }: {
   pieceId: string; token: string;
   onApplied?: (r: { html: string | null; artifact_url: string | null }) => void;
+  /** 2026-11-17 (Sam: «sí a aplicar juntos»): lo editado sin aplicar vive en la tarjeta y viaja con el otro «Aplicar». */
+  borrador?: SoundDraft | null;
+  onBorrador?: (b: { draft: SoundDraft; layer: SoundLayer } | null) => void;
+  /** El texto editado sin aplicar en «Texto en pantalla»: viaja con este «Aplicar». */
+  textoPendiente?: TextLayers | null;
+  onEnviado?: () => void;
 }) {
   const [cat, setCat] = useState<PieceSoundCatalog | null>(null);
   const [draft, setDraft] = useState<SoundDraft | null>(null);
@@ -179,11 +187,28 @@ export function ControlesDeSonido({ pieceId, token, onApplied }: {
   const [ocupado, setOcupado] = useState(false);
   const esc = useEscucha();
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Lo guardado en la pieza, como borrador: contra esto se sabe si hay cambios sin aplicar. */
+  const base = useRef<SoundDraft | null>(null);
+  const [confirmarDeshacer, setConfirmarDeshacer] = useState(false);
+  const [deshaciendo, setDeshaciendo] = useState(false);
 
-  const cargar = () => soundCatalog(token, pieceId)
-    .then((c) => { setCat(c); setDraft((d) => d ?? soundDraftOf(c.current, c.presets, c.suggested_bed)); if (c.pending?.job_id) setJob(c.pending.job_id); })
+  /** `reset`: después de deshacer, el borrador vuelve a lo que quedó guardado. */
+  const cargar = (reset = false) => soundCatalog(token, pieceId)
+    .then((c) => {
+      const guardado = soundDraftOf(c.current, c.presets, c.suggested_bed);
+      base.current = guardado;
+      setCat(c);
+      setDraft((d) => (reset ? guardado : d ?? borrador ?? guardado));
+      if (c.pending?.job_id) setJob(c.pending.job_id);
+    })
     .catch((err) => setError(errorDe(err, 'No se pudo leer el catálogo de sonido.')));
   useEffect(() => { void cargar(); }, [pieceId, token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sinAplicar = !!(draft && base.current && JSON.stringify(draft) !== JSON.stringify(base.current));
+  useEffect(() => {
+    if (!cat || !draft || !base.current) return;
+    onBorrador?.(sinAplicar ? { draft, layer: soundFromDraft(draft, cat.presets) } : null);
+  }, [draft]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!job) return;
@@ -240,10 +265,24 @@ export function ControlesDeSonido({ pieceId, token, onApplied }: {
   const aplicar = () => {
     if (ocupado) return;
     setError(null); setAviso(null); setOcupado(true);
-    applyPieceSound(token, pieceId, soundFromDraft(draft, presets))
-      .then((r) => setJob(r.job_id))
+    applyPieceSound(token, pieceId, soundFromDraft(draft, presets), textoPendiente ?? null)
+      .then((r) => { setJob(r.job_id); base.current = draft; onBorrador?.(null); onEnviado?.(); })
       .catch((err) => setError(errorDe(err, 'No se pudo mandar el sonido a VideoLab.')))
       .finally(() => setOcupado(false));
+  };
+
+  const descartar = () => { if (base.current) setDraft(base.current); setAviso(null); setError(null); };
+  /** Deshacer lo aplicado: un paso atrás, sin render (Sam: «deshacer (a)»). */
+  const deshacer = () => {
+    setDeshaciendo(true); setError(null); setAviso(null); setConfirmarDeshacer(false);
+    undoPieceVideo(token, pieceId)
+      .then(async (r) => {
+        await cargar(true); onBorrador?.(null);
+        setAviso(`Listo: volvió la versión ${r.to_version ?? 'anterior'} (con su texto y su sonido). Deshacer otra vez devuelve la ${r.from_version ?? 'que estaba'}.`);
+        onApplied?.({ html: r.html ?? null, artifact_url: r.artifact_url ?? null });
+      })
+      .catch((err) => setError(errorDe(err, 'No se pudo deshacer.')))
+      .finally(() => setDeshaciendo(false));
   };
 
   const fondos = (lib ?? []).filter((s) => s.fn === BED_FN);
@@ -365,15 +404,92 @@ export function ControlesDeSonido({ pieceId, token, onApplied }: {
         </div>
       )}
 
+      {cat.clean_video_url && <EscuchaAproximada videoUrl={cat.clean_video_url} cues={cat.cue_times ?? []} draft={draft} presets={presets} lib={lib} />}
       {error && <p className="text-[11px] text-rose-300">{error}</p>}
       {aviso && <p className="text-[11px] text-emerald-300">{aviso}</p>}
+      {textoPendiente && !enCurso && (
+        <p className="text-[11px] rounded-lg px-3 py-1.5 border border-cyan-400/30 bg-cyan-400/[0.06] text-cyan-100">
+          Hay cambios de texto sin aplicar: «Aplicar» los manda junto con este sonido, en un solo render.
+        </p>
+      )}
       <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
-        <span className="mr-auto text-[11px] text-zinc-500">{enCurso ? 'VideoLab está mezclando el sonido…' : 'Al aplicar, el video se vuelve a mezclar con esta elección. El texto no cambia.'}</span>
+        <span className="mr-auto text-[11px] text-zinc-500">{enCurso ? 'VideoLab está mezclando el sonido…' : textoPendiente ? 'Al aplicar, el video se rehace con el texto y el sonido nuevos.' : 'Al aplicar, el video se vuelve a mezclar con esta elección. El texto no cambia.'}</span>
         <button type="button" onClick={aplicar} disabled={enCurso || ocupado || !cat.has_clean_video}
           className="px-4 min-h-11 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-[13px] font-semibold disabled:opacity-40 flex items-center gap-2">
           {enCurso && <Spinner size={12} />} Aplicar
         </button>
       </div>
+      <BarraDeshacer sinAplicar={sinAplicar} onDescartar={descartar} undo={cat.undo} confirmando={confirmarDeshacer}
+        onPedir={() => setConfirmarDeshacer(true)} onCancelar={() => setConfirmarDeshacer(false)} onDeshacer={deshacer}
+        ocupado={deshaciendo} bloqueado={enCurso || ocupado} />
     </div>
+  );
+}
+
+// ── Escucha aproximada (2026-11-17, Sam: «las dos escuchas») ────────────────────────────────────
+
+/**
+ * El video limpio con su voz, el fondo debajo y cada efecto en su momento, mezclado en el navegador. APROXIMADA: el
+ * volumen y el instante exactos los fija el render (o la escucha exacta de VideoLab, cuando exista). Sirve para elegir.
+ */
+function EscuchaAproximada({ videoUrl, cues, draft, presets, lib }: {
+  videoUrl: string; cues: Array<{ fn: EffectFn; at_ms: number }>; draft: SoundDraft; presets: SoundPresets; lib: LibrarySound[] | null;
+}) {
+  const video = useRef<HTMLVideoElement | null>(null);
+  const cama = useRef<HTMLAudioElement | null>(null);
+  const ultimo = useRef(0);
+  const raf = useRef(0);
+  const [sonando, setSonando] = useState(false);
+  const urlDe = (k: string | null) => (k ? lib?.find((s) => s.sound_key === k)?.url ?? null : null);
+  const bedKey = draft.bed.on ? bedSoundNow(draft, presets) : null;
+  const bedPreset = presets.bed.find((p) => p.preset_key === draft.bed.preset_key);
+  const g = approxGains({
+    underVoiceLu: bedPreset?.under_voice_lu ?? null, levelLu: draft.bed.level_lu,
+    bedLufs: lib?.find((s) => s.sound_key === bedKey)?.loudness_lufs ?? null, gainDb: draft.effects.gain_db,
+  });
+  const parar = () => { video.current?.pause(); cama.current?.pause(); cancelAnimationFrame(raf.current); setSonando(false); };
+  useEffect(() => parar, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (cama.current) cama.current.volume = g.bed; }, [g.bed]);
+  const tocar = () => {
+    const v = video.current; if (!v) return;
+    if (sonando) { parar(); return; }
+    const bUrl = urlDe(bedKey);
+    cama.current?.pause();
+    cama.current = bUrl ? Object.assign(new Audio(bUrl), { loop: true, volume: g.bed }) : null;
+    // −1 ms: un efecto que cae justo donde empieza la escucha (el gancho, en el 0) también suena.
+    ultimo.current = v.currentTime * 1000 - 1;
+    void v.play(); void cama.current?.play().catch(() => undefined);
+    setSonando(true);
+    const paso = () => {
+      const t = v.currentTime * 1000;
+      if (draft.effects.on) {
+        for (const c of cues) {
+          if (c.at_ms > ultimo.current && c.at_ms <= t) {
+            const u = urlDe(effectSoundNow(draft, presets, c.fn));
+            if (u) { const a = new Audio(u); a.volume = g.fx; void a.play().catch(() => undefined); }
+          }
+        }
+      }
+      ultimo.current = t;
+      if (v.ended || v.paused) { parar(); return; }
+      raf.current = requestAnimationFrame(paso);
+    };
+    raf.current = requestAnimationFrame(paso);
+  };
+  return (
+    <section className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 space-y-2">
+      <h4 className="flex flex-wrap items-baseline gap-2 text-[11px] font-semibold tracking-wider uppercase text-zinc-400">
+        Escuchar la mezcla <span className="ml-auto normal-case tracking-normal font-normal text-[10.5px] text-amber-300/90">aproximada</span>
+      </h4>
+      <div className="flex items-center gap-3">
+        <video ref={video} src={videoUrl} playsInline preload="metadata" className="w-20 rounded-md bg-black" aria-label="Video limpio de la pieza"
+          onSeeked={(e) => { ultimo.current = e.currentTarget.currentTime * 1000; }} />
+        <button type="button" onClick={tocar}
+          className="px-4 min-h-11 rounded-lg border border-zinc-700 bg-zinc-900 text-[13px] text-zinc-100 hover:border-zinc-500">
+          {sonando ? '■ Parar' : '▶ Escuchar con la voz'}
+        </button>
+      </div>
+      <p className="text-[11px] text-zinc-500">La voz del video, el fondo debajo y cada efecto en su momento, mezclados en el navegador. El volumen y el instante exactos salen del render.</p>
+    </section>
   );
 }

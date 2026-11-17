@@ -656,3 +656,38 @@ export function assetsAfterFailedJob(assets: any, failure: { error_label: string
   a.video = v;
   return a;
 }
+
+// ── DESHACER LO APLICADO (2026-11-17, Sam: «deshacer (a)») ─────────────────────────────────────
+
+/** Lo que la ventana necesita saber para ofrecer «Deshacer»: si hay versión anterior y cuál vuelve. PURO. */
+export function undoInfoOf(assets: any): { available: boolean; to_version: string | null; reason: string | null } {
+  const prev = Array.isArray(assets?.video_history) ? assets.video_history[0] : null;
+  if (assets?.video?.pending_text_job?.job_id) return { available: false, to_version: null, reason: 'hay un cambio en curso: espera a que termine' };
+  if (!prev?.url) return { available: false, to_version: null, reason: 'no hay versión anterior de este video' };
+  return { available: true, to_version: typeof prev.version === 'string' ? prev.version : null, reason: null };
+}
+
+/**
+ * Deshacer = UN PASO ATRÁS: el video vigente cambia de lugar con el más reciente del historial, con su texto y su
+ * sonido tal como estaban. Sin render y sin costo. Deshacer otra vez devuelve el que estaba (es un intercambio). El
+ * video limpio y la línea de tiempo son los de ahora: son la base de la próxima edición. PURO.
+ */
+export function assetsAfterUndoVideo(assets: any, by: string, nowIso: string):
+  { ok: true; assets: any; from_version: string | null; to_version: string | null } | { ok: false; reason: string } {
+  const info = undoInfoOf(assets);
+  if (!info.available) return { ok: false, reason: info.reason ?? 'no se puede deshacer' };
+  const a = { ...(assets ?? {}) };
+  const actual = { ...(a.video ?? {}) };
+  delete actual.pending_text_job;
+  const [prev, ...resto] = a.video_history as any[];
+  const { replaced_at: _r, ...restaurado } = prev ?? {};
+  a.video = {
+    ...restaurado,
+    clean_video: actual.clean_video ?? restaurado.clean_video ?? null,
+    timeline: actual.timeline ?? restaurado.timeline ?? null,
+    restored: { by, at: nowIso, from_version: actual.version ?? null },
+    updated_at: nowIso,
+  };
+  a.video_history = [{ ...actual, replaced_at: nowIso }, ...resto].slice(0, VIDEO_HISTORY_MAX);
+  return { ok: true, assets: a, from_version: actual.version ?? null, to_version: restaurado.version ?? null };
+}
