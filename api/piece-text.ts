@@ -15,6 +15,15 @@
  *     `assets.video.pending_text_job = { job_id, requested_at, text_layers }`.
  *   202: { ok, job_id, status: 'running' }
  *
+ * POST /api/piece-text { piece_id, action: 'sound_catalog' }   (2026-11-17, ventana «Controles de sonido»)
+ *   → presets de sonido por familia (`videolab_sound_presets`), librería de VoiceLab (`GET /api/sound-library`), la
+ *     sugerencia de fondo de la rotación (`/api/text-styles`, capa `sound_bed`) sólo si la pieza aún no tiene sonido,
+ *     lo guardado y cuántas veces suena cada momento. Sólo lee.
+ *
+ * POST /api/piece-text { piece_id, action: 'apply_sound', sound }
+ *   → el MISMO render que 'apply', con el texto vigente de la pieza y `text_layers.sound` nuevo (contrato VideoLab
+ *     v1.10.0). Aplicar texto conserva el sonido guardado, y aplicar sonido conserva el texto.
+ *
  * GET /api/piece-text?piece_id=
  *   → sondea `lab_jobs` del pedido pendiente. Terminado: el video de ahora pasa a `assets.video_history[]` y la pieza
  *     queda con el nuevo (versión siguiente, `text_layers`, `hook_pattern_key`) y el artefacto rehecho. Fallido: se
@@ -43,6 +52,10 @@ import {
   buildSceneBody, keywordCandidatesOf, layersForVariant, SCENE_VARIANTS_MAX, TEXT_LAYERS,
   type PresetsByLayer, type PresetView, type SuggestedPresets, type TextLayer,
 } from './_pieceText.js';
+import {
+  BED_LEVEL, cueCountsOf, FX_GAIN, groupSoundPresets, libraryOf, validateSound,
+  type LibrarySound, type SoundPresets, type SoundPresetView,
+} from './_pieceSound.js';
 
 const headers = (profile: 'public' | 'content' | 'intel', extra: Record<string, string> = {}) =>
   ({ apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': profile, ...extra });
@@ -115,30 +128,102 @@ async function presetsDe(brandId: string): Promise<{ presets: PresetsByLayer | n
   }
 }
 
+// ── SONIDO (2026-11-17) ────────────────────────────────────────────────────────────────────────
+
+/** Los presets de sonido de la marca y del sistema, por familia. Sin la columna `kind` (base anterior a v1.10.0), se dice. */
+async function presetsDeSonido(brandId: string): Promise<{ presets: SoundPresets; retired: SoundPresetView[]; error: string | null }> {
+  try {
+    const rows = await leer(`videolab_sound_presets?or=(brand_id.is.null,brand_id.eq.${encodeURIComponent(brandId)})`
+      + '&active=eq.true&select=preset_key,kind,name,description,brand_id,active,sort,status,spec&order=sort.asc');
+    const g = groupSoundPresets(rows, brandId);
+    const vacio = !g.bed.length && !g.effects.length;
+    return { presets: { bed: g.bed, effects: g.effects }, retired: g.retired, error: vacio ? 'VideoLab todavía no tiene presets de fondo ni de efectos (contrato v1.10.0)' : null };
+  } catch (err) {
+    return { presets: { bed: [], effects: [] }, retired: [], error: `No se pudieron leer los presets de sonido (videolab_sound_presets): ${String(err instanceof Error ? err.message : err)}` };
+  }
+}
+
+/** La librería de sonidos que ve la marca, de VoiceLab (dueño de la librería). `null` + motivo si no responde. */
+async function libreriaDeSonidos(brandId: string): Promise<{ library: LibrarySound[] | null; error: string | null }> {
+  try {
+    const rows = await leer('lab_configs?lab_key=eq.voicelab&select=api_endpoint&limit=1');
+    const base = labBaseUrl(Array.isArray(rows) ? rows[0] : null);
+    if (!base) return { library: null, error: 'lab_configs no tiene la dirección de VoiceLab' };
+    const r = await fetchWithTimeout('db', `${base}/api/sound-library?brandId=${encodeURIComponent(brandId)}`, {});
+    if (!r.ok) return { library: null, error: `VoiceLab no dio la librería de sonidos (${r.status})` };
+    return { library: libraryOf(await r.json().catch(() => null)), error: null };
+  } catch (err) {
+    return { library: null, error: `VoiceLab no dio la librería de sonidos: ${String(err instanceof Error ? err.message : err)}` };
+  }
+}
+
+/** La sugerencia de fondo de la rotación de VideoLab (capa `sound_bed`). Sólo para una pieza que aún no tiene sonido. */
+async function sugerenciaDeFondo(brandId: string, presets: SoundPresets): Promise<string | null> {
+  try {
+    const rows = await leer('lab_configs?lab_key=eq.videolab&select=api_endpoint&limit=1');
+    const base = labBaseUrl(Array.isArray(rows) ? rows[0] : null);
+    if (!base) return null;
+    const r = await fetchWithTimeout('db', `${base}/api/text-styles?brandId=${encodeURIComponent(brandId)}`, {});
+    if (!r.ok) return null;
+    const k = (await r.json().catch(() => null))?.suggested?.sound_bed?.preset_key;
+    return typeof k === 'string' && presets.bed.some((p) => p.preset_key === k) ? k : null;
+  } catch { return null; }
+}
+
+async function catalogoDeSonido(res: VercelResponse, piece: any, admin: boolean) {
+  const brandId = String(piece.brand_id ?? '');
+  const assets = piece.assets ?? {};
+  const medium = mediumOf(assets);
+  if (medium !== 'video') return res.status(409).json({ error: 'not_a_video_piece', detail: 'el sonido se elige en piezas de video' });
+  const actual = assets?.video?.text_layers?.sound ?? null;
+  const [p, lib] = await Promise.all([presetsDeSonido(brandId), libreriaDeSonidos(brandId)]);
+  const suggested_bed = actual ? null : await sugerenciaDeFondo(brandId, p.presets);
+  const impacto = [...new Set(p.presets.effects.flatMap((x) => x.text_presets_with_impact ?? []))];
+  return res.status(200).json({
+    ok: true, brand_id: brandId, medium, has_clean_video: hasCleanVideo(assets), clean_video_note: hasCleanVideo(assets) ? null : NO_CLEAN_VIDEO,
+    presets: p.presets, retired_presets: admin ? p.retired : [], presets_error: p.error,
+    library: lib.library, library_error: lib.error,
+    suggested_bed, current: actual, has_text_layers: !!assets?.video?.text_layers,
+    cue_counts: cueCountsOf(assets?.video?.text_layers ?? null, assets?.video?.timeline ?? null, impacto),
+    ranges: { bed_level: BED_LEVEL, fx_gain: FX_GAIN },
+    pending: assets?.video?.pending_text_job ?? null, can_change_preset_status: admin,
+  });
+}
+
+/** El texto vigente de la pieza, o las capas vacías si todavía no tiene texto: el sonido se puede pedir igual. */
+const SIN_TEXTO = { hook: null, roles: [], captions: null, key_titles: [], cta: null, identity: { strip: false, identity_role: null } };
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res, 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method === 'GET') return recoger(req, res);
   if (req.method !== 'POST') return res.status(405).json({ error: 'GET or POST only' });
 
-  let body: { piece_id?: string; action?: string; text_layers?: unknown; goal?: unknown; session_token?: string } = {};
+  let body: { piece_id?: string; action?: string; text_layers?: unknown; sound?: unknown; goal?: unknown; session_token?: string } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* vacío */ }
   const session = await requireReviewer(req, res, extractToken(req, body), VISTAS_DE_PIEZA);
   if (!session) return;
   const pieceId = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';
   if (!pieceId) return res.status(400).json({ error: 'piece_id required' });
   if (!(await guardPiece(res, session, pieceId))) return;
-  if (body.action !== 'propose' && body.action !== 'apply' && body.action !== 'scenes') {
-    return res.status(400).json({ error: 'invalid action', detail: "action debe ser 'propose', 'apply' o 'scenes'" });
+  if (!['propose', 'apply', 'scenes', 'sound_catalog', 'apply_sound'].includes(String(body.action))) {
+    return res.status(400).json({ error: 'invalid action', detail: "action debe ser 'propose', 'apply', 'scenes', 'sound_catalog' o 'apply_sound'" });
   }
 
   try {
     const piece = await fetchPiece(pieceId);
     if (!piece) return res.status(404).json({ error: 'piece_not_found', detail: `la pieza ${pieceId} no existe` });
-    if (piece.discarded_at && body.action !== 'scenes') {
+    if (piece.discarded_at && body.action !== 'scenes' && body.action !== 'sound_catalog') {
       return res.status(409).json({ error: 'piece_already_sealed', detail: 'la pieza ya está sellada: su texto ya no se edita', discarded_at: piece.discarded_at });
     }
     if (body.action === 'scenes') return escenas(res, piece, body.text_layers, (body as any).variants);
+    if (body.action === 'sound_catalog') return catalogoDeSonido(res, piece, esAdmin(session.role));
+    if (body.action === 'apply_sound') {
+      // El texto es el vigente; sólo cambia el sonido. `sound: null` quita el sonido.
+      const vigente = piece.assets?.video?.text_layers ?? SIN_TEXTO;
+      const { sound: _fuera, ...texto } = vigente as any;
+      return aplicar(res, piece, texto, { sound: body.sound ?? null });
+    }
     return body.action === 'propose' ? proponer(res, piece, body.goal, esAdmin(session.role)) : aplicar(res, piece, body.text_layers);
   } catch (err) {
     console.error(`[piece-text] ${body.action} ${pieceId}: ${String(err)}`);
@@ -292,7 +377,11 @@ async function escenas(res: VercelResponse, piece: any, raw: unknown, variantsRa
   }
 }
 
-async function aplicar(res: VercelResponse, piece: any, raw: unknown) {
+/**
+ * `sonido` ausente = aplicar TEXTO: el sonido guardado se conserva tal cual (ya se validó al guardarlo). Presente =
+ * aplicar SONIDO: se valida contra el catálogo de hoy y reemplaza al guardado.
+ */
+async function aplicar(res: VercelResponse, piece: any, raw: unknown, sonido?: { sound: unknown }) {
   const brandId = String(piece.brand_id ?? '');
   const assets = piece.assets ?? {};
   if (mediumOf(assets) !== 'video') {
@@ -316,6 +405,15 @@ async function aplicar(res: VercelResponse, piece: any, raw: unknown) {
   });
   if (!v.ok) return res.status(400).json({ error: 'invalid text_layers', detail: v.errors.join(' · '), errors: v.errors });
 
+  let sound: unknown = assets.video?.text_layers?.sound ?? null;
+  if (sonido) {
+    const [p, lib] = await Promise.all([presetsDeSonido(brandId), libreriaDeSonidos(brandId)]);
+    const s = validateSound(sonido.sound, { presets: p.presets, library: lib.library });
+    if (!s.ok) return res.status(400).json({ error: 'invalid sound', detail: s.errors.join(' · '), errors: s.errors });
+    sound = s.value;
+  }
+  const capas = sound ? { ...v.value, sound } : v.value;
+
   const videolab = await labUrl('videolab');
   if (!videolab) return res.status(503).json({ error: 'lab_not_configured', detail: 'lab_configs no declara api_endpoint para videolab' });
   const pedido = buildVideoLabBody({
@@ -323,7 +421,7 @@ async function aplicar(res: VercelResponse, piece: any, raw: unknown) {
     // El padre es el job de VideoLab que produjo el video (un lab_jobs.id). El job del Orchestrator vive en otra tabla y
     // violaba la FK de lab_jobs.parent_job_id (2026-11-16).
     parentJobId: assets.video.lab_job_id ?? null,
-    cleanVideoUrl: assets.video.clean_video.url, timeline: assets.video.timeline, textLayers: v.value,
+    cleanVideoUrl: assets.video.clean_video.url, timeline: assets.video.timeline, textLayers: capas as any,
   });
   const r = await fetchWithTimeout('edge', videolab, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pedido),
@@ -336,7 +434,7 @@ async function aplicar(res: VercelResponse, piece: any, raw: unknown) {
     });
   }
 
-  const nuevos = { ...assets, video: { ...assets.video, pending_text_job: { job_id: jobId, requested_at: new Date().toISOString(), text_layers: v.value } } };
+  const nuevos = { ...assets, video: { ...assets.video, pending_text_job: { job_id: jobId, requested_at: new Date().toISOString(), text_layers: capas } } };
   const guardado = await guardarAssets(piece.id, nuevos, assets.video.url);
   if (!guardado) {
     return res.status(409).json({ error: 'video_changed', detail: 'el video de la pieza cambió mientras se pedía el texto: el render sigue, pero no quedó enlazado a la pieza', job_id: jobId });

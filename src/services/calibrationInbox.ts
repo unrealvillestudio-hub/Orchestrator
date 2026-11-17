@@ -37,6 +37,7 @@ import type { CarouselTextView, SlideTextOut } from '../../api/_carouselText';
 import type { TextPlace } from '../../api/_textPlace';
 import type { TextColumn } from '../../api/_textColumn';
 import type { TextColorOptions } from '../../api/_textStyle';
+import type { EffectFn, LibrarySound, SoundLayer, SoundPresets, SoundPresetView } from '../../api/_pieceSound';
 import type { CastMember, PresetsByLayer, PresetView, TextLayers } from '../../api/_pieceText';
 import type { ImageBlocks, SafeZone } from '../../api/_onScreenText';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
@@ -932,9 +933,29 @@ export function proposePieceText(token: string, pieceId: string, goal?: string):
 }
 
 /** Valida, retira o reactiva un estilo de texto (sólo admin; vale para todas las marcas). */
-export function changePresetStatus(token: string, presetKey: string, brandId: string, action: 'validate' | 'retire' | 'reactivate'):
+export function changePresetStatus(token: string, presetKey: string, brandId: string, action: 'validate' | 'retire' | 'reactivate',
+  catalog: 'text' | 'sound' = 'text'):
   Promise<{ ok: true; preset_key: string; status: string; status_changed_at: string; status_changed_by: string }> {
-  return req('/api/text-preset-status', token, { method: 'POST', body: { preset_key: presetKey, brand_id: brandId, action } });
+  return req('/api/text-preset-status', token, { method: 'POST', body: { preset_key: presetKey, brand_id: brandId, action, ...(catalog === 'text' ? {} : { catalog }) } });
+}
+
+// ── 2026-11-17 · CONTROLES DE SONIDO (contrato VideoLab v1.10.0, `api/piece-text.ts` acciones de sonido) ──────
+export interface PieceSoundCatalog {
+  ok: true; brand_id: string; medium: 'video'; has_clean_video: boolean; clean_video_note: string | null;
+  presets: SoundPresets; retired_presets: SoundPresetView[]; presets_error: string | null;
+  library: LibrarySound[] | null; library_error: string | null;
+  suggested_bed: string | null; current: SoundLayer | null; has_text_layers: boolean;
+  cue_counts: Record<EffectFn, number | null>;
+  ranges: { bed_level: { min: number; max: number; step: number; unit: string }; fx_gain: { min: number; max: number; step: number; unit: string } };
+  pending: { job_id: string; requested_at: string } | null; can_change_preset_status: boolean;
+}
+/** Presets de fondo y de efectos, librería, sugerencia de la rotación, lo guardado y los momentos de la pieza. Sólo lee. */
+export function soundCatalog(token: string, pieceId: string): Promise<PieceSoundCatalog> {
+  return req('/api/piece-text', token, { method: 'POST', body: { piece_id: pieceId, action: 'sound_catalog' } });
+}
+/** Vuelve a mezclar el video con el sonido elegido; el texto de la pieza no cambia. Se sondea con `pollPieceText`. */
+export function applyPieceSound(token: string, pieceId: string, sound: SoundLayer | null): Promise<{ ok: true; job_id: string; status: 'running' }> {
+  return req('/api/piece-text', token, { method: 'POST', body: { piece_id: pieceId, action: 'apply_sound', sound } });
 }
 
 export interface SceneResult {

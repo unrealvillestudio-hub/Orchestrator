@@ -8,6 +8,10 @@
  * selector le muestra a la marca, que hoy es siempre la de sistema); se incluye «Retirar»; se registra quién y cuándo
  * en `status_changed_by` / `status_changed_at` (unrlvl-iid-functions, migración 20261117183000).
  *
+ * `catalog` (2026-11-17, ventana «Controles de sonido»): `'text'` (por defecto) = `videolab_text_presets`;
+ * `'sound'` = `videolab_sound_presets`, con las mismas columnas de estado (contrato VideoLab v1.10.0). Un catálogo
+ * desconocido es 400: un mapa explícito, sin adivinar.
+ *
  * La escritura lleva ancla en el estado leído (`status=eq.<leído>`): si otra mano lo cambió entretanto, no se pisa y
  * responde 409. Ni una marca, ni un estilo con nombre propio en este archivo: todo sale de la fila.
  */
@@ -17,6 +21,9 @@ import { fetchWithTimeout } from './_fetchWithTimeout.js';
 import { requireReviewer, esAdmin } from './_reviewScope.js';
 import { nextPresetStatus, presetRowToChange, PRESET_STATUS_ACTIONS } from './_pieceText.js';
 
+/** El catálogo de estilos y la tabla que lo guarda. Ejes del sistema, no marcas. */
+export const PRESET_CATALOG_TABLES: Record<string, string> = { text: 'videolab_text_presets', sound: 'videolab_sound_presets' };
+
 const H = (extra: Record<string, string> = {}) => ({ apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': 'public', ...extra });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -24,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
-  let body: { preset_key?: unknown; brand_id?: unknown; action?: unknown; session_token?: string } = {};
+  let body: { preset_key?: unknown; brand_id?: unknown; action?: unknown; catalog?: unknown; session_token?: string } = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body ?? {}); } catch { /* vacío */ }
   const session = await requireReviewer(req, res, extractToken(req, body));
   if (!session) return;
@@ -39,8 +46,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'bad_request', detail: `action debe ser ${PRESET_STATUS_ACTIONS.join(', ')}` });
   }
 
+  const catalog = body.catalog == null ? 'text' : String(body.catalog);
+  const tabla = PRESET_CATALOG_TABLES[catalog];
+  if (!tabla) return res.status(400).json({ error: 'bad_request', detail: `catalog debe ser ${Object.keys(PRESET_CATALOG_TABLES).join(' o ')}` });
+
   try {
-    const q = `videolab_text_presets?preset_key=eq.${encodeURIComponent(presetKey)}`
+    const q = `${tabla}?preset_key=eq.${encodeURIComponent(presetKey)}`
       + `&or=(brand_id.is.null,brand_id.eq.${encodeURIComponent(brandId)})&select=id,preset_key,brand_id,active,status`;
     const r = await fetchWithTimeout('db', `${SB_URL()}/rest/v1/${q}`, { headers: H() });
     if (!r.ok) throw new Error(`lectura HTTP ${r.status}`);
@@ -53,7 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const ahora = new Date().toISOString();
     const quien = session.sub || 'admin';
     const ancla = fila.status == null ? 'status=is.null' : `status=eq.${encodeURIComponent(fila.status)}`;
-    const w = await fetchWithTimeout('db', `${SB_URL()}/rest/v1/videolab_text_presets?id=eq.${encodeURIComponent(fila.id)}&${ancla}`, {
+    const w = await fetchWithTimeout('db', `${SB_URL()}/rest/v1/${tabla}?id=eq.${encodeURIComponent(fila.id)}&${ancla}`, {
       method: 'PATCH',
       headers: H({ 'Content-Type': 'application/json', 'Content-Profile': 'public', Prefer: 'return=representation' }),
       body: JSON.stringify({ status: siguiente.status, status_changed_at: ahora, status_changed_by: quien }),
@@ -63,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!Array.isArray(escritas) || escritas.length !== 1) {
       return res.status(409).json({ error: 'status_changed', detail: 'el estado del estilo cambió mientras tanto: no se pisó. Vuelve a abrir la ventana.' });
     }
-    console.log(`[text-preset-status] ${quien} ${String(body.action)} ${presetKey} (${fila.brand_id ?? 'sistema'}): ${fila.status} → ${siguiente.status}`);
+    console.log(`[text-preset-status] ${tabla} ${quien} ${String(body.action)} ${presetKey} (${fila.brand_id ?? 'sistema'}): ${fila.status} → ${siguiente.status}`);
     return res.status(200).json({
       ok: true, preset_key: presetKey, status: siguiente.status, brand_override: fila.brand_id === brandId,
       status_changed_at: ahora, status_changed_by: quien,
