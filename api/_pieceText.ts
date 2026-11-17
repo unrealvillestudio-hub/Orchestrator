@@ -50,7 +50,12 @@ export interface TextLayers {
   captions: { enabled: boolean; preset_key: string; accent_role: string; place?: ZoomOnly } | null;
   key_titles: Array<{ text: string; at_ms: number; dur_ms: number; preset_key: string; place?: Place }>;
   cta: { text: string; at_ms: number; preset_key: string; pattern_key?: string | null; place?: Place } | null;
-  identity: { strip: boolean; strip_role: string | null };
+  /**
+   * La franja de identidad. `identity_role` es el nombre del contrato v1.4.0 de VideoLab y el de ImageLab. Se escribe
+   * SÓLO `identity_role` (2026-11-17, paso 1 de 3 del retiro del alias). `strip_role` es el ALIAS LEGACY: se lee
+   * todavía en lo que ya está guardado y no se escribe nunca más. Lo retira la sesión del motor (pasos 2 y 3).
+   */
+  identity: { strip: boolean; identity_role: string | null; /** @deprecated alias legacy, sólo lectura */ strip_role?: string | null };
 }
 
 export interface PresetView { preset_key: string; layer: TextLayer; name: string; description: string; status: string | null; brand_override: boolean }
@@ -345,9 +350,14 @@ export function validateTextLayers(
 
   const idRaw = obj(raw.identity) ? raw.identity : {};
   const strip = idRaw.strip === true;
-  const stripRole = str(idRaw.strip_role) || null;
+  // `identity_role` manda; `strip_role` (alias legacy) sólo se lee. Si llegan los dos con colores distintos es un error,
+  // igual que en VideoLab (`render/src/textlayers.mjs`): no se elige uno en silencio.
+  const idRole = str(idRaw.identity_role) || null;
+  const legacyRole = str(idRaw.strip_role) || null;
+  if (idRole && legacyRole && idRole !== legacyRole) errors.push(`identity: identity_role «${idRole}» y strip_role «${legacyRole}» (alias) dicen colores distintos`);
+  const stripRole = idRole ?? legacyRole;
   if (strip && stripRole && !ctx.stripRoles.includes(stripRole)) errors.push(`identity: el color «${stripRole}» no es uno de los de la franja de la marca`);
-  const identity = { strip, strip_role: strip ? stripRole : null };
+  const identity = { strip, identity_role: strip ? stripRole : null };
 
   if (!hook && !roles.some((r) => r.show) && !(captions?.enabled) && !key_titles.length && !cta && !strip) {
     errors.push('no hay ninguna capa de texto elegida: el video quedaría limpio');
