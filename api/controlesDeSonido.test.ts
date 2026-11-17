@@ -81,6 +81,11 @@ describe('validar text_layers.sound (contrato v1.10.0)', () => {
     expect(e).toMatch(/level_lu: debe ir de -6 a 6/); expect(e).toMatch(/sound\.effects\.preset_key/);
     expect(e).toMatch(/gain_db/); expect(e).toMatch(/sounds_by_fn\.cta.*block_entry/); expect(e).toMatch(/«otro» no es un momento/);
   });
+  it('con la familia encendida el preset es obligatorio (v1.10.0); apagada, no', () => {
+    const v = validateSound({ bed: { sound_key: 'cama_1' }, effects: { sounds_by_fn: { cta: 'c_2' } } }, ctx);
+    expect(!v.ok && v.errors.join(' | ')).toMatch(/sound\.bed: falta el preset.*sound\.effects: falta el preset/);
+    expect(validateSound({ bed: { enabled: false }, effects: { enabled: false } }, ctx).ok).toBe(true);
+  });
   it('un preset retirado no se acepta', () => {
     expect(validateSound({ bed: { preset_key: 'fondo_ret' } }, ctx).ok).toBe(false);
   });

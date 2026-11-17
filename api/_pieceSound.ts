@@ -1,5 +1,6 @@
 /**
- * UNRLVL Orchestrator — api/_pieceSound.ts (2026-11-17 · contrato VideoLab v1.10.0 «sonido por familias»)
+ * UNRLVL Orchestrator — api/_pieceSound.ts (2026-11-17 · contrato VideoLab v1.10.0 §4 ter.8, VideoLab#42; librería:
+ * VoiceLab v1.2 §3 ter, VoiceLab#12)
  *
  * EL SONIDO DE UNA PIEZA DE VIDEO: QUÉ SE LE PIDE A VIDEOLAB Y CÓMO SE VALIDA. Funciones PURAS: sin red, sin base.
  * Boceto aprobado por Sam el 2026-11-17 («Boceto aprobado, cada momento se puede apagar, usa tus 6 presets»):
@@ -114,7 +115,8 @@ export function groupSoundPresets(rows: unknown, brandId: string): SoundPresets 
 
 /** La librería tal como la lista VoiceLab, con lo que la ventana usa; filas sin `sound_key` o sin `fn`, fuera. PURO. */
 export function libraryOf(raw: unknown): LibrarySound[] {
-  const rows = Array.isArray((raw as any)?.sounds) ? (raw as any).sounds : Array.isArray(raw) ? raw : [];
+  const r0 = raw as any;
+  const rows = Array.isArray(r0?.sounds) ? r0.sounds : Array.isArray(r0?.library) ? r0.library : Array.isArray(r0) ? r0 : [];
   return rows
     .map((r: any) => ({
       sound_key: str(r?.sound_key), fn: str(r?.fn), description: str(r?.description),
@@ -173,7 +175,8 @@ export function validateSound(raw: unknown, ctx: { presets: SoundPresets; librar
       if (raw.bed.sound_key !== undefined && raw.bed.sound_key !== null) { const k = deLibreria(raw.bed.sound_key, BED_FN, 'sound.bed.sound_key'); if (k) b.sound_key = k; }
       if (raw.bed.enabled !== undefined) { if (typeof raw.bed.enabled !== 'boolean') errors.push('sound.bed.enabled debe ser sí o no'); else b.enabled = raw.bed.enabled; }
       const lv = rango(raw.bed.level_lu, BED_LEVEL, 'sound.bed.level_lu'); if (lv !== undefined) b.level_lu = lv;
-      if (b.enabled !== false && !b.preset_key && !b.sound_key) errors.push('sound.bed: falta el preset o el sonido de fondo');
+      // v1.10.0 §4 ter.8: con la familia encendida el preset es obligatorio; la librería y el volumen van encima.
+      if (b.enabled !== false && !b.preset_key) errors.push('sound.bed: falta el preset de fondo (la librería y el volumen van encima del preset)');
       out.bed = b;
     }
   }
@@ -196,7 +199,7 @@ export function validateSound(raw: unknown, ctx: { presets: SoundPresets; librar
           if (Object.keys(m).length) e.sounds_by_fn = m;
         }
       }
-      if (e.enabled !== false && !e.preset_key && !e.sounds_by_fn) errors.push('sound.effects: falta el preset o algún sonido');
+      if (e.enabled !== false && !e.preset_key) errors.push('sound.effects: falta el preset de efectos (la librería y el volumen van encima del preset)');
       out.effects = e;
     }
   }
