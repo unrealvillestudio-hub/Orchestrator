@@ -43,18 +43,24 @@ export interface VideoTextDraft {
 }
 
 const firstKey = (presets: PresetsByLayer | null, layer: keyof PresetsByLayer) => presets?.[layer]?.[0]?.preset_key ?? '';
+/**
+ * El estilo por defecto de una capa: el que sugiere la rotación de VideoLab (sólo llega en una generación nueva) y, si
+ * no hay, el primero. Lo ya guardado en la pieza manda siempre sobre esto (lo resuelve quien llama con `cur?.… ??`).
+ */
+const defaultKey = (p: Pick<PieceTextProposal, 'presets' | 'suggested_presets'>, layer: keyof PresetsByLayer) =>
+  p.suggested_presets?.[layer] ?? firstKey(p.presets, layer);
 const defaultRole = (opts: EmphasisColorOption[]) => (opts.find((o) => o.is_default) ?? opts[0])?.role ?? '';
 const placeOf = (p: unknown): Place | null => (p && typeof p === 'object' && 'x_pct' in (p as object) ? clampPlace(p as Place) : null);
 
 /** El borrador con el que abre la ventana: lo vigente del video si lo hay, si no lo primero de cada catálogo. PURO. */
-export function videoTextDraftOf(p: Pick<PieceTextProposal, 'presets' | 'cast' | 'accent_options' | 'strip_options' | 'proposals' | 'current'>): VideoTextDraft {
+export function videoTextDraftOf(p: Pick<PieceTextProposal, 'presets' | 'cast' | 'accent_options' | 'strip_options' | 'proposals' | 'current'> & Partial<Pick<PieceTextProposal, 'suggested_presets'>>): VideoTextDraft {
   const cur = p.current?.text_layers ?? null;
   const rolDe = (c: CastMember) => cur?.roles?.find((r) => r.person_id === c.person_id) ?? null;
   const zoomCap = cur?.captions?.place?.zoom;
   return {
     hook: {
       choice: cur?.hook?.text ? OWN : null, own: cur?.hook?.text ?? '',
-      preset_key: cur?.hook?.preset_key ?? firstKey(p.presets, 'hook'),
+      preset_key: cur?.hook?.preset_key ?? defaultKey(p, 'hook'),
       dur_s: cur?.hook ? Math.max(0.5, (cur.hook.end_ms - cur.hook.start_ms) / 1000) : 2.6,
       place: placeOf(cur?.hook?.place),
     },
@@ -64,27 +70,27 @@ export function videoTextDraftOf(p: Pick<PieceTextProposal, 'presets' | 'cast' |
         person_id: c.person_id, name: c.name, show: r ? r.show : false,
         text: r?.text ?? [c.name, c.title].filter(Boolean).join(' — '),
         at_s: r ? r.at_ms / 1000 : 0.4 + i * 4, dur_s: r ? r.dur_ms / 1000 : 3.8,
-        preset_key: r?.preset_key ?? firstKey(p.presets, 'role'),
+        preset_key: r?.preset_key ?? defaultKey(p, 'role'),
         place: placeOf(r?.place),
       };
     }),
     captions: {
       enabled: cur?.captions?.enabled ?? false,
-      preset_key: cur?.captions?.preset_key ?? firstKey(p.presets, 'caption'),
+      preset_key: cur?.captions?.preset_key ?? defaultKey(p, 'caption'),
       accent_role: cur?.captions?.accent_role ?? defaultRole(p.accent_options ?? []),
       zoom: typeof zoomCap === 'number' ? clampZoom(zoomCap) : null,
     },
     key_titles: [
       ...(p.proposals?.key_phrases ?? []).map((k) => {
         const v = cur?.key_titles?.find((t) => t.text === k.text);
-        return { text: k.text, on: !!v, at_s: v ? v.at_ms / 1000 : 0, dur_s: v ? v.dur_ms / 1000 : 2.5, preset_key: v?.preset_key ?? firstKey(p.presets, 'key_title'), own: false, place: placeOf(v?.place) };
+        return { text: k.text, on: !!v, at_s: v ? v.at_ms / 1000 : 0, dur_s: v ? v.dur_ms / 1000 : 2.5, preset_key: v?.preset_key ?? defaultKey(p, 'key_title'), own: false, place: placeOf(v?.place) };
       }),
       ...(cur?.key_titles ?? []).filter((t) => !(p.proposals?.key_phrases ?? []).some((k) => k.text === t.text))
         .map((t) => ({ text: t.text, on: true, at_s: t.at_ms / 1000, dur_s: t.dur_ms / 1000, preset_key: t.preset_key, own: true, place: placeOf(t.place) })),
     ],
     cta: {
       choice: cur?.cta?.text ? OWN : null, own: cur?.cta?.text ?? '',
-      preset_key: cur?.cta?.preset_key ?? firstKey(p.presets, 'cta'), at_s: cur?.cta ? cur.cta.at_ms / 1000 : 0,
+      preset_key: cur?.cta?.preset_key ?? defaultKey(p, 'cta'), at_s: cur?.cta ? cur.cta.at_ms / 1000 : 0,
       place: placeOf(cur?.cta?.place),
     },
     strip: { on: cur?.identity?.strip ?? false, role: cur?.identity?.identity_role ?? cur?.identity?.strip_role ?? defaultRole(p.strip_options ?? []) },
@@ -658,6 +664,7 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
         </p>
       )}
       {prop.presets_error && <p className="text-[11px] text-amber-300/90">{prop.presets_error}</p>}
+      {prop.rotation_note && <p className="text-[10px] text-zinc-500">{prop.rotation_note}</p>}
       {prop.meta?.n8_filter === 'no_recent_list' && (
         <p className="text-[10px] text-zinc-500">CopyLab no recibió los patrones recientes: los ganchos pueden repetir patrón.</p>
       )}
@@ -703,7 +710,7 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
           );
         })}
         <button type="button"
-          onClick={() => set({ key_titles: [...draft.key_titles, { text: '', on: true, at_s: 0, dur_s: 2.5, preset_key: firstKey(p, 'key_title'), own: true, place: null }] })}
+          onClick={() => set({ key_titles: [...draft.key_titles, { text: '', on: true, at_s: 0, dur_s: 2.5, preset_key: defaultKey(prop, 'key_title'), own: true, place: null }] })}
           className="px-2.5 py-1 rounded-lg text-[11px] border border-dashed border-zinc-700 text-zinc-400 hover:border-zinc-500">
           Añadir uno propio
         </button>
