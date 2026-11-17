@@ -4,7 +4,7 @@
  * LA VENTANA DE PRODUCCIÓN. Sam, 2026-11-09: «Activa la producción que haga falta para lo que se
  * necesita en los próximos 7 días.» Sam, 2026-11-17: «la función me permita activarla para los próximos
  * 3 días... no 7», y sólo para las marcas que elija. El carril produce para cada marca sólo hasta el fin
- * de su ventana (`intel.v_carril_entrada`, migraciones `20261109120000` y `20261117210000` de
+ * de su ventana (`intel.v_carril_entrada`, migraciones `20261109120000` y `20261117230000` de
  * unrlvl-iid-functions).
  *
  * GET  /api/production-window
@@ -104,7 +104,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Sólo marcas que la base conoce como marcas con canal activo: un nombre mal escrito no crea una fila.
     const conocidas = await leer('v_production_windows_by_brand');
     if (conocidas.status >= 400) {
-      return res.status(502).json({ error: 'brands_unavailable', detail: 'La vista por marca no está disponible: falta aplicar la migración 20261117210000.' });
+      return res.status(502).json({ error: 'brands_unavailable', detail: 'La vista por marca no está disponible: falta aplicar la migración 20261117230000.' });
     }
     const validas = new Set((conocidas.rows as { brand_id?: string }[]).map((r) => r.brand_id).filter(Boolean));
     const desconocidas = pedidas.filter((b) => !validas.has(b));
