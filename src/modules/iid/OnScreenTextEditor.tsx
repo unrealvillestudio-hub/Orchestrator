@@ -624,6 +624,20 @@ export function fitFor(result: SceneResult | null | undefined, layer: 'hook' | '
   return e.label === etiqueta || (!e.label && e.layer === layer) ? e : null;
 }
 
+// ── El tamaño de la vista grande (2026-11-17) ──────────────────────────────────────────────────────
+export const VISTA_ANCHO_MIN = 110;
+export const VISTA_ANCHO_MAX = 320;
+export const VISTA_ANCHO_INICIAL = 170;
+/** El ancho de la vista dentro de su rango; un valor que no es número vuelve al inicial. PURO. */
+export function clampAncho(n: number): number {
+  if (!Number.isFinite(n)) return VISTA_ANCHO_INICIAL;
+  return Math.round(Math.min(VISTA_ANCHO_MAX, Math.max(VISTA_ANCHO_MIN, n)));
+}
+const leerPreferencia = (k: string, porDefecto: string): string => {
+  try { return globalThis.localStorage?.getItem(k) ?? porDefecto; } catch { return porDefecto; }
+};
+const guardarPreferencia = (k: string, v: string) => { try { globalThis.localStorage?.setItem(k, v); } catch { /* sin almacenamiento */ } };
+
 /** «Caben hasta N caracteres»: lo que mide VideoLab con este estilo (mismo cálculo que decide si cabe). */
 function Medidor({ fit }: { fit: TextFit | null }) {
   if (!fit) return null;
@@ -777,6 +791,12 @@ function ImageBody(p: Extract<OnScreenTextEditorProps, { medium: 'image' }>) {
 function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPendiente, onEnviado }: Extract<OnScreenTextEditorProps, { medium: 'video' }>) {
   const [prop, setProp] = useState<PieceTextProposal | null>(null);
   const [draft, setDraft] = useState<VideoTextDraft | null>(null);
+  // 2026-11-17 (Sam): la vista se fija o se suelta, y su tamaño se cambia arrastrando el borde inferior. Se recuerda en
+  // este navegador (comodidad de quien edita; si el navegador no deja guardar, vale lo de siempre).
+  const [vistaFija, setVistaFija] = useState<boolean>(() => leerPreferencia('orchestrator.vista.fija', 'si') === 'si');
+  const [anchoVista, setAnchoVista] = useState<number>(() => clampAncho(Number(leerPreferencia('orchestrator.vista.ancho', String(VISTA_ANCHO_INICIAL)))));
+  const cambiarFija = (v: boolean) => { setVistaFija(v); guardarPreferencia('orchestrator.vista.fija', v ? 'si' : 'no'); };
+  const cambiarAncho = (n: number) => { const a = clampAncho(n); setAnchoVista(a); guardarPreferencia('orchestrator.vista.ancho', String(a)); };
   /** Lo guardado en la pieza, como borrador: contra esto se sabe si hay cambios sin aplicar y a esto vuelve «Descartar». */
   const base = useRef<VideoTextDraft | null>(null);
   const [confirmarDeshacer, setConfirmarDeshacer] = useState(false);
@@ -962,20 +982,39 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
       )}
 
       {prop.clean_video_url && (
-        // 2026-11-17 (Sam): la vista grande se queda arriba al desplazarse (en pantallas anchas) y el esquema va a su
-        // lado, con las medidas reales de la escena; si VideoLab no pudo preparar la escena, el esquema aproximado.
-        <div className="md:sticky md:top-0 z-20 rounded-xl border border-zinc-800 bg-zinc-950 p-2 shadow-lg shadow-black/40">
-          <div className="flex flex-wrap items-start gap-3">
-            <div className="shrink-0" style={{ width: 170 }}>
-              <VistaFiel videoUrl={prop.clean_video_url} result={vista.result} loading={vista.loading} error={vista.error} width={170}
-                targets={vista.result?.ok && vista.result.scene ? dragTargetsOf(vista.result.scene, draftBlocksOf(draft, prop.proposals, prop.duration_ms ?? null)) : []}
-                onPlace={enCurso ? undefined : (ref, place) => setDraft(withPlace(draft, ref, place))} />
-            </div>
-            <div className="shrink-0">
-              {vista.result?.ok && vista.result.scene
-                ? <EsquemaDeEscena scene={vista.result.scene} width={118} />
-                : <SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} />}
-            </div>
+        // 2026-11-17 (Sam): la vista grande arriba, con el esquema, la barra de reproducción y las notas AL LADO del video
+        // (ocupa sólo el alto del video). Se puede fijar o soltar, y su borde inferior se arrastra para hacerla más
+        // grande o más chica: lo de abajo se reacomoda.
+        <div className={cn('z-20 rounded-xl border border-zinc-800 bg-zinc-950 shadow-lg shadow-black/40', vistaFija && 'md:sticky md:top-0')}>
+          <div className="p-2">
+            <VistaFiel videoUrl={prop.clean_video_url} result={vista.result} loading={vista.loading} error={vista.error} width={anchoVista}
+              targets={vista.result?.ok && vista.result.scene ? dragTargetsOf(vista.result.scene, draftBlocksOf(draft, prop.proposals, prop.duration_ms ?? null)) : []}
+              onPlace={enCurso ? undefined : (ref, place) => setDraft(withPlace(draft, ref, place))}
+              lado={
+                <div className="flex flex-wrap items-start gap-3">
+                  {vista.result?.ok && vista.result.scene
+                    ? <EsquemaDeEscena scene={vista.result.scene} width={Math.round(anchoVista * 0.62)} />
+                    : <SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} />}
+                  <button type="button" onClick={() => cambiarFija(!vistaFija)} aria-pressed={vistaFija}
+                    className="hidden md:inline-flex ml-auto px-2 min-h-8 rounded-md border border-zinc-700 text-[11px] text-zinc-300 hover:text-white"
+                    title={vistaFija ? 'La vista sigue arriba al desplazarse. Pulsa para soltarla.' : 'Pulsa para que la vista siga arriba al desplazarse.'}>
+                    {vistaFija ? 'Fijada arriba · soltar' : 'Fijar arriba'}
+                  </button>
+                </div>
+              } />
+          </div>
+          <div role="separator" aria-orientation="horizontal" aria-label="Arrastra para cambiar el tamaño de la vista" tabIndex={0}
+            title="Arrastra hacia arriba o hacia abajo para achicar o agrandar la vista"
+            onKeyDown={(e) => { if (e.key === 'ArrowUp') cambiarAncho(anchoVista - 10); if (e.key === 'ArrowDown') cambiarAncho(anchoVista + 10); }}
+            onPointerDown={(e) => {
+              e.preventDefault(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              const y0 = e.clientY; const a0 = anchoVista;
+              const mover = (ev: PointerEvent) => cambiarAncho(a0 + (ev.clientY - y0) * (9 / 16));
+              const soltar = () => { window.removeEventListener('pointermove', mover); window.removeEventListener('pointerup', soltar); };
+              window.addEventListener('pointermove', mover); window.addEventListener('pointerup', soltar);
+            }}
+            className="h-3 cursor-row-resize touch-none rounded-b-xl flex items-center justify-center hover:bg-violet-500/20 focus:bg-violet-500/20 focus:outline-none">
+            <span aria-hidden className="block w-10 h-1 rounded-full bg-zinc-700" />
           </div>
         </div>
       )}

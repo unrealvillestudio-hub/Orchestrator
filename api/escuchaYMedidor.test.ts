@@ -65,3 +65,20 @@ describe('el servidor', () => {
     expect(TIMEOUT_MS.lab_sync).toBeLessThan(vercel.functions['api/piece-text.ts'].maxDuration * 1000);
   });
 });
+
+describe('la vista grande: al lado, de tamaño ajustable y se puede soltar (Sam, 2026-11-17)', () => {
+  it('el ancho queda en su rango; un valor raro vuelve al inicial', async () => {
+    const { clampAncho, VISTA_ANCHO_MIN, VISTA_ANCHO_MAX, VISTA_ANCHO_INICIAL } = await import('../src/modules/iid/OnScreenTextEditor');
+    expect(clampAncho(10)).toBe(VISTA_ANCHO_MIN);
+    expect(clampAncho(9999)).toBe(VISTA_ANCHO_MAX);
+    expect(clampAncho(Number('nada'))).toBe(VISTA_ANCHO_INICIAL);
+    expect(clampAncho(200.4)).toBe(200);
+  });
+  it('fijar arriba es una opción, no algo obligatorio; la barra y las notas van al lado del video', () => {
+    const editor = readFileSync('src/modules/iid/OnScreenTextEditor.tsx', 'utf8');
+    const visual = readFileSync('src/modules/iid/TextoVisual.tsx', 'utf8');
+    expect(editor).toMatch(/vistaFija && 'md:sticky md:top-0'/);
+    expect(editor).toMatch(/role="separator"/);
+    expect(visual).toMatch(/<div className="min-w-0 flex-1 space-y-1\.5">\{lado\}\{notas\}<\/div>/);
+  });
+});

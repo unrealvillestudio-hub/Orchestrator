@@ -139,10 +139,15 @@ const avisoDe = (w: unknown) => {
  * LA VISTA GRANDE: el video limpio de la pieza con el texto encima, dibujado por VideoLab. Cambia mientras se elige,
  * sin «Aplicar». Si aún no hay escena (cargando, error), lo dice; el video se ve igual.
  */
-export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace }: {
+export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace, lado }: {
   videoUrl: string; result: SceneResult | null; loading: boolean; error: string | null; width: number;
   /** Los bloques que se pueden arrastrar (ver `arrastre.ts`). Sin `onPlace`, no se arrastra nada. */
   targets?: DragTarget[]; onPlace?: (ref: BlockRef, place: Place) => void;
+  /**
+   * 2026-11-17 (Sam): lo que va AL LADO del video (el esquema). Con `lado`, la barra de reproducción, la etiqueta y las
+   * notas pasan a esa columna, para que la vista ocupe sólo el alto del video.
+   */
+  lado?: React.ReactNode;
 }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const W = Number(result?.scene?.canvas?.width) || 1080;
@@ -158,9 +163,8 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
     const ir = () => { if (video.paused && video.currentTime < 0.05) video.currentTime = Math.min((v.start + 1200) / 1000, (video.duration || 9e9) - 0.1); saltado.current = true; };
     if (video.readyState >= 1) ir(); else video.addEventListener('loadedmetadata', ir, { once: true });
   }, [video, result]);
-  return (
-    <div className="space-y-1.5">
-      <div className="relative mx-auto rounded-lg overflow-hidden bg-black" style={{ width, height: alto }}>
+  const pantalla = (
+      <div className="relative mx-auto rounded-lg overflow-hidden bg-black shrink-0" style={{ width, height: alto }}>
         <video ref={setVideo} src={videoUrl} className="absolute inset-0 w-full h-full object-cover" muted playsInline loop controls={false}
           onClick={(e) => { const v = e.currentTarget; if (v.paused) void v.play(); else v.pause(); }} aria-label="Video limpio de la pieza" />
         {result?.ok && result.scene && result.runtime_url && (
@@ -173,6 +177,8 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
         )}
         {loading && <span className="absolute top-2 right-2"><Spinner size={14} /></span>}
       </div>
+  );
+  const notas = (<>
       <VideoBarra video={video} />
       <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
         <Fidelidad fidelity={result?.ok ? result.fidelity : null} />
@@ -185,6 +191,12 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
       {onPlace && !!targets.length && (
         <p className="text-[10px] text-zinc-500">Arrastra un texto sobre el video para moverlo. Queda colocado a mano; «Automático» lo devuelve.</p>
       )}
+  </>);
+  if (!lado) return <div className="space-y-1.5">{pantalla}{notas}</div>;
+  return (
+    <div className="flex items-start gap-3">
+      {pantalla}
+      <div className="min-w-0 flex-1 space-y-1.5">{lado}{notas}</div>
     </div>
   );
 }
