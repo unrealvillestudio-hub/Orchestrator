@@ -37,7 +37,7 @@ import type { CarouselTextView, SlideTextOut } from '../../api/_carouselText';
 import type { TextPlace } from '../../api/_textPlace';
 import type { TextColumn } from '../../api/_textColumn';
 import type { TextColorOptions } from '../../api/_textStyle';
-import type { CastMember, PresetsByLayer, TextLayers } from '../../api/_pieceText';
+import type { CastMember, PresetsByLayer, PresetView, TextLayers } from '../../api/_pieceText';
 import type { ImageBlocks, SafeZone } from '../../api/_onScreenText';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
 
@@ -910,6 +910,9 @@ export interface PieceTextProposal {
   meta: { patterns_used?: string[]; n8_filter?: string; model?: string } | null;
   recent_pattern_keys: string[];
   presets: PresetsByLayer | null; presets_error: string | null;
+  /** 2026-11-17 — sólo un admin cambia el estado de un estilo; a él se le dan además los retirados, para reactivarlos. */
+  can_change_preset_status?: boolean;
+  retired_presets?: PresetView[];
   accent_options: EmphasisColorOption[]; strip_options: EmphasisColorOption[];
   cast: CastMember[];
   current: { text_layers: TextLayers | null; hook: string | null };
@@ -922,6 +925,12 @@ export interface PieceTextProposal {
 /** Pide a CopyLab (vía el Orchestrator) los ganchos, las frases clave y los CTA de la pieza. */
 export function proposePieceText(token: string, pieceId: string, goal?: string): Promise<PieceTextProposal> {
   return req('/api/piece-text', token, { method: 'POST', body: { piece_id: pieceId, action: 'propose', ...(goal ? { goal } : {}) } });
+}
+
+/** Valida, retira o reactiva un estilo de texto (sólo admin; vale para todas las marcas). */
+export function changePresetStatus(token: string, presetKey: string, brandId: string, action: 'validate' | 'retire' | 'reactivate'):
+  Promise<{ ok: true; preset_key: string; status: string; status_changed_at: string; status_changed_by: string }> {
+  return req('/api/text-preset-status', token, { method: 'POST', body: { preset_key: presetKey, brand_id: brandId, action } });
 }
 
 /** Manda las capas elegidas a VideoLab (vía el Orchestrator). Devuelve el job que hay que sondear. */
