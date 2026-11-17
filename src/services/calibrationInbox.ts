@@ -37,7 +37,7 @@ import type { CarouselTextView, SlideTextOut } from '../../api/_carouselText';
 import type { TextPlace } from '../../api/_textPlace';
 import type { TextColumn } from '../../api/_textColumn';
 import type { TextColorOptions } from '../../api/_textStyle';
-import type { EffectFn, LibrarySound, SoundLayer, SoundPresets, SoundPresetView } from '../../api/_pieceSound';
+import type { CueTime, EffectFn, LibrarySound, SoundLayer, SoundPresets, SoundPresetView } from '../../api/_pieceSound';
 import type { CastMember, PresetsByLayer, PresetView, TextLayers } from '../../api/_pieceText';
 import type { ImageBlocks, SafeZone } from '../../api/_onScreenText';
 export type Verdict = 'approved' | 'rejected' | 'fixable' | 'research';
@@ -959,6 +959,7 @@ export interface PieceTextProposal {
   accent_options: EmphasisColorOption[]; strip_options: EmphasisColorOption[];
   cast: CastMember[];
   current: { text_layers: TextLayers | null; hook: string | null };
+  undo?: UndoInfo;
   duration_ms: number | null;
   /** 2026-11-16 — la proporción ancho/alto de la pieza, para la vista previa de la ventana. */
   aspect?: number;
@@ -986,14 +987,15 @@ export interface PieceSoundCatalog {
   cue_counts: Record<EffectFn, number | null>;
   ranges: { bed_level: { min: number; max: number; step: number; unit: string }; fx_gain: { min: number; max: number; step: number; unit: string } };
   pending: { job_id: string; requested_at: string } | null; can_change_preset_status: boolean;
+  clean_video_url?: string | null; cue_times?: CueTime[]; undo?: UndoInfo;
 }
 /** Presets de fondo y de efectos, librería, sugerencia de la rotación, lo guardado y los momentos de la pieza. Sólo lee. */
 export function soundCatalog(token: string, pieceId: string): Promise<PieceSoundCatalog> {
   return req('/api/piece-text', token, { method: 'POST', body: { piece_id: pieceId, action: 'sound_catalog' } });
 }
 /** Vuelve a mezclar el video con el sonido elegido; el texto de la pieza no cambia. Se sondea con `pollPieceText`. */
-export function applyPieceSound(token: string, pieceId: string, sound: SoundLayer | null): Promise<{ ok: true; job_id: string; status: 'running' }> {
-  return req('/api/piece-text', token, { method: 'POST', body: { piece_id: pieceId, action: 'apply_sound', sound } });
+export function applyPieceSound(token: string, pieceId: string, sound: SoundLayer | null, textLayers?: TextLayers | null): Promise<{ ok: true; job_id: string; status: 'running' }> {
+  return req('/api/piece-text', token, { method: 'POST', body: { piece_id: pieceId, action: 'apply_sound', sound, ...(textLayers ? { text_layers: textLayers } : {}) } });
 }
 
 export interface SceneResult {
@@ -1007,8 +1009,18 @@ export function previewPieceText(token: string, pieceId: string, textLayers: Tex
 }
 
 /** Manda las capas elegidas a VideoLab (vía el Orchestrator). Devuelve el job que hay que sondear. */
-export function applyPieceText(token: string, pieceId: string, textLayers: TextLayers): Promise<{ ok: true; job_id: string; status: 'running' }> {
-  return req('/api/piece-text', token, { method: 'POST', body: { piece_id: pieceId, action: 'apply', text_layers: textLayers } });
+/** 2026-11-17 — con `sound`, viaja también el sonido editado sin aplicar (Sam: «sí a aplicar juntos»). */
+export function applyPieceText(token: string, pieceId: string, textLayers: TextLayers, sound?: SoundLayer | null): Promise<{ ok: true; job_id: string; status: 'running' }> {
+  return req('/api/piece-text', token, { method: 'POST', body: { piece_id: pieceId, action: 'apply', text_layers: textLayers, ...(sound !== undefined ? { sound } : {}) } });
+}
+
+export interface UndoInfo { available: boolean; to_version: string | null; reason: string | null }
+/** Deshacer lo aplicado: un paso atrás, sin render (Sam: «deshacer (a)»). Otra vez = vuelve el que estaba. */
+export function undoPieceVideo(token: string, pieceId: string): Promise<{
+  ok: true; video: { url?: string; version?: string; text_layers?: TextLayers | null } & Record<string, any>;
+  from_version: string | null; to_version: string | null; undo: UndoInfo; html: string | null; artifact_url: string | null;
+}> {
+  return req('/api/piece-text', token, { method: 'POST', body: { piece_id: pieceId, action: 'undo_video' } });
 }
 
 export interface PieceTextPoll {

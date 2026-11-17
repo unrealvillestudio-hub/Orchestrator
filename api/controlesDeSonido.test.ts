@@ -171,7 +171,7 @@ describe('el servidor', () => {
   const ruta = readFileSync('api/piece-text.ts', 'utf8');
   it('aplicar texto conserva el sonido guardado; aplicar sonido conserva el texto vigente', () => {
     expect(ruta).toMatch(/let sound: unknown = assets\.video\?\.text_layers\?\.sound \?\? null;/);
-    expect(ruta).toMatch(/const vigente = \(piece\.assets as any\)\?\.video\?\.text_layers \?\? SIN_TEXTO;/);
+    expect(ruta).toMatch(/const vigente = body\.text_layers \?\? \(piece\.assets as any\)\?\.video\?\.text_layers \?\? SIN_TEXTO;/);
     expect(ruta).toMatch(/pending_text_job: \{ job_id: jobId, requested_at: new Date\(\)\.toISOString\(\), text_layers: capas \}/);
   });
   it('la librería se pide a VoiceLab por lab_configs; ninguna dirección escrita en el código', () => {

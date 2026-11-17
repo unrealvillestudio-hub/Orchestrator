@@ -294,3 +294,46 @@ export function cueCountsOf(textLayers: any, timeline: any, impactPresets: strin
     shot_cut: cortes,
   };
 }
+
+// ── Escucha aproximada (2026-11-17, Sam: «las dos escuchas») ───────────────────────────────────
+
+export interface CueTime { fn: EffectFn; at_ms: number }
+
+/**
+ * CUÁNDO suena cada momento, para la escucha aproximada del navegador: entradas de texto, CTA, roles, golpes, cifras
+ * (a los 800 ms de entrar el título, aproximado) y cortes de toma (regla del motor: cambio de `shot_id`). El momento
+ * exacto lo fija el render (`render/src/sound.mjs`, `soundCues`). PURO.
+ */
+export function cueTimesOf(textLayers: any, timeline: any, impactPresets: string[]): CueTime[] {
+  const out: CueTime[] = [];
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  if (textLayers?.hook) out.push({ fn: 'block_entry', at_ms: n(textLayers.hook.start_ms) ?? 0 });
+  for (const k of Array.isArray(textLayers?.key_titles) ? textLayers.key_titles : []) {
+    const at = n(k?.at_ms); if (at == null) continue;
+    out.push({ fn: impactPresets.includes(k?.preset_key) ? 'impact' : 'block_entry', at_ms: at });
+    const cifras = (String(k?.text ?? '').match(/\d+(?:[.,]\d+)*/g) ?? []).length;
+    for (let i = 0; i < cifras; i++) out.push({ fn: 'digit_land', at_ms: at + 800 + i * 120 });
+  }
+  const cta = n(textLayers?.cta?.at_ms); if (textLayers?.cta && cta != null) out.push({ fn: 'cta', at_ms: cta });
+  for (const r of Array.isArray(textLayers?.roles) ? textLayers.roles : []) {
+    const at = n(r?.at_ms); if (r?.show !== false && at != null) out.push({ fn: 'word_pop', at_ms: at });
+  }
+  const caras = Array.isArray(timeline?.faces) ? [...timeline.faces].sort((x: any, y: any) => x.start_ms - y.start_ms) : [];
+  const cortes = new Set<number>();
+  for (let i = 1; i < caras.length; i++) if (caras[i].shot_id !== caras[i - 1].shot_id && caras[i].start_ms > 0) cortes.add(caras[i].start_ms);
+  for (const at of cortes) out.push({ fn: 'shot_cut', at_ms: at });
+  return out.sort((x, y) => x.at_ms - y.at_ms);
+}
+
+/**
+ * Volúmenes de la escucha aproximada (0–1 del navegador): la cama queda `under_voice_lu − level_lu` por debajo de la voz
+ * (la voz se supone a −20 LUFS, la referencia del motor) y se corrige por la sonoridad medida del archivo; los efectos,
+ * a −15 dB más el volumen elegido. Aproximado a propósito: lo exacto lo hace el render. PURO.
+ */
+export function approxGains(opts: { underVoiceLu: number | null; levelLu: number; bedLufs: number | null; gainDb: number }): { bed: number; fx: number } {
+  const clamp = (v: number) => Math.max(0, Math.min(1, v));
+  const objetivo = -20 - (opts.underVoiceLu ?? 14) + opts.levelLu;
+  const bed = clamp(Math.pow(10, (objetivo - (opts.bedLufs ?? -20)) / 20));
+  const fx = clamp(Math.pow(10, (-15 + opts.gainDb) / 20) * 2);
+  return { bed: Math.round(bed * 1000) / 1000, fx: Math.round(fx * 1000) / 1000 };
+}

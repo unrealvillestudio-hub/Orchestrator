@@ -1,12 +1,14 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { cn, Spinner } from '../../ui/components';
 import {
-  proposePieceText, applyPieceText, pollPieceText, changePresetStatus, previewPieceText, CalibrationError, type SceneResult,
+  proposePieceText, applyPieceText, pollPieceText, undoPieceVideo, changePresetStatus, previewPieceText, CalibrationError, type SceneResult,
   type PieceTextProposal, type TextProposal,
 } from '../../services/calibrationInbox';
 import type { CastMember, PresetsByLayer, PresetView, TextAlign, TextLayers } from '../../../api/_pieceText';
 import { MARK_KINDS, pruneMarks, parseMarkup, mergeMarks, type BlockMarks } from './textoMarcas';
 import { dragTargetsOf, type BlockRef, type DraftBlocks } from './arrastre';
+import { BarraDeshacer } from './BarraDeshacer';
+import type { SoundLayer } from '../../../api/_pieceSound';
 import { Alineacion, EsquemaDeEscena, FranjaModo, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel } from './TextoVisual';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
 import {
@@ -82,6 +84,16 @@ const defaultKey = (p: Pick<PieceTextProposal, 'presets' | 'suggested_presets'>,
   p.suggested_presets?.[layer] ?? firstKey(p.presets, layer);
 const defaultRole = (opts: EmphasisColorOption[]) => (opts.find((o) => o.is_default) ?? opts[0])?.role ?? '';
 const placeOf = (p: unknown): Place | null => (p && typeof p === 'object' && 'x_pct' in (p as object) ? clampPlace(p as Place) : null);
+
+/**
+ * El borrador tal como se guarda en la tarjeta mientras no se aplica (2026-11-17). Una propuesta elegida se guarda
+ * por su TEXTO, no por su posición: al reabrir la ventana CopyLab propone otra lista y «la segunda» sería otra frase. PURO.
+ */
+export function draftParaGuardar(d: VideoTextDraft, proposals: PieceTextProposal['proposals']): VideoTextDraft {
+  const fijar = <T extends { choice: Choice; own: string }>(b: T, list: TextProposal[]): T =>
+    typeof b.choice === 'number' && list[b.choice] ? { ...b, choice: OWN, own: list[b.choice].text } : b;
+  return { ...d, hook: fijar(d.hook, proposals.hooks), cta: fijar(d.cta, proposals.share_ctas) };
+}
 
 /** El borrador con el que abre la ventana: lo vigente del video si lo hay, si no lo primero de cada catálogo. PURO. */
 export function videoTextDraftOf(p: Pick<PieceTextProposal, 'presets' | 'cast' | 'accent_options' | 'strip_options' | 'proposals' | 'current'> & Partial<Pick<PieceTextProposal, 'suggested_presets'>>): VideoTextDraft {
@@ -637,6 +649,16 @@ export type OnScreenTextEditorProps =
     medium: 'video'; pieceId: string; token: string;
     /** El video nuevo quedó en la pieza: la tarjeta cambia el artefacto. */
     onApplied?: (r: { html: string | null; artifact_url: string | null }) => void;
+    /**
+     * 2026-11-17 (Sam: «sí a aplicar juntos»). Lo editado sin aplicar vive en la tarjeta: al cerrar la ventana y abrir
+     * «Sonido» no se pierde, y un solo «Aplicar» manda texto y sonido. `borrador` = lo que había quedado sin aplicar.
+     */
+    borrador?: VideoTextDraft | null;
+    onBorrador?: (b: { draft: VideoTextDraft; layers: TextLayers } | null) => void;
+    /** El sonido editado sin aplicar en la otra ventana: viaja con este «Aplicar». */
+    sonidoPendiente?: SoundLayer | null;
+    /** El pedido salió: la tarjeta vacía los dos borradores. */
+    onEnviado?: () => void;
   }
   | {
     medium: 'image';
@@ -722,9 +744,13 @@ function ImageBody(p: Extract<OnScreenTextEditorProps, { medium: 'image' }>) {
 
 // ── Video ────────────────────────────────────────────────────────────────────────────────────────
 
-function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProps, { medium: 'video' }>) {
+function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPendiente, onEnviado }: Extract<OnScreenTextEditorProps, { medium: 'video' }>) {
   const [prop, setProp] = useState<PieceTextProposal | null>(null);
   const [draft, setDraft] = useState<VideoTextDraft | null>(null);
+  /** Lo guardado en la pieza, como borrador: contra esto se sabe si hay cambios sin aplicar y a esto vuelve «Descartar». */
+  const base = useRef<VideoTextDraft | null>(null);
+  const [confirmarDeshacer, setConfirmarDeshacer] = useState(false);
+  const [deshaciendo, setDeshaciendo] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<null | { id: string; since: number }>(null);
@@ -749,13 +775,38 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
     setLoading(true); setError(null);
     proposePieceText(token, pieceId)
       .then((r) => {
-        setProp(r); setDraft(videoTextDraftOf(r));
+        const guardado = videoTextDraftOf(r);
+        base.current = guardado;
+        setProp(r); setDraft(borrador ?? guardado);
         if (r.pending?.job_id) setJob({ id: r.pending.job_id, since: Date.now() });
       })
       .catch((err) => setError(errorDe(err, 'No se pudieron pedir las propuestas a CopyLab.')))
       .finally(() => setLoading(false));
   };
   useEffect(proponer, [pieceId, token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cambios sin aplicar → a la tarjeta (sobreviven al cerrar la ventana y viajan con el «Aplicar» de «Sonido»).
+  const sinAplicar = !!(draft && base.current && JSON.stringify(draft) !== JSON.stringify(base.current));
+  useEffect(() => {
+    if (!prop || !draft || !base.current) return;
+    onBorrador?.(sinAplicar ? { draft: draftParaGuardar(draft, prop.proposals), layers: textLayersFromDraft(draft, prop.proposals, prop.duration_ms ?? null) } : null);
+  }, [draft]); // eslint-disable-line react-hooks/exhaustive-deps
+  const descartar = () => { if (base.current) setDraft(base.current); setDone(null); setError(null); };
+  /** Deshacer lo aplicado: un paso atrás, sin render (Sam: «deshacer (a)»). Lo editado sin aplicar se descarta. */
+  const deshacer = () => {
+    if (!prop) return;
+    setDeshaciendo(true); setError(null); setDone(null); setConfirmarDeshacer(false);
+    undoPieceVideo(token, pieceId)
+      .then((r) => {
+        const nuevo = { ...prop, current: { ...prop.current, text_layers: (r.video?.text_layers ?? null) as any }, undo: r.undo };
+        const d = videoTextDraftOf(nuevo);
+        base.current = d; setProp(nuevo); setDraft(d); onBorrador?.(null);
+        setDone(`Listo: volvió la versión ${r.to_version ?? 'anterior'} (con su texto y su sonido). Deshacer otra vez devuelve la ${r.from_version ?? 'que estaba'}.`);
+        onApplied?.({ html: r.html ?? null, artifact_url: r.artifact_url ?? null });
+      })
+      .catch((err) => setError(errorDe(err, 'No se pudo deshacer.')))
+      .finally(() => setDeshaciendo(false));
+  };
 
   // ── 2026-11-17 · La vista previa fiel: la escena de VideoLab sobre el video limpio, al momento (sin «Aplicar»). ──
   const [vista, setVista] = useState<{ loading: boolean; result: SceneResult | null; error: string | null }>({ loading: false, result: null, error: null });
@@ -824,8 +875,8 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
     if (!prop || !draft) return;
     if (enviando) return;
     setError(null); setDone(null); setEnviando(true);
-    applyPieceText(token, pieceId, textLayersFromDraft(draft, prop.proposals, prop.duration_ms))
-      .then((r) => setJob({ id: r.job_id, since: Date.now() }))
+    applyPieceText(token, pieceId, textLayersFromDraft(draft, prop.proposals, prop.duration_ms), sonidoPendiente ?? undefined)
+      .then((r) => { setJob({ id: r.job_id, since: Date.now() }); base.current = draft; onBorrador?.(null); onEnviado?.(); })
       .catch((err) => setError(errorDe(err, 'No se pudo mandar el texto a VideoLab.')))
       .finally(() => setEnviando(false));
   };
@@ -1038,6 +1089,11 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
       {enCurso && (
         <p className="flex items-center gap-2 text-[11px] text-zinc-300"><Spinner size={12} /> VideoLab está aplicando el texto sobre el video limpio…</p>
       )}
+      {sonidoPendiente && !enCurso && (
+        <p className="text-[11px] rounded-lg px-3 py-1.5 border border-cyan-400/30 bg-cyan-400/[0.06] text-cyan-100">
+          Hay cambios de sonido sin aplicar: «Aplicar» los manda junto con este texto, en un solo render.
+        </p>
+      )}
       <div className="flex gap-2">
         <button type="button" onClick={aplicar} disabled={sinLimpio || enCurso || enviando || !p}
           title={sinLimpio ? prop.clean_video_note ?? undefined : undefined}
@@ -1049,6 +1105,9 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
           {loading ? <Spinner size={12} /> : 'Otras propuestas'}
         </button>
       </div>
+      <BarraDeshacer sinAplicar={sinAplicar} onDescartar={descartar} undo={prop.undo} confirmando={confirmarDeshacer}
+        onPedir={() => setConfirmarDeshacer(true)} onCancelar={() => setConfirmarDeshacer(false)} onDeshacer={deshacer}
+        ocupado={deshaciendo} bloqueado={enCurso || enviando} />
       <p className="text-[10px] font-mono leading-snug text-zinc-600">
         Sólo se vuelve a dibujar el texto sobre el video limpio: no se regeneran las tomas. El video anterior queda en el historial.
       </p>

@@ -24,6 +24,13 @@
  *   → el MISMO render que 'apply', con el texto vigente de la pieza y `text_layers.sound` nuevo (contrato VideoLab
  *     v1.10.0). Aplicar texto conserva el sonido guardado, y aplicar sonido conserva el texto.
  *
+ * POST /api/piece-text { piece_id, action: 'undo_video' }   (2026-11-17, Sam: «deshacer (a)»)
+ *   → UN PASO ATRÁS: el video vigente cambia de lugar con el más reciente de `video_history`, con su texto y su sonido.
+ *     Sin render. Otra vez = vuelve el que estaba. 200: { ok, video, from_version, to_version, undo, html, artifact_url }
+ *
+ * «Aplicar juntos» (Sam, 2026-11-17): 'apply' acepta `sound` además de `text_layers`, y 'apply_sound' acepta
+ * `text_layers` además de `sound`: lo editado en una ventana sin aplicar viaja con lo de la otra en un solo render.
+ *
  * GET /api/piece-text?piece_id=
  *   → sondea `lab_jobs` del pedido pendiente. Terminado: el video de ahora pasa a `assets.video_history[]` y la pieza
  *     queda con el nuevo (versión siguiente, `text_layers`, `hook_pattern_key`) y el artefacto rehecho. Fallido: se
@@ -49,11 +56,11 @@ import {
   assetsAfterFailedJob, assetsAfterTextJob, buildCopyLabBody, buildCopyLabSource, buildVideoLabBody, castOf,
   copyLabLanguageOf, errorLabelOf, goalOf, groupPresets, hasCleanVideo, labExecuteUrl, mediumOf, NO_CLEAN_VIDEO,
   RECENT_PIECES_N, recentPatternKeysOf, retiredPresetsOf, validateTextLayers, labBaseUrl, suggestedPresetsOf,
-  buildSceneBody, keywordCandidatesOf, layersForVariant, SCENE_VARIANTS_MAX, TEXT_LAYERS,
+  buildSceneBody, keywordCandidatesOf, layersForVariant, SCENE_VARIANTS_MAX, TEXT_LAYERS, undoInfoOf, assetsAfterUndoVideo,
   type PresetsByLayer, type PresetView, type SuggestedPresets, type TextLayer,
 } from './_pieceText.js';
 import {
-  BED_LEVEL, cueCountsOf, FX_GAIN, groupSoundPresets, libraryOf, validateSound,
+  BED_LEVEL, cueCountsOf, cueTimesOf, FX_GAIN, groupSoundPresets, libraryOf, validateSound,
   type LibrarySound, type SoundPresets, type SoundPresetView,
 } from './_pieceSound.js';
 
@@ -191,9 +198,28 @@ async function catalogoDeSonido(res: VercelResponse, piece: any, admin: boolean)
     library: lib.library, library_error: lib.error,
     suggested_bed, current: actual, has_text_layers: !!assets?.video?.text_layers,
     cue_counts: cueCountsOf(assets?.video?.text_layers ?? null, assets?.video?.timeline ?? null, impacto),
+    // Escucha aproximada (Sam, 2026-11-17): el video limpio con su voz y cuándo suena cada momento.
+    clean_video_url: assets?.video?.clean_video?.url ?? null,
+    cue_times: cueTimesOf(assets?.video?.text_layers ?? null, assets?.video?.timeline ?? null, impacto),
+    undo: undoInfoOf(assets),
     ranges: { bed_level: BED_LEVEL, fx_gain: FX_GAIN },
     pending: assets?.video?.pending_text_job ?? null, can_change_preset_status: admin,
   });
+}
+
+/** Deshacer lo aplicado: un paso atrás, sin render. Ancla en el video leído y en «sin pendiente». */
+async function deshacerVideo(res: VercelResponse, piece: any, by: string) {
+  const assets = piece.assets ?? {};
+  if (mediumOf(assets) !== 'video') return res.status(409).json({ error: 'not_a_video_piece', detail: 'deshacer el video sólo aplica a piezas de video' });
+  const r = assetsAfterUndoVideo(assets, by, new Date().toISOString());
+  if (!r.ok) return res.status(409).json({ error: 'nothing_to_undo', detail: r.reason });
+  const guardado = await guardarAssets(piece.id, r.assets, assets.video.url, { sinPendiente: true });
+  if (!guardado) return res.status(409).json({ error: 'video_changed', detail: 'el video cambió mientras se deshacía (otro cambio en curso): no se tocó nada' });
+  console.log(`[piece-text] ${piece.id}: ${by} deshizo ${r.from_version} → ${r.to_version}`);
+  let html: string | null = null; let artifact_url: string | null = null;
+  try { const art = await ensureArtifact(piece.id); html = art.html; artifact_url = art.artifact_url; }
+  catch (err) { console.error(`[piece-text] ${piece.id}: deshecho, pero el artefacto NO se rehízo: ${String(err)}`); }
+  return res.status(200).json({ ok: true, video: r.assets.video, from_version: r.from_version, to_version: r.to_version, undo: undoInfoOf(r.assets), html, artifact_url });
 }
 
 /** El texto vigente de la pieza, o las capas vacías si todavía no tiene texto: el sonido se puede pedir igual. */
@@ -212,8 +238,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const pieceId = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';
   if (!pieceId) return res.status(400).json({ error: 'piece_id required' });
   if (!(await guardPiece(res, session, pieceId))) return;
-  if (!['propose', 'apply', 'scenes', 'sound_catalog', 'apply_sound'].includes(String(body.action))) {
-    return res.status(400).json({ error: 'invalid action', detail: "action debe ser 'propose', 'apply', 'scenes', 'sound_catalog' o 'apply_sound'" });
+  if (!['propose', 'apply', 'scenes', 'sound_catalog', 'apply_sound', 'undo_video'].includes(String(body.action))) {
+    return res.status(400).json({ error: 'invalid action', detail: "action debe ser 'propose', 'apply', 'scenes', 'sound_catalog', 'apply_sound' o 'undo_video'" });
   }
 
   try {
@@ -224,13 +250,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (body.action === 'scenes') return escenas(res, piece, body.text_layers, (body as any).variants);
     if (body.action === 'sound_catalog') return catalogoDeSonido(res, piece, esAdmin(session.role));
+    if (body.action === 'undo_video') return deshacerVideo(res, piece, session.sub || 'admin');
     if (body.action === 'apply_sound') {
-      // El texto es el vigente; sólo cambia el sonido. `sound: null` quita el sonido.
-      const vigente = (piece.assets as any)?.video?.text_layers ?? SIN_TEXTO;
+      // El texto: el editado sin aplicar si viene (aplicar juntos); si no, el vigente. `sound: null` quita el sonido.
+      const vigente = body.text_layers ?? (piece.assets as any)?.video?.text_layers ?? SIN_TEXTO;
       const { sound: _fuera, ...texto } = vigente as any;
       return aplicar(res, piece, texto, { sound: body.sound ?? null });
     }
-    return body.action === 'propose' ? proponer(res, piece, body.goal, esAdmin(session.role)) : aplicar(res, piece, body.text_layers);
+    return body.action === 'propose'
+      ? proponer(res, piece, body.goal, esAdmin(session.role))
+      // Con `sound` en el cuerpo, viaja también el sonido editado sin aplicar (aplicar juntos).
+      : aplicar(res, piece, body.text_layers, Object.prototype.hasOwnProperty.call(body, 'sound') ? { sound: body.sound ?? null } : undefined);
   } catch (err) {
     console.error(`[piece-text] ${body.action} ${pieceId}: ${String(err)}`);
     return res.status(503).json({ error: 'piece_text_unavailable', detail: String(err instanceof Error ? err.message : err) });
@@ -317,6 +347,7 @@ async function proponer(res: VercelResponse, piece: any, goalRaw: unknown, admin
     ]) : [],
     cast: medium === 'video' ? castOf(assets) : [],
     current: { text_layers: assets?.video?.text_layers ?? null, hook: source.current_hook },
+    undo: undoInfoOf(assets),
     duration_ms: Number.isFinite(durS) && durS > 0 ? Math.round(durS * 1000) : null,
     // 2026-11-16 — la proporción de la pieza, para la vista previa esquemática de la ventana «Texto en pantalla».
     aspect: aspectOf(assets, medium),
