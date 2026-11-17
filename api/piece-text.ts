@@ -35,11 +35,11 @@ import { applyCors, extractToken, ensureArtifact, fetchPiece, SB_URL, SB_KEY } f
 import { emphasisColorOptions, identityColorOptions } from './_overlayText.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
 import { aspectOf } from './_onScreenText.js';
-import { requireReviewer, guardPiece, VISTAS_DE_PIEZA } from './_reviewScope.js';
+import { requireReviewer, guardPiece, VISTAS_DE_PIEZA, esAdmin } from './_reviewScope.js';
 import {
   assetsAfterFailedJob, assetsAfterTextJob, buildCopyLabBody, buildCopyLabSource, buildVideoLabBody, castOf,
   copyLabLanguageOf, errorLabelOf, goalOf, groupPresets, hasCleanVideo, labExecuteUrl, mediumOf, NO_CLEAN_VIDEO,
-  RECENT_PIECES_N, recentPatternKeysOf, validateTextLayers, type PresetsByLayer,
+  RECENT_PIECES_N, recentPatternKeysOf, retiredPresetsOf, validateTextLayers, type PresetsByLayer, type PresetView,
 } from './_pieceText.js';
 
 const headers = (profile: 'public' | 'content' | 'intel', extra: Record<string, string> = {}) =>
@@ -85,13 +85,13 @@ async function coloresDeMarca(brandId: string) {
 }
 
 /** Los presets de VideoLab de la marca y del sistema. Si la tabla aún no existe, se dice en vez de inventarlos. */
-async function presetsDe(brandId: string): Promise<{ presets: PresetsByLayer | null; error: string | null }> {
+async function presetsDe(brandId: string): Promise<{ presets: PresetsByLayer | null; retired: PresetView[]; error: string | null }> {
   try {
     const rows = await leer(`videolab_text_presets?or=(brand_id.is.null,brand_id.eq.${encodeURIComponent(brandId)})`
       + '&active=eq.true&select=preset_key,layer,name,description,brand_id,active,sort,status&order=sort.asc');
-    return { presets: groupPresets(rows, brandId), error: null };
+    return { presets: groupPresets(rows, brandId), retired: retiredPresetsOf(rows, brandId), error: null };
   } catch (err) {
-    return { presets: null, error: `No se pudieron leer los presets de VideoLab (videolab_text_presets): ${String(err instanceof Error ? err.message : err)}` };
+    return { presets: null, retired: [], error: `No se pudieron leer los presets de VideoLab (videolab_text_presets): ${String(err instanceof Error ? err.message : err)}` };
   }
 }
 
@@ -118,7 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (piece.discarded_at) {
       return res.status(409).json({ error: 'piece_already_sealed', detail: 'la pieza ya está sellada: su texto ya no se edita', discarded_at: piece.discarded_at });
     }
-    return body.action === 'propose' ? proponer(res, piece, body.goal) : aplicar(res, piece, body.text_layers);
+    return body.action === 'propose' ? proponer(res, piece, body.goal, esAdmin(session.role)) : aplicar(res, piece, body.text_layers);
   } catch (err) {
     console.error(`[piece-text] ${body.action} ${pieceId}: ${String(err)}`);
     return res.status(503).json({ error: 'piece_text_unavailable', detail: String(err instanceof Error ? err.message : err) });
@@ -127,7 +127,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 // ── PROPONER ───────────────────────────────────────────────────────────────────────────────────
 
-async function proponer(res: VercelResponse, piece: any, goalRaw: unknown) {
+async function proponer(res: VercelResponse, piece: any, goalRaw: unknown, admin: boolean) {
   const brandId = String(piece.brand_id ?? '');
   const b = encodeURIComponent(brandId);
   const assets = piece.assets ?? {};
@@ -168,7 +168,7 @@ async function proponer(res: VercelResponse, piece: any, goalRaw: unknown) {
   // Los colores y los presets sólo hacen falta para editar un video.
   const [colores, presets] = medium === 'video'
     ? await Promise.all([coloresDeMarca(brandId), presetsDe(brandId)])
-    : [{ accent: [], strip: [] }, { presets: null, error: null }];
+    : [{ accent: [], strip: [] }, { presets: null, retired: [] as PresetView[], error: null }];
   const conLimpio = medium === 'video' && hasCleanVideo(assets);
   const durS = Number(assets?.video?.duration_s);
 
@@ -184,6 +184,9 @@ async function proponer(res: VercelResponse, piece: any, goalRaw: unknown) {
     meta: data?.meta ?? null,
     recent_pattern_keys: recentPatternKeys,
     presets: presets.presets, presets_error: presets.error,
+    // Estado de los estilos (2026-11-17): sólo un admin valida, retira o reactiva, y sólo a él se le dan los retirados.
+    can_change_preset_status: admin,
+    retired_presets: admin ? presets.retired : [],
     accent_options: colores.accent, strip_options: colores.strip,
     cast: medium === 'video' ? castOf(assets) : [],
     current: { text_layers: assets?.video?.text_layers ?? null, hook: source.current_hook },
