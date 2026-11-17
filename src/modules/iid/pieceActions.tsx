@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle2, XCircle, Archive, Wrench, ImagePlay, PenLine, Search, Undo2 } from 'lucide-react';
+import { CheckCircle2, XCircle, Archive, Wrench, ImagePlay, PenLine, Search, Undo2, Music } from 'lucide-react';
 import { cn, Spinner } from '../../ui/components';
 import {
   saveVerdict, discardPiece, recomposeImage, renderArtifact, CalibrationError,
@@ -13,6 +13,7 @@ import { overlayEditorSeed, overlayViewAfterApply, shadowDefaultLabel, type Imag
 import { textStyleDraftOf, subMarkupOf, textStylePayload, withBlock, SUB_EDITOR_HELP, type TextStyleDraft, type TextColorOptions } from '../../../api/_textStyle';
 import { TextBlockControls } from './TextStyleControls';
 import { OnScreenTextEditor, HookProposals } from './OnScreenTextEditor';
+import { ControlesDeSonido } from './ControlesDeSonido';
 import { VentanaLateral } from './VentanaLateral';
 import {
   imageBlocksToSend, imagePlacementDraftOf, LAMINA_SIN_COLOCACION, NO_SAFE_ZONE, roleTextOf,
@@ -660,6 +661,8 @@ export function PieceActionsBar({
   const [pantallaAspect, setPantallaAspect] = useState(4 / 5);
   // La ventana del video se abre aparte: un video no se recompone por el panel de imagen (`PIEZA_DE_VIDEO`).
   const [pantallaVideo, setPantallaVideo] = useState(false);
+  // 2026-11-17 — la ventana «Controles de sonido» (boceto aprobado por Sam). Una ventana a la vez: texto o sonido.
+  const [sonidoVideo, setSonidoVideo] = useState(false);
   const elegirLamina = (n: number) => {
     setSlideN(n); setError(null); setPlaceSel(null); setColSel(null); setScaleSel(null);
     if (n > 1) {
@@ -1833,7 +1836,7 @@ export function PieceActionsBar({
   const textoVideo = !!piece.has_video;
   const botonTextoImagen = (texto || textoVideo) && !(textoVideo && pantallaVideo) && (
     <button
-      onClick={() => { if (textoVideo) { setPantallaVideo(true); setPanel(null); } else { open('regen'); setRegenTab('text'); } }}
+      onClick={() => { if (textoVideo) { setPantallaVideo(true); setSonidoVideo(false); setPanel(null); } else { open('regen'); setRegenTab('text'); } }}
       disabled={!!busy}
       title={textoVideo
         ? 'El texto sobre el video: gancho, títulos clave, CTA, rol y subtítulos, con su lugar y tamaño. Sólo se redibuja el texto sobre el video limpio.'
@@ -1842,6 +1845,29 @@ export function PieceActionsBar({
     >
       {ICON.edit_text} Texto en pantalla
     </button>
+  );
+  // 2026-11-17 — «Sonido», al lado de «Texto en pantalla» en la tarjeta de un video: abre «Controles de sonido».
+  const botonSonido = textoVideo && !sonidoVideo && (
+    <button
+      onClick={() => { setSonidoVideo(true); setPantallaVideo(false); setPanel(null); }}
+      disabled={!!busy}
+      title="El sonido del video: música de fondo y efectos, cada uno con sus presets, volumen y librería. El texto no cambia."
+      className={cn('flex items-center justify-center gap-2 transition-colors', WEIGHT_SHAPE.tertiary, BUTTON_STYLE.recompose_image)}
+    >
+      <Music size={14} /> Sonido
+    </button>
+  );
+  const ventanaSonido = textoVideo && sonidoVideo && (
+    <VentanaLateral>
+    <div className="rounded-xl border border-violet-500/25 bg-violet-500/[0.04] p-2.5 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-medium text-violet-200">Controles de sonido</p>
+        <button type="button" onClick={() => setSonidoVideo(false)} className="text-[11px] text-zinc-400 hover:text-zinc-200">Cerrar</button>
+      </div>
+      <ControlesDeSonido pieceId={piece.piece_id} token={token}
+        onApplied={(r) => onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: false, refreshed: r.html !== null, posts: 0 })} />
+    </div>
+    </VentanaLateral>
   );
   // 2026-11-16 — en escritorio, la ventana va AL LADO del video (`VentanaLateral`); sin sitio, debajo como antes.
   const ventanaVideo = textoVideo && pantallaVideo && (
@@ -1869,9 +1895,11 @@ export function PieceActionsBar({
               <div className="flex gap-1.5 flex-wrap items-center">
                 {arreglo.map(pintar)}
                 {botonTextoImagen}
+                {botonSonido}
               </div>
             )}
             {ventanaVideo}
+            {ventanaSonido}
           </motion.div>
   );
 
@@ -1898,9 +1926,11 @@ export function PieceActionsBar({
             <div className="flex gap-1.5 flex-wrap items-center">
               {deImagen.map(pintar)}
               {botonTextoImagen}
+              {botonSonido}
             </div>
           ))}
           {ventanaVideo}
+          {ventanaSonido}
         </div>
         {textView}
         {reader}

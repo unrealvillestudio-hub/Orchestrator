@@ -1,0 +1,364 @@
+[
+ {
+  "preset_key": "sound_bed_soft_pulse",
+  "kind": "bed",
+  "name": "Pulso suave",
+  "brand_id": null,
+  "active": true,
+  "sort": 110,
+  "status": "proposed",
+  "spec": {
+   "bed": {
+    "sound": "bed_soft_pulse",
+    "duck_db": 9,
+    "release_ms": 500,
+    "under_voice_lu": 14
+   }
+  }
+ },
+ {
+  "preset_key": "sound_bed_warm_pad",
+  "kind": "bed",
+  "name": "Calma cálida",
+  "brand_id": null,
+  "active": true,
+  "sort": 120,
+  "status": "proposed",
+  "spec": {
+   "bed": {
+    "sound": "bed_warm_pad",
+    "duck_db": 9,
+    "release_ms": 500,
+    "under_voice_lu": 16
+   }
+  }
+ },
+ {
+  "preset_key": "sound_bed_pluck_bright",
+  "kind": "bed",
+  "name": "Animado y claro",
+  "brand_id": null,
+  "active": true,
+  "sort": 130,
+  "status": "proposed",
+  "spec": {
+   "bed": {
+    "sound": "bed_pluck_bright",
+    "duck_db": 9,
+    "release_ms": 500,
+    "under_voice_lu": 13
+   }
+  }
+ },
+ {
+  "preset_key": "sound_bed_marimba_light",
+  "kind": "bed",
+  "name": "Marimba amable",
+  "brand_id": null,
+  "active": true,
+  "sort": 140,
+  "status": "proposed",
+  "spec": {
+   "bed": {
+    "sound": "bed_marimba_light",
+    "duck_db": 9,
+    "release_ms": 500,
+    "under_voice_lu": 14
+   }
+  }
+ },
+ {
+  "preset_key": "sound_bed_tension_pulse",
+  "kind": "bed",
+  "name": "Tensión contenida",
+  "brand_id": null,
+  "active": true,
+  "sort": 150,
+  "status": "proposed",
+  "spec": {
+   "bed": {
+    "sound": "bed_tension_pulse",
+    "duck_db": 9,
+    "release_ms": 500,
+    "under_voice_lu": 14
+   }
+  }
+ },
+ {
+  "preset_key": "sound_bed_lofi_keys",
+  "kind": "bed",
+  "name": "Teclas relajadas",
+  "brand_id": null,
+  "active": true,
+  "sort": 160,
+  "status": "proposed",
+  "spec": {
+   "bed": {
+    "sound": "bed_lofi_keys",
+    "duck_db": 9,
+    "release_ms": 500,
+    "under_voice_lu": 13
+   }
+  }
+ },
+ {
+  "preset_key": "sound_fx_discreet",
+  "kind": "effects",
+  "name": "Discreto",
+  "brand_id": null,
+  "active": true,
+  "sort": 210,
+  "status": "proposed",
+  "spec": {
+   "bed": null,
+   "cues": {
+    "shot_cut": {
+     "sound": "sfx_cut_swish"
+    },
+    "digit_land": {
+     "sound": "sfx_digit_tick"
+    },
+    "block_entry": {
+     "by_layer": {
+      "hook": {
+       "sound": "sfx_block_entry_whoosh"
+      },
+      "key_title": {
+       "sound": "sfx_block_entry_whoosh"
+      },
+      "cta": {
+       "sound": "sfx_cta_chime"
+      },
+      "role": {
+       "sound": "sfx_word_pop"
+      }
+     },
+     "by_text_preset": {
+      "key_title_stamp_spring": {
+       "sound": "sfx_stamp_impact"
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "preset_key": "sound_fx_warm",
+  "kind": "effects",
+  "name": "Cálido",
+  "brand_id": null,
+  "active": true,
+  "sort": 220,
+  "status": "proposed",
+  "spec": {
+   "bed": null,
+   "cues": {
+    "shot_cut": {
+     "sound": "sfx_cut_air_puff"
+    },
+    "digit_land": {
+     "sound": "sfx_digit_click_wood"
+    },
+    "block_entry": {
+     "by_layer": {
+      "hook": {
+       "sound": "sfx_block_entry_airy"
+      },
+      "key_title": {
+       "sound": "sfx_block_entry_airy"
+      },
+      "cta": {
+       "sound": "sfx_cta_pluck_hook"
+      },
+      "role": {
+       "sound": "sfx_word_tap"
+      }
+     },
+     "by_text_preset": {
+      "key_title_stamp_spring": {
+       "sound": "sfx_impact_soft_thump"
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "preset_key": "sound_fx_bright",
+  "kind": "effects",
+  "name": "Brillante",
+  "brand_id": null,
+  "active": true,
+  "sort": 230,
+  "status": "proposed",
+  "spec": {
+   "bed": null,
+   "cues": {
+    "shot_cut": {
+     "sound": "sfx_cut_swish"
+    },
+    "digit_land": {
+     "sound": "sfx_digit_blip"
+    },
+    "block_entry": {
+     "by_layer": {
+      "hook": {
+       "sound": "sfx_block_entry_swipe"
+      },
+      "key_title": {
+       "sound": "sfx_block_entry_swipe"
+      },
+      "cta": {
+       "sound": "sfx_cta_sparkle"
+      },
+      "role": {
+       "sound": "sfx_word_bubble"
+      }
+     },
+     "by_text_preset": {
+      "key_title_stamp_spring": {
+       "sound": "sfx_stamp_impact"
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "preset_key": "sound_fx_numbers",
+  "kind": "effects",
+  "name": "Para cifras",
+  "brand_id": null,
+  "active": true,
+  "sort": 240,
+  "status": "proposed",
+  "spec": {
+   "bed": null,
+   "cues": {
+    "shot_cut": {
+     "sound": "sfx_cut_swish"
+    },
+    "digit_land": {
+     "sound": "sfx_digit_tick"
+    },
+    "block_entry": {
+     "by_layer": {
+      "hook": {
+       "sound": "sfx_block_entry_riser"
+      },
+      "key_title": {
+       "sound": "sfx_block_entry_riser"
+      },
+      "cta": {
+       "sound": "sfx_cta_rise_ding"
+      },
+      "role": {
+       "sound": "sfx_word_tap"
+      }
+     },
+     "by_text_preset": {
+      "key_title_stamp_spring": {
+       "sound": "sfx_impact_deep_boom"
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "preset_key": "sound_fx_friendly",
+  "kind": "effects",
+  "name": "Amable",
+  "brand_id": null,
+  "active": true,
+  "sort": 250,
+  "status": "proposed",
+  "spec": {
+   "bed": null,
+   "cues": {
+    "shot_cut": {
+     "sound": "sfx_cut_air_puff"
+    },
+    "digit_land": {
+     "sound": "sfx_digit_click_wood"
+    },
+    "block_entry": {
+     "by_layer": {
+      "hook": {
+       "sound": "sfx_block_entry_whoosh"
+      },
+      "key_title": {
+       "sound": "sfx_block_entry_whoosh"
+      },
+      "cta": {
+       "sound": "sfx_cta_chime"
+      },
+      "role": {
+       "sound": "sfx_word_bubble"
+      }
+     },
+     "by_text_preset": {
+      "key_title_stamp_spring": {
+       "sound": "sfx_impact_soft_thump"
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "preset_key": "sound_fx_minimal",
+  "kind": "effects",
+  "name": "Mínimo",
+  "brand_id": null,
+  "active": true,
+  "sort": 260,
+  "status": "proposed",
+  "spec": {
+   "bed": null,
+   "cues": {
+    "shot_cut": {
+     "sound": null
+    },
+    "digit_land": {
+     "sound": "sfx_digit_tick"
+    },
+    "block_entry": {
+     "by_layer": {
+      "hook": {
+       "sound": null
+      },
+      "key_title": {
+       "sound": null
+      },
+      "cta": {
+       "sound": "sfx_cta_chime"
+      },
+      "role": {
+       "sound": null
+      }
+     },
+     "by_text_preset": {
+      "key_title_stamp_spring": {
+       "sound": null
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "preset_key": "sound_soft_pulse",
+  "kind": "mixed",
+  "name": "Pulso suave",
+  "brand_id": null,
+  "active": true,
+  "sort": 10,
+  "status": "proposed",
+  "spec": {
+   "bed": {
+    "sound": "bed_soft_pulse"
+   }
+  }
+ }
+]
