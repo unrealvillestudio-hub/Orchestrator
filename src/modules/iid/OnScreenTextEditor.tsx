@@ -6,6 +6,7 @@ import {
 } from '../../services/calibrationInbox';
 import type { CastMember, PresetsByLayer, PresetView, TextAlign, TextLayers } from '../../../api/_pieceText';
 import { MARK_KINDS, pruneMarks, type BlockMarks } from './textoMarcas';
+import { dragTargetsOf, type BlockRef, type DraftBlocks } from './arrastre';
 import { Alineacion, FranjaModo, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel } from './TextoVisual';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
 import {
@@ -162,6 +163,30 @@ export function textLayersFromDraft(d: VideoTextDraft, proposals: PieceTextPropo
     cta: cta ? { text: cta.text, at_ms: ctaAt, preset_key: d.cta.preset_key, pattern_key: cta.pattern_key ?? null, ...conPlace(d.cta.place), ...styleFields(cta.text, d.cta.style) } : null,
     identity: { strip: d.strip.on, identity_role: d.strip.on ? d.strip.role || null : null },
   };
+}
+
+/**
+ * Qué bloques del borrador viajan a VideoLab, con su índice en el borrador y su hora de inicio: lo que necesita el
+ * arrastre para saber qué bloque de la escena es cuál. Sale de `textLayersFromDraft`, la misma fuente que se manda. PURO.
+ */
+export function draftBlocksOf(d: VideoTextDraft, proposals: PieceTextProposal['proposals'], durationMs: number | null): DraftBlocks {
+  const capas = textLayersFromDraft(d, proposals, durationMs);
+  const kIdx = d.key_titles.map((k, i) => (k.on && k.text.trim() ? i : -1)).filter((i) => i >= 0);
+  const rIdx = d.roles.map((r, i) => (r.show ? i : -1)).filter((i) => i >= 0);
+  return {
+    hook: capas.hook ? { sent: true, place: d.hook.place } : null,
+    cta: capas.cta ? { sent: true, at_ms: capas.cta.at_ms, place: d.cta.place } : null,
+    key_titles: kIdx.map((i, j) => ({ index: i, at_ms: capas.key_titles[j]?.at_ms ?? 0, place: d.key_titles[i].place, label: `Título clave ${j + 1}` })),
+    roles: rIdx.map((i, j) => ({ index: i, at_ms: capas.roles[j]?.at_ms ?? 0, place: d.roles[i].place, label: `Rol · ${d.roles[i].name}` })),
+  };
+}
+
+/** El borrador con un bloque colocado a mano en `place` (lo que hace soltar un bloque arrastrado). PURO. */
+export function withPlace(d: VideoTextDraft, ref: BlockRef, place: Place): VideoTextDraft {
+  if (ref.block === 'hook') return { ...d, hook: { ...d.hook, place } };
+  if (ref.block === 'cta') return { ...d, cta: { ...d.cta, place } };
+  if (ref.block === 'key_titles') return { ...d, key_titles: d.key_titles.map((k, i) => (i === ref.index ? { ...k, place } : k)) };
+  return { ...d, roles: d.roles.map((r, i) => (i === ref.index ? { ...r, place } : r)) };
 }
 
 /** Los rectángulos de la vista previa de un video: un bloque por capa elegida. PURO. */
@@ -791,7 +816,9 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
 
       {prop.clean_video_url && (
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-2">
-          <VistaFiel videoUrl={prop.clean_video_url} result={vista.result} loading={vista.loading} error={vista.error} width={240} />
+          <VistaFiel videoUrl={prop.clean_video_url} result={vista.result} loading={vista.loading} error={vista.error} width={240}
+            targets={vista.result?.ok && vista.result.scene ? dragTargetsOf(vista.result.scene, draftBlocksOf(draft, prop.proposals, prop.duration_ms ?? null)) : []}
+            onPlace={enCurso ? undefined : (ref, place) => setDraft(withPlace(draft, ref, place))} />
         </div>
       )}
       <Seccion titulo={prop.clean_video_url ? 'Esquema de posiciones' : 'Vista previa'} resumen="aproximada">
