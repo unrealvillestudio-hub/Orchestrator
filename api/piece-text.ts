@@ -32,7 +32,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, extractToken, ensureArtifact, fetchPiece, SB_URL, SB_KEY } from './_calibrationShared.js';
-import { emphasisColorOptions, identityColorOptions } from './_overlayText.js';
+import { emphasisColorOptions, identityColorOptions, identityModeOf } from './_overlayText.js';
 import { fetchWithTimeout } from './_fetchWithTimeout.js';
 import { aspectOf } from './_onScreenText.js';
 import { requireReviewer, guardPiece, VISTAS_DE_PIEZA, esAdmin } from './_reviewScope.js';
@@ -40,7 +40,8 @@ import {
   assetsAfterFailedJob, assetsAfterTextJob, buildCopyLabBody, buildCopyLabSource, buildVideoLabBody, castOf,
   copyLabLanguageOf, errorLabelOf, goalOf, groupPresets, hasCleanVideo, labExecuteUrl, mediumOf, NO_CLEAN_VIDEO,
   RECENT_PIECES_N, recentPatternKeysOf, retiredPresetsOf, validateTextLayers, labBaseUrl, suggestedPresetsOf,
-  type PresetsByLayer, type PresetView, type SuggestedPresets,
+  buildSceneBody, keywordCandidatesOf, layersForVariant, SCENE_VARIANTS_MAX, TEXT_LAYERS,
+  type PresetsByLayer, type PresetView, type SuggestedPresets, type TextLayer,
 } from './_pieceText.js';
 
 const headers = (profile: 'public' | 'content' | 'intel', extra: Record<string, string> = {}) =>
@@ -100,14 +101,14 @@ async function coloresDeMarca(brandId: string) {
     leer(`imagelab_overlay_tokens?or=(brand_id.eq.${b},brand_id.is.null)&active=eq.true&select=brand_id,canal,tokens`),
     leer(`brand_palette?brand_id=eq.${b}&select=role,hex`),
   ]);
-  return { accent: emphasisColorOptions(tokens, palette, brandId), strip: identityColorOptions(tokens, palette, brandId) };
+  return { accent: emphasisColorOptions(tokens, palette, brandId), strip: identityColorOptions(tokens, palette, brandId), stripMode: identityModeOf(tokens, brandId) };
 }
 
 /** Los presets de VideoLab de la marca y del sistema. Si la tabla aún no existe, se dice en vez de inventarlos. */
 async function presetsDe(brandId: string): Promise<{ presets: PresetsByLayer | null; retired: PresetView[]; error: string | null }> {
   try {
     const rows = await leer(`videolab_text_presets?or=(brand_id.is.null,brand_id.eq.${encodeURIComponent(brandId)})`
-      + '&active=eq.true&select=preset_key,layer,name,description,brand_id,active,sort,status&order=sort.asc');
+      + '&active=eq.true&select=preset_key,layer,name,description,brand_id,active,sort,status,spec&order=sort.asc');
     return { presets: groupPresets(rows, brandId), retired: retiredPresetsOf(rows, brandId), error: null };
   } catch (err) {
     return { presets: null, retired: [], error: `No se pudieron leer los presets de VideoLab (videolab_text_presets): ${String(err instanceof Error ? err.message : err)}` };
@@ -127,16 +128,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const pieceId = typeof body.piece_id === 'string' ? body.piece_id.trim() : '';
   if (!pieceId) return res.status(400).json({ error: 'piece_id required' });
   if (!(await guardPiece(res, session, pieceId))) return;
-  if (body.action !== 'propose' && body.action !== 'apply') {
-    return res.status(400).json({ error: 'invalid action', detail: "action debe ser 'propose' o 'apply'" });
+  if (body.action !== 'propose' && body.action !== 'apply' && body.action !== 'scenes') {
+    return res.status(400).json({ error: 'invalid action', detail: "action debe ser 'propose', 'apply' o 'scenes'" });
   }
 
   try {
     const piece = await fetchPiece(pieceId);
     if (!piece) return res.status(404).json({ error: 'piece_not_found', detail: `la pieza ${pieceId} no existe` });
-    if (piece.discarded_at) {
+    if (piece.discarded_at && body.action !== 'scenes') {
       return res.status(409).json({ error: 'piece_already_sealed', detail: 'la pieza ya está sellada: su texto ya no se edita', discarded_at: piece.discarded_at });
     }
+    if (body.action === 'scenes') return escenas(res, piece, body.text_layers, (body as any).variants);
     return body.action === 'propose' ? proponer(res, piece, body.goal, esAdmin(session.role)) : aplicar(res, piece, body.text_layers);
   } catch (err) {
     console.error(`[piece-text] ${body.action} ${pieceId}: ${String(err)}`);
@@ -187,7 +189,7 @@ async function proponer(res: VercelResponse, piece: any, goalRaw: unknown, admin
   // Los colores y los presets sólo hacen falta para editar un video.
   const [colores, presets] = medium === 'video'
     ? await Promise.all([coloresDeMarca(brandId), presetsDe(brandId)])
-    : [{ accent: [], strip: [] }, { presets: null, retired: [] as PresetView[], error: null }];
+    : [{ accent: [], strip: [], stripMode: null as string | null }, { presets: null, retired: [] as PresetView[], error: null }];
   // Rotación (2026-11-17): sólo en una generación nueva, sin `text_layers` todavía.
   const rotacion = medium === 'video' && !assets?.video?.text_layers && presets.presets
     ? await sugerenciaDeEstilos(brandId, presets.presets)
@@ -212,6 +214,16 @@ async function proponer(res: VercelResponse, piece: any, goalRaw: unknown, admin
     can_change_preset_status: admin,
     retired_presets: admin ? presets.retired : [],
     accent_options: colores.accent, strip_options: colores.strip,
+    // 2026-11-17 — ventana visual: el video limpio para la vista previa fiel, el modo de la franja (dato de la marca) y
+    // las palabras clave candidatas para los subtítulos «sólo palabras clave».
+    strip_mode: colores.stripMode,
+    clean_video_url: conLimpio ? String(assets.video.clean_video.url) : null,
+    spoken_words: conLimpio && Array.isArray(assets.video.timeline?.words)
+      ? assets.video.timeline.words.map((w: any) => String(w?.text ?? w?.word ?? '')).filter(Boolean).slice(0, 2000) : [],
+    keyword_candidates: conLimpio ? keywordCandidatesOf(assets.video.timeline, [
+      ...(Array.isArray(output.key_phrases) ? output.key_phrases.map((k: any) => String(k?.text ?? '')) : []),
+      ...(Array.isArray(output.hooks) ? output.hooks.map((h: any) => String(h?.text ?? '')) : []),
+    ]) : [],
     cast: medium === 'video' ? castOf(assets) : [],
     current: { text_layers: assets?.video?.text_layers ?? null, hook: source.current_hook },
     duration_ms: Number.isFinite(durS) && durS > 0 ? Math.round(durS * 1000) : null,
@@ -222,6 +234,63 @@ async function proponer(res: VercelResponse, piece: any, goalRaw: unknown, admin
 }
 
 // ── APLICAR ────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * LA VISTA PREVIA FIEL (2026-11-17, contrato VideoLab §4 ter.6). `POST { action: 'scenes', text_layers, variants? }`.
+ * Sólo lee: valida lo elegido igual que `apply` y pide a VideoLab `POST /api/text-scene` la escena resuelta (geometría,
+ * colores, fuentes y tramos) para la vista grande y, por cada variante `{ layer, preset_key }`, la de una miniatura con
+ * sólo esa capa en ese estilo. No crea jobs ni cuesta proveedor (contrato). Si una variante falla, va con su error y las
+ * demás siguen.
+ */
+async function escenas(res: VercelResponse, piece: any, raw: unknown, variantsRaw: unknown) {
+  const brandId = String(piece.brand_id ?? '');
+  const assets = piece.assets ?? {};
+  if (mediumOf(assets) !== 'video') return res.status(409).json({ error: 'not_a_video_piece', detail: 'la vista previa fiel es de piezas de video' });
+  if (!hasCleanVideo(assets)) return res.status(409).json({ error: 'no_clean_video', detail: NO_CLEAN_VIDEO });
+  if (!piece.platform) return res.status(409).json({ error: 'piece_without_platform', detail: 'la pieza no declara plataforma: VideoLab no sabe qué zona segura usar' });
+  const [colores, presets] = await Promise.all([coloresDeMarca(brandId), presetsDe(brandId)]);
+  if (!presets.presets) return res.status(503).json({ error: 'presets_unavailable', detail: presets.error });
+  const durS = Number(assets.video.duration_s);
+  const durationMs = Number.isFinite(durS) && durS > 0 ? Math.round(durS * 1000) : null;
+  const v = validateTextLayers(raw, {
+    presets: presets.presets, accentRoles: colores.accent.map((c) => c.role), stripRoles: colores.strip.map((c) => c.role),
+    durationMs, castIds: castOf(assets).map((c) => c.person_id),
+  });
+  if (!v.ok) return res.status(400).json({ error: 'invalid text_layers', detail: v.errors.join(' · '), errors: v.errors });
+  const rows = await leer('lab_configs?lab_key=eq.videolab&select=api_endpoint&limit=1');
+  const base = labBaseUrl(Array.isArray(rows) ? rows[0] : null);
+  if (!base) return res.status(503).json({ error: 'lab_not_configured', detail: 'lab_configs no declara api_endpoint para videolab' });
+
+  const pedir = async (textLayers: any) => {
+    const r = await fetchWithTimeout('edge', `${base}/api/text-scene`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildSceneBody({ brandId, platform: piece.platform, timeline: assets.video.timeline, durationMs, textLayers })),
+    });
+    const d: any = await r.json().catch(() => ({}));
+    if (!r.ok || d?.status !== 'ok') return { ok: false as const, error: String(d?.error_label ?? `HTTP ${r.status}`), detail: String(d?.message ?? d?.error ?? '') };
+    const rt = String(d.runtime_url ?? '');
+    return {
+      ok: true as const, engine: d.engine ?? null, fidelity: d.fidelity ?? null,
+      runtime_url: /^https:\/\//.test(rt) ? rt : `${base}${rt.startsWith('/') ? rt : `/${rt}`}`,
+      scene: d.scene ?? null, warnings: Array.isArray(d?.text_layout?.warnings) ? d.text_layout.warnings : [],
+    };
+  };
+
+  const variantes = (Array.isArray(variantsRaw) ? variantsRaw : []).slice(0, SCENE_VARIANTS_MAX)
+    .map((x: any) => ({ layer: String(x?.layer ?? '') as TextLayer, preset_key: String(x?.preset_key ?? '') }))
+    .filter((x) => (TEXT_LAYERS as readonly string[]).includes(x.layer) && presets.presets![x.layer].some((p) => p.preset_key === x.preset_key));
+  try {
+    // De a 4 a la vez: VideoLab descarga fuentes por pedido.
+    const out: any[] = new Array(variantes.length);
+    let i = 0;
+    const trabajador = async () => { while (i < variantes.length) { const k = i++; const vl = layersForVariant(v.value, variantes[k].layer, variantes[k].preset_key);
+      out[k] = { ...variantes[k], ...(vl ? await pedir(vl).catch((e) => ({ ok: false, error: 'VIDEOLAB_UNREACHABLE', detail: String(e?.message ?? e) })) : { ok: false, error: 'NO_TEXT', detail: 'esa capa no tiene texto que mostrar' }) }; } };
+    const [principal] = await Promise.all([pedir(v.value), ...[0, 1, 2, 3].map(trabajador)]);
+    return res.status(200).json({ ok: true, main: principal, variants: out });
+  } catch (err) {
+    return res.status(503).json({ error: 'videolab_unreachable', detail: String(err instanceof Error ? err.message : err) });
+  }
+}
 
 async function aplicar(res: VercelResponse, piece: any, raw: unknown) {
   const brandId = String(piece.brand_id ?? '');

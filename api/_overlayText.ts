@@ -333,6 +333,16 @@ export function shadowDefaultLabel(o: ShadowOption): string {
  * y los accent con los que la marca resalta. Es la lista que acepta el compositor (`identityAllowedRoles`, ImageLab
  * 1.10.0). Sin franja en la capa de la marca, nada que elegir. PURO.
  */
+/**
+ * El modo de la franja de identidad de la marca (`tokens.identity.mode` de su fila sin canal): `none` | `edge_left` |
+ * `edge_right` | `edge_bottom`. Es dato de la marca; la ventana sólo lo enseña. `null` si la marca no lo declara. PURO.
+ */
+export function identityModeOf(tokenRows: Array<{ brand_id?: unknown; canal?: unknown; tokens?: any }>, brandId: string): string | null {
+  const fila = (tokenRows ?? []).find((r) => r?.brand_id === brandId && (r?.canal == null || r?.canal === ''));
+  const m = fila?.tokens?.identity?.mode;
+  return typeof m === 'string' && m ? m : null;
+}
+
 export function identityColorOptions(
   tokenRows: Array<{ brand_id?: unknown; canal?: unknown; tokens?: any }>,
   palette: Array<{ role?: unknown; hex?: unknown }>,

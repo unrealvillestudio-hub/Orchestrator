@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { cn, Spinner } from '../../ui/components';
 import {
-  proposePieceText, applyPieceText, pollPieceText, changePresetStatus, CalibrationError,
+  proposePieceText, applyPieceText, pollPieceText, changePresetStatus, previewPieceText, CalibrationError, type SceneResult,
   type PieceTextProposal, type TextProposal,
 } from '../../services/calibrationInbox';
-import type { CastMember, PresetsByLayer, PresetView, TextLayers } from '../../../api/_pieceText';
+import type { CastMember, PresetsByLayer, PresetView, TextAlign, TextLayers } from '../../../api/_pieceText';
+import { MARK_KINDS, pruneMarks, type BlockMarks } from './textoMarcas';
+import { Alineacion, FranjaModo, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel } from './TextoVisual';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
 import {
   BLOCK_LABELS, CAPTIONS_BAND, PCT_STEP, PREVIEW_AUTO, PREVIEW_NOTE, ROLE_NO_PERSONA, VIDEO_SAFE_ZONE_APPROX,
@@ -32,13 +34,41 @@ import {
 export const OWN = 'own' as const;
 export type Choice = number | typeof OWN | null;
 
+/**
+ * Estilo en línea de un bloque (2026-11-17, ventana visual): alineación, color del resaltado y marcas por palabra
+ * (`textoMarcas.ts`). `null` = lo del estilo elegido.
+ */
+export interface BlockStyle { align: TextAlign | null; emphasis_role: string | null; marks: BlockMarks }
+const SIN_ESTILO: BlockStyle = { align: null, emphasis_role: null, marks: {} };
+/** El estilo en línea guardado en un bloque de `text_layers`. PURO. */
+export function blockStyleOf(b: any): BlockStyle {
+  if (!b) return SIN_ESTILO;
+  const lista = (v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : []);
+  const marks: BlockMarks = {};
+  for (const k of MARK_KINDS) { const l = lista(b[k]); if (l.length) marks[k] = l; }
+  return {
+    align: b.align === 'left' || b.align === 'center' || b.align === 'right' ? b.align : null,
+    emphasis_role: typeof b.emphasis_role === 'string' && b.emphasis_role ? b.emphasis_role : null,
+    marks,
+  };
+}
+/** Los campos del contrato que salen de un estilo en línea, sólo los que tienen algo; las marcas que ya no están en el texto se caen. PURO. */
+export function styleFields(text: string, st: BlockStyle): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (st.align) out.align = st.align;
+  if (st.emphasis_role) out.emphasis_role = st.emphasis_role;
+  const vivas = pruneMarks(text, st.marks);
+  for (const k of MARK_KINDS) if (vivas[k]?.length) out[k] = vivas[k];
+  return out;
+}
+
 export interface VideoTextDraft {
-  hook: { choice: Choice; own: string; preset_key: string; dur_s: number; place: Place | null };
+  hook: { choice: Choice; own: string; preset_key: string; dur_s: number; place: Place | null; style: BlockStyle };
   roles: Array<{ person_id: string; name: string; show: boolean; text: string; at_s: number; dur_s: number; preset_key: string; place: Place | null }>;
   /** `zoom` null = el tamaño de siempre; los subtítulos sólo cambian de tamaño (banda fija). */
-  captions: { enabled: boolean; preset_key: string; accent_role: string; zoom: number | null };
-  key_titles: Array<{ text: string; on: boolean; at_s: number; dur_s: number; preset_key: string; own: boolean; place: Place | null }>;
-  cta: { choice: Choice; own: string; preset_key: string; at_s: number; place: Place | null };
+  captions: { enabled: boolean; preset_key: string; accent_role: string; zoom: number | null; keywords: string[] };
+  key_titles: Array<{ text: string; on: boolean; at_s: number; dur_s: number; preset_key: string; own: boolean; place: Place | null; style: BlockStyle }>;
+  cta: { choice: Choice; own: string; preset_key: string; at_s: number; place: Place | null; style: BlockStyle };
   strip: { on: boolean; role: string };
 }
 
@@ -63,6 +93,7 @@ export function videoTextDraftOf(p: Pick<PieceTextProposal, 'presets' | 'cast' |
       preset_key: cur?.hook?.preset_key ?? defaultKey(p, 'hook'),
       dur_s: cur?.hook ? Math.max(0.5, (cur.hook.end_ms - cur.hook.start_ms) / 1000) : 2.6,
       place: placeOf(cur?.hook?.place),
+      style: blockStyleOf(cur?.hook),
     },
     roles: (p.cast ?? []).map((c, i) => {
       const r = rolDe(c);
@@ -79,19 +110,21 @@ export function videoTextDraftOf(p: Pick<PieceTextProposal, 'presets' | 'cast' |
       preset_key: cur?.captions?.preset_key ?? defaultKey(p, 'caption'),
       accent_role: cur?.captions?.accent_role ?? defaultRole(p.accent_options ?? []),
       zoom: typeof zoomCap === 'number' ? clampZoom(zoomCap) : null,
+      keywords: Array.isArray(cur?.captions?.keywords) ? cur!.captions!.keywords!.filter((w) => typeof w === 'string' && w) : [],
     },
     key_titles: [
       ...(p.proposals?.key_phrases ?? []).map((k) => {
         const v = cur?.key_titles?.find((t) => t.text === k.text);
-        return { text: k.text, on: !!v, at_s: v ? v.at_ms / 1000 : 0, dur_s: v ? v.dur_ms / 1000 : 2.5, preset_key: v?.preset_key ?? defaultKey(p, 'key_title'), own: false, place: placeOf(v?.place) };
+        return { text: k.text, on: !!v, at_s: v ? v.at_ms / 1000 : 0, dur_s: v ? v.dur_ms / 1000 : 2.5, preset_key: v?.preset_key ?? defaultKey(p, 'key_title'), own: false, place: placeOf(v?.place), style: blockStyleOf(v) };
       }),
       ...(cur?.key_titles ?? []).filter((t) => !(p.proposals?.key_phrases ?? []).some((k) => k.text === t.text))
-        .map((t) => ({ text: t.text, on: true, at_s: t.at_ms / 1000, dur_s: t.dur_ms / 1000, preset_key: t.preset_key, own: true, place: placeOf(t.place) })),
+        .map((t) => ({ text: t.text, on: true, at_s: t.at_ms / 1000, dur_s: t.dur_ms / 1000, preset_key: t.preset_key, own: true, place: placeOf(t.place), style: blockStyleOf(t) })),
     ],
     cta: {
       choice: cur?.cta?.text ? OWN : null, own: cur?.cta?.text ?? '',
       preset_key: cur?.cta?.preset_key ?? defaultKey(p, 'cta'), at_s: cur?.cta ? cur.cta.at_ms / 1000 : 0,
       place: placeOf(cur?.cta?.place),
+      style: blockStyleOf(cur?.cta),
     },
     strip: { on: cur?.identity?.strip ?? false, role: cur?.identity?.identity_role ?? cur?.identity?.strip_role ?? defaultRole(p.strip_options ?? []) },
   };
@@ -116,13 +149,17 @@ export function textLayersFromDraft(d: VideoTextDraft, proposals: PieceTextPropo
   const cta = elegido(d.cta.choice, d.cta.own, proposals.share_ctas);
   const ctaAt = d.cta.at_s > 0 ? ms(d.cta.at_s) : Math.max(0, (durationMs ?? 0) - 6000);
   return {
-    hook: hook ? { text: hook.text, preset_key: d.hook.preset_key, start_ms: 0, end_ms: ms(d.hook.dur_s), emphasis: [], pattern_key: hook.pattern_key ?? null, ...conPlace(d.hook.place) } : null,
+    hook: hook ? (() => {
+      const { emphasis, ...resto } = styleFields(hook.text, d.hook.style) as { emphasis?: string[] };
+      return { text: hook.text, preset_key: d.hook.preset_key, start_ms: 0, end_ms: ms(d.hook.dur_s), emphasis: emphasis ?? [], pattern_key: hook.pattern_key ?? null, ...conPlace(d.hook.place), ...resto };
+    })() : null,
     roles: d.roles.filter((r) => r.show).map((r) => ({ person_id: r.person_id, text: r.text.trim(), show: true, at_ms: ms(r.at_s), dur_ms: ms(r.dur_s), preset_key: r.preset_key, ...conPlace(r.place) })),
     captions: d.captions.enabled
-      ? { enabled: true, preset_key: d.captions.preset_key, accent_role: d.captions.accent_role, ...(d.captions.zoom != null ? { place: { zoom: clampZoom(d.captions.zoom) } } : {}) }
+      ? { enabled: true, preset_key: d.captions.preset_key, accent_role: d.captions.accent_role, ...(d.captions.zoom != null ? { place: { zoom: clampZoom(d.captions.zoom) } } : {}),
+          ...(d.captions.keywords.length ? { keywords: d.captions.keywords.slice(0, 12) } : {}) }
       : null,
-    key_titles: d.key_titles.filter((k) => k.on && k.text.trim()).map((k) => ({ text: k.text.trim(), at_ms: ms(k.at_s), dur_ms: ms(k.dur_s), preset_key: k.preset_key, ...conPlace(k.place) })),
-    cta: cta ? { text: cta.text, at_ms: ctaAt, preset_key: d.cta.preset_key, pattern_key: cta.pattern_key ?? null, ...conPlace(d.cta.place) } : null,
+    key_titles: d.key_titles.filter((k) => k.on && k.text.trim()).map((k) => ({ text: k.text.trim(), at_ms: ms(k.at_s), dur_ms: ms(k.dur_s), preset_key: k.preset_key, ...conPlace(k.place), ...styleFields(k.text.trim(), k.style) })),
+    cta: cta ? { text: cta.text, at_ms: ctaAt, preset_key: d.cta.preset_key, pattern_key: cta.pattern_key ?? null, ...conPlace(d.cta.place), ...styleFields(cta.text, d.cta.style) } : null,
     identity: { strip: d.strip.on, identity_role: d.strip.on ? d.strip.role || null : null },
   };
 }
@@ -156,8 +193,10 @@ const errorDe = (err: unknown, caida: string) => (err instanceof CalibrationErro
 
 export interface PreviewItem { block: ScreenBlock; label: string; place: Place | null; zoom?: number | null }
 
-function Seccion({ titulo, resumen, children, disabledReason }: {
+function Seccion({ titulo, resumen, children, disabledReason, onOpen }: {
   titulo: string; resumen?: string | null; children?: React.ReactNode; disabledReason?: string | null;
+  /** 2026-11-17 — al abrirse: pide las miniaturas de sus estilos sólo cuando alguien va a verlas. */
+  onOpen?: () => void;
 }) {
   if (disabledReason) {
     // Lo que no aplica al formato se VE, desactivado y con su motivo (contrato §4): no se oculta.
@@ -169,7 +208,8 @@ function Seccion({ titulo, resumen, children, disabledReason }: {
     );
   }
   return (
-    <details data-seccion className="group rounded-xl border border-zinc-800 bg-zinc-950/40">
+    <details data-seccion className="group rounded-xl border border-zinc-800 bg-zinc-950/40"
+      onToggle={(e) => { if ((e.currentTarget as HTMLDetailsElement).open) onOpen?.(); }}>
       <summary className="cursor-pointer select-none list-none px-3 py-2 text-[12px] font-medium text-zinc-200 flex items-center justify-between gap-2 [&::-webkit-details-marker]:hidden">
         {/* 2026-11-16 — el pliegue se VE: sin flecha, Sam no veía que cada sección se abre y se cierra. */}
         <span className="flex items-center gap-1.5">
@@ -351,7 +391,14 @@ interface EstadoDeEstilos {
 }
 const EstadoCtx = createContext<EstadoDeEstilos | null>(null);
 
-function Presets({ list, value, onChange, label }: { list: PresetsByLayer[keyof PresetsByLayer] | undefined; value: string; onChange: (k: string) => void; label: string }) {
+/** Las miniaturas de una capa: la escena de cada estilo (o su error), y si se están pidiendo. */
+export interface Miniaturas { loading: boolean; byKey: Record<string, SceneResult>; error: string | null }
+
+function Presets({ list, value, onChange, label, previews, suggested }: {
+  list: PresetsByLayer[keyof PresetsByLayer] | undefined; value: string; onChange: (k: string) => void; label: string;
+  /** 2026-11-17 — con miniaturas, cada estilo es una tarjeta animada con el texto real (dibujada por VideoLab). */
+  previews?: Miniaturas; suggested?: string | null;
+}) {
   const admin = useContext(EstadoCtx);
   const [verRetirados, setVerRetirados] = useState(false);
   const capa = list?.[0]?.layer;
@@ -360,7 +407,38 @@ function Presets({ list, value, onChange, label }: { list: PresetsByLayer[keyof 
   const elegido = list?.find((x) => x.preset_key === value) ?? null;
   return (
     <div className="space-y-1.5">
-      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={label}>
+      {previews && (
+        <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))' }} role="radiogroup" aria-label={label}>
+          {(list ?? []).map((p) => {
+            const m = previews.byKey[p.preset_key];
+            return (
+              <button key={p.preset_key} type="button" role="radio" aria-checked={value === p.preset_key} onClick={() => onChange(p.preset_key)}
+                title={`${p.description}${p.description ? ' · ' : ''}Estado: ${STATUS_LABEL[p.status ?? ''] ?? p.status ?? 'sin estado'}`}
+                className={cn('relative flex flex-col gap-1 p-1 rounded-lg border text-left',
+                  value === p.preset_key ? 'border-violet-500 ring-1 ring-violet-500 bg-violet-500/10' : 'border-zinc-800 bg-zinc-950/40 hover:border-zinc-600')}>
+                <div className="relative rounded-md overflow-hidden bg-zinc-900" style={{ aspectRatio: '9 / 13' }}>
+                  {m?.ok && m.scene && m.runtime_url
+                    ? <div className="absolute inset-0 grid place-items-center p-1"><ScenePlayer scene={m.scene} runtimeUrl={m.runtime_url} width={88} fit="blocks" /></div>
+                    : <span className="absolute inset-0 grid place-items-center text-[9px] text-zinc-600 px-1 text-center">
+                        {previews.loading && !m ? <Spinner size={12} /> : m && !m.ok ? 'sin vista previa' : ''}
+                      </span>}
+                  {suggested === p.preset_key && (
+                    <span className="absolute bottom-1 right-1 px-1.5 rounded-full text-[9px] font-mono bg-black/70 text-cyan-300 border border-cyan-400/40" title="El estilo que propone la rotación para esta marca">rota</span>
+                  )}
+                </div>
+                <span className="text-[11px] leading-tight text-zinc-200 min-h-[2.4em]">{p.name}</span>
+                <span className="flex items-center gap-1 text-[9.5px] text-zinc-500">
+                  <span aria-hidden className={cn('inline-block w-1.5 h-1.5 rounded-full', esValidado(p.status) ? 'bg-cyan-300' : 'border border-amber-400/80')} />
+                  {STATUS_LABEL[p.status ?? ''] ?? 'sin estado'}
+                  <span className="ml-auto font-mono" title={p.engine === 'html' ? 'Vista previa igual al render' : 'Vista previa aproximada'}>{p.engine === 'html' ? 'exacta' : 'aprox.'}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {previews?.error && <p className="text-[10px] text-amber-300/90">{previews.error}</p>}
+      {!previews && <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={label}>
         {(list ?? []).map((p) => (
           <button key={p.preset_key} type="button" role="radio" aria-checked={value === p.preset_key}
             title={`${p.description}${p.description ? ' · ' : ''}Estado: ${STATUS_LABEL[p.status ?? ''] ?? p.status ?? 'sin estado'}`}
@@ -374,7 +452,7 @@ function Presets({ list, value, onChange, label }: { list: PresetsByLayer[keyof 
             <span className="sr-only">({STATUS_LABEL[p.status ?? ''] ?? 'sin estado'})</span>
           </button>
         ))}
-      </div>
+      </div>}
       {admin && elegido && (
         <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500">
           <span>«{elegido.name}»: <span className={esValidado(elegido.status) ? 'text-cyan-300' : 'text-amber-300/90'}>{STATUS_LABEL[elegido.status ?? ''] ?? 'sin estado'}</span></span>
@@ -416,23 +494,6 @@ function Presets({ list, value, onChange, label }: { list: PresetsByLayer[keyof 
         </div>
       )}
       {admin?.aviso && <p className="text-[10px] text-amber-300/90">{admin.aviso}</p>}
-    </div>
-  );
-}
-
-function Colores({ opts, value, onChange, label }: { opts: EmphasisColorOption[]; value: string; onChange: (r: string) => void; label: string }) {
-  if (!opts.length) return <p className="text-[10px] text-zinc-500">La marca no declara colores para esto.</p>;
-  return (
-    <div className="flex items-center gap-1.5 flex-wrap" role="radiogroup" aria-label={label}>
-      {opts.map((o) => (
-        <button key={o.role} type="button" role="radio" aria-checked={value === o.role} onClick={() => onChange(o.role)}
-          title={`${o.role}${o.is_default ? ' (el de la marca)' : ''}`}
-          className={cn('flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] border',
-            value === o.role ? 'border-violet-500/70 bg-violet-500/15 text-violet-100' : 'border-zinc-800 text-zinc-400 hover:border-zinc-600')}>
-          <span className="inline-block w-3 h-3 rounded-full border border-white/20" style={{ background: o.hex }} />
-          {o.role}
-        </button>
-      ))}
     </div>
   );
 }
@@ -607,6 +668,52 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
   };
   useEffect(proponer, [pieceId, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── 2026-11-17 · La vista previa fiel: la escena de VideoLab sobre el video limpio, al momento (sin «Aplicar»). ──
+  const [vista, setVista] = useState<{ loading: boolean; result: SceneResult | null; error: string | null }>({ loading: false, result: null, error: null });
+  const capas = prop && draft ? textLayersFromDraft(draft, prop.proposals, prop.duration_ms ?? null) : null;
+  const firma = capas ? JSON.stringify(capas) : '';
+  useEffect(() => {
+    if (!capas || !prop?.clean_video_url) return;
+    let vivo = true;
+    setVista((v) => ({ ...v, loading: true }));
+    // Se espera a que quien edita deje de tocar: un pedido por pausa, no por tecla.
+    const t = setTimeout(() => {
+      previewPieceText(token, pieceId, capas)
+        .then((r) => { if (vivo) setVista({ loading: false, result: r.main, error: null }); })
+        .catch((err) => { if (vivo) setVista({ loading: false, result: null, error: errorDe(err, 'No se pudo preparar la vista previa.') }); });
+    }, 700);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [firma]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Las miniaturas de cada estilo: se piden al abrir la sección, y otra vez si cambia el texto de esa capa. ──
+  const [minis, setMinis] = useState<Partial<Record<keyof PresetsByLayer, Miniaturas & { firma: string }>>>({});
+  const abiertas = useRef<Set<keyof PresetsByLayer>>(new Set());
+  const firmaCapa = (layer: keyof PresetsByLayer): string => {
+    if (!capas) return '';
+    const sinEstilo = (b: any) => (b ? { ...b, preset_key: undefined, place: undefined, at_ms: undefined } : null);
+    if (layer === 'hook') return JSON.stringify(sinEstilo(capas.hook));
+    if (layer === 'cta') return JSON.stringify(sinEstilo(capas.cta));
+    if (layer === 'key_title') return JSON.stringify(sinEstilo(capas.key_titles[0] ?? null));
+    if (layer === 'role') return JSON.stringify(sinEstilo(capas.roles[0] ?? null));
+    return JSON.stringify(sinEstilo(capas.captions));
+  };
+  const pedirMiniaturas = (layer: keyof PresetsByLayer) => {
+    abiertas.current.add(layer);
+    if (!prop?.clean_video_url || !capas || !prop.presets) return;
+    const f = firmaCapa(layer);
+    if (minis[layer]?.firma === f) return;
+    if (f === 'null') { setMinis((m) => ({ ...m, [layer]: { loading: false, byKey: {}, error: 'Elige primero el texto de esta capa para ver cómo queda cada estilo.', firma: f } })); return; }
+    setMinis((m) => ({ ...m, [layer]: { loading: true, byKey: m[layer]?.byKey ?? {}, error: null, firma: f } }));
+    const variantes = prop.presets[layer].slice(0, 12).map((x) => ({ layer, preset_key: x.preset_key }));
+    previewPieceText(token, pieceId, capas, variantes)
+      .then((r) => setMinis((m) => ({ ...m, [layer]: { loading: false, error: null, firma: f, byKey: Object.fromEntries(r.variants.map((v) => [v.preset_key, v])) } })))
+      .catch((err) => setMinis((m) => ({ ...m, [layer]: { loading: false, byKey: {}, firma: f, error: errorDe(err, 'No se pudieron preparar las miniaturas.') } })));
+  };
+  useEffect(() => {
+    const t = setTimeout(() => abiertas.current.forEach((l) => pedirMiniaturas(l)), 1200);
+    return () => clearTimeout(t);
+  }, [firma]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Sondeo del render mientras haya un job en curso.
   useEffect(() => {
     if (!job) return;
@@ -649,6 +756,19 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
   const ctaElegido = elegido(draft.cta.choice, draft.cta.own, prop.proposals.share_ctas);
   const enCurso = !!job;
   const modo = (pl: Place | null) => (pl ? 'a mano' : 'automático');
+  /** Marcas por palabra, alineación y color del resaltado de un bloque (gancho, título clave, CTA). */
+  const controlesDeEstilo = (texto: string, st: BlockStyle, onSt: (s: BlockStyle) => void) => (
+    <div className="space-y-2 rounded-lg border border-zinc-800/70 p-2">
+      <p className="text-[10px] text-zinc-500">Marcas</p>
+      <MarcasDeTexto text={texto} marks={st.marks} onChange={(m) => onSt({ ...st, marks: m })} />
+      <p className="text-[10px] text-zinc-500">Alineación</p>
+      <Alineacion value={st.align} onChange={(a) => onSt({ ...st, align: a })} />
+      <p className="text-[10px] text-zinc-500">Color del resaltado</p>
+      <Muestras opts={prop.accent_options} value={st.emphasis_role} nullable label="Color del resaltado"
+        onChange={(r) => onSt({ ...st, emphasis_role: r })} />
+    </div>
+  );
+  const sug = prop.suggested_presets ?? {};
 
   const estadoCtx: EstadoDeEstilos | null = prop.can_change_preset_status
     ? { cambiar: cambiarEstado, retirados: prop.retired_presets ?? [], ocupado: presetOcupado, aviso: presetAviso }
@@ -669,22 +789,29 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
         <p className="text-[10px] text-zinc-500">CopyLab no recibió los patrones recientes: los ganchos pueden repetir patrón.</p>
       )}
 
-      <Seccion titulo="Vista previa" resumen="aproximada">
+      {prop.clean_video_url && (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-2">
+          <VistaFiel videoUrl={prop.clean_video_url} result={vista.result} loading={vista.loading} error={vista.error} width={240} />
+        </div>
+      )}
+      <Seccion titulo={prop.clean_video_url ? 'Esquema de posiciones' : 'Vista previa'} resumen="aproximada">
         <SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} />
       </Seccion>
 
-      <Seccion titulo={BLOCK_LABELS.headline} resumen={hookElegido ? `${hookElegido.text} · ${modo(draft.hook.place)}` : null}>
+      <Seccion titulo={BLOCK_LABELS.headline} resumen={hookElegido ? `${hookElegido.text} · ${modo(draft.hook.place)}` : null} onOpen={() => pedirMiniaturas('hook')}>
         <Propuestas list={prop.proposals.hooks} choice={draft.hook.choice} own={draft.hook.own} propio="Escribir uno propio"
           onChoice={(c) => set({ hook: { ...draft.hook, choice: c } })} onOwn={(t) => set({ hook: { ...draft.hook, own: t } })} />
         <p className="text-[10px] text-zinc-500">Animación</p>
-        <Presets list={p?.hook} value={draft.hook.preset_key} label="Animación del gancho" onChange={(k) => set({ hook: { ...draft.hook, preset_key: k } })} />
+        <Presets list={p?.hook} value={draft.hook.preset_key} label="Animación del gancho" onChange={(k) => set({ hook: { ...draft.hook, preset_key: k } })}
+          previews={prop.clean_video_url ? minis.hook ?? { loading: false, byKey: {}, error: null } : undefined} suggested={sug.hook} />
+        {hookElegido && controlesDeEstilo(hookElegido.text, draft.hook.style, (st) => set({ hook: { ...draft.hook, style: st } }))}
         <Segundo label="Duración" value={draft.hook.dur_s} onChange={(n) => set({ hook: { ...draft.hook, dur_s: n } })} />
         <PlaceControls medium="video" block="headline" place={draft.hook.place} onChange={(pl) => set({ hook: { ...draft.hook, place: pl } })} />
       </Seccion>
 
       <Seccion titulo={BLOCK_LABELS.subheadline} disabledReason={noAplica('video', 'subheadline')} />
 
-      <Seccion titulo={BLOCK_LABELS.key_titles} resumen={`${draft.key_titles.filter((k) => k.on).length} elegidos`}>
+      <Seccion titulo={BLOCK_LABELS.key_titles} resumen={`${draft.key_titles.filter((k) => k.on).length} elegidos`} onOpen={() => pedirMiniaturas('key_title')}>
         {draft.key_titles.map((k, i) => {
           const upd = (patch: Partial<typeof k>) => set({ key_titles: draft.key_titles.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
           return (
@@ -702,7 +829,9 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
                     <Segundo label="En el segundo" value={k.at_s} onChange={(n) => upd({ at_s: n })} />
                     <Segundo label="Dura" value={k.dur_s} onChange={(n) => upd({ dur_s: n })} />
                   </div>
-                  <Presets list={p?.key_title} value={k.preset_key} label="Estilo del título clave" onChange={(key) => upd({ preset_key: key })} />
+                  <Presets list={p?.key_title} value={k.preset_key} label="Estilo del título clave" onChange={(key) => upd({ preset_key: key })}
+                    previews={prop.clean_video_url ? minis.key_title ?? { loading: false, byKey: {}, error: null } : undefined} suggested={sug.key_title} />
+                  {k.text.trim() && controlesDeEstilo(k.text.trim(), k.style, (st) => upd({ style: st }))}
                   <PlaceControls medium="video" block="key_titles" place={k.place} onChange={(pl) => upd({ place: pl })} />
                 </div>
               )}
@@ -710,23 +839,25 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
           );
         })}
         <button type="button"
-          onClick={() => set({ key_titles: [...draft.key_titles, { text: '', on: true, at_s: 0, dur_s: 2.5, preset_key: defaultKey(prop, 'key_title'), own: true, place: null }] })}
+          onClick={() => set({ key_titles: [...draft.key_titles, { text: '', on: true, at_s: 0, dur_s: 2.5, preset_key: defaultKey(prop, 'key_title'), own: true, place: null, style: SIN_ESTILO }] })}
           className="px-2.5 py-1 rounded-lg text-[11px] border border-dashed border-zinc-700 text-zinc-400 hover:border-zinc-500">
           Añadir uno propio
         </button>
       </Seccion>
 
-      <Seccion titulo={BLOCK_LABELS.cta} resumen={ctaElegido ? `${ctaElegido.text} · ${modo(draft.cta.place)}` : null}>
+      <Seccion titulo={BLOCK_LABELS.cta} resumen={ctaElegido ? `${ctaElegido.text} · ${modo(draft.cta.place)}` : null} onOpen={() => pedirMiniaturas('cta')}>
         {!prop.proposals.share_ctas.length && <p className="text-[11px] text-zinc-500">CopyLab no propuso CTA de reenvío para esta pieza.</p>}
         <Propuestas list={prop.proposals.share_ctas} choice={draft.cta.choice} own={draft.cta.own} propio="Escribir uno propio"
           onChoice={(c) => set({ cta: { ...draft.cta, choice: c } })} onOwn={(t) => set({ cta: { ...draft.cta, own: t } })} />
         <p className="text-[10px] text-zinc-500">Formato</p>
-        <Presets list={p?.cta} value={draft.cta.preset_key} label="Formato del CTA" onChange={(k) => set({ cta: { ...draft.cta, preset_key: k } })} />
+        <Presets list={p?.cta} value={draft.cta.preset_key} label="Formato del CTA" onChange={(k) => set({ cta: { ...draft.cta, preset_key: k } })}
+          previews={prop.clean_video_url ? minis.cta ?? { loading: false, byKey: {}, error: null } : undefined} suggested={sug.cta} />
+        {ctaElegido && controlesDeEstilo(ctaElegido.text, draft.cta.style, (st) => set({ cta: { ...draft.cta, style: st } }))}
         <Segundo label="En el segundo (0 = 6 s antes del final)" value={draft.cta.at_s} onChange={(n) => set({ cta: { ...draft.cta, at_s: n } })} />
         <PlaceControls medium="video" block="cta" place={draft.cta.place} onChange={(pl) => set({ cta: { ...draft.cta, place: pl } })} />
       </Seccion>
 
-      <Seccion titulo={BLOCK_LABELS.role} resumen={`${draft.roles.filter((r) => r.show).length} de ${draft.roles.length}`}>
+      <Seccion titulo={BLOCK_LABELS.role} resumen={`${draft.roles.filter((r) => r.show).length} de ${draft.roles.length}`} onOpen={() => pedirMiniaturas('role')}>
         {!draft.roles.length && <p className="text-[11px] text-zinc-500">El video no tiene el elenco guardado como dato: no hay personas que rotular.</p>}
         {draft.roles.map((r, i) => {
           const upd = (patch: Partial<typeof r>) => set({ roles: draft.roles.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
@@ -744,7 +875,8 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
                     <Segundo label="Aparece en" value={r.at_s} onChange={(n) => upd({ at_s: n })} />
                     <Segundo label="Dura" value={r.dur_s} onChange={(n) => upd({ dur_s: n })} />
                   </div>
-                  <Presets list={p?.role} value={r.preset_key} label={`Formato del rótulo de ${r.name}`} onChange={(k) => upd({ preset_key: k })} />
+                  <Presets list={p?.role} value={r.preset_key} label={`Formato del rótulo de ${r.name}`} onChange={(k) => upd({ preset_key: k })}
+                    previews={prop.clean_video_url ? minis.role ?? { loading: false, byKey: {}, error: null } : undefined} suggested={sug.role} />
                   <PlaceControls medium="video" block="role" place={r.place} onChange={(pl) => upd({ place: pl })} />
                 </>
               )}
@@ -753,7 +885,7 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
         })}
       </Seccion>
 
-      <Seccion titulo={BLOCK_LABELS.captions} resumen={draft.captions.enabled ? draft.captions.accent_role : 'sin subtítulos'}>
+      <Seccion titulo={BLOCK_LABELS.captions} resumen={draft.captions.enabled ? draft.captions.accent_role : 'sin subtítulos'} onOpen={() => pedirMiniaturas('caption')}>
         <label className="flex items-center gap-2 text-[12px] text-zinc-200">
           <input type="checkbox" checked={draft.captions.enabled} onChange={(e) => set({ captions: { ...draft.captions, enabled: e.target.checked } })} />
           Mostrar subtítulos
@@ -761,11 +893,19 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
         {draft.captions.enabled && (
           <>
             <p className="text-[10px] text-zinc-500">Color de acento</p>
-            <Colores opts={prop.accent_options} value={draft.captions.accent_role} label="Color de acento de los subtítulos"
-              onChange={(r) => set({ captions: { ...draft.captions, accent_role: r } })} />
+            <Muestras opts={prop.accent_options} value={draft.captions.accent_role} label="Color de acento de los subtítulos"
+              onChange={(r) => r && set({ captions: { ...draft.captions, accent_role: r } })} />
             <p className="text-[10px] text-zinc-500">Estilo</p>
             <Presets list={p?.caption} value={draft.captions.preset_key} label="Estilo de los subtítulos"
-              onChange={(k) => set({ captions: { ...draft.captions, preset_key: k } })} />
+              onChange={(k) => set({ captions: { ...draft.captions, preset_key: k } })}
+              previews={prop.clean_video_url ? minis.caption ?? { loading: false, byKey: {}, error: null } : undefined} suggested={sug.caption} />
+            {p?.caption.find((x) => x.preset_key === draft.captions.preset_key)?.uses_keywords && (
+              <>
+                <p className="text-[10px] text-zinc-500">Palabras clave (este estilo sólo marca estas)</p>
+                <PalabrasClave candidates={prop.keyword_candidates ?? []} spoken={prop.spoken_words ?? []} value={draft.captions.keywords}
+                  onChange={(v) => set({ captions: { ...draft.captions, keywords: v } })} />
+              </>
+            )}
             <PlaceControls medium="video" block="captions" place={null} onChange={() => undefined} zoomOnly
               zoom={draft.captions.zoom} onZoom={(z) => set({ captions: { ...draft.captions, zoom: z } })} />
           </>
@@ -778,7 +918,10 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
           Mostrar la franja de la marca
         </label>
         {draft.strip.on && (
-          <Colores opts={prop.strip_options} value={draft.strip.role} label="Color de la franja" onChange={(r) => set({ strip: { ...draft.strip, role: r } })} />
+          <>
+            <FranjaModo mode={prop.strip_mode ?? null} hex={prop.strip_options.find((o) => o.role === draft.strip.role)?.hex ?? null} />
+            <Muestras opts={prop.strip_options} value={draft.strip.role} label="Color de la franja" onChange={(r) => r && set({ strip: { ...draft.strip, role: r } })} />
+          </>
         )}
         <NoAplica label="X, Y y Zoom" reason="La franja va fija en el borde de la marca: no es un bloque que se coloque." />
       </Seccion>

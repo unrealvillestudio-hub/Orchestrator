@@ -44,12 +44,28 @@ export interface CopyLabSource {
  * colocados a mano» v1 §2: cada capa lleva `place` opcional (`_onScreenText.ts`); sin él, la capa es automática como
  * siempre. Los subtítulos, sólo `{ zoom }`.
  */
+/**
+ * Estilos en línea y alineación de un bloque de texto (contrato VideoLab v1.4.0 §4 ter.5, mismo vocabulario que
+ * ImageLab): tramos literales, primera aparición, hasta 3 por campo de hasta 60 caracteres. `italic_spans` y
+ * `bold_spans` INVIERTEN el estilo del preset. Ausente = lo del preset. 2026-11-17.
+ */
+export type TextAlign = 'left' | 'center' | 'right';
+export interface InlineStyle {
+  align?: TextAlign; emphasis_role?: string;
+  italic_spans?: string[]; bold_spans?: string[]; color_spans?: string[];
+}
+export const SPANS_MAX = 3;
+export const SPAN_CHARS_MAX = 60;
+export const KEYWORDS_MAX = 12;
+export const TEXT_ALIGNS: readonly TextAlign[] = ['left', 'center', 'right'];
+
 export interface TextLayers {
-  hook: { text: string; preset_key: string; start_ms: number; end_ms: number; emphasis: string[]; pattern_key?: string | null; place?: Place } | null;
+  hook: ({ text: string; preset_key: string; start_ms: number; end_ms: number; emphasis: string[]; pattern_key?: string | null; place?: Place } & InlineStyle) | null;
   roles: Array<{ person_id: string; text: string; show: boolean; at_ms: number; dur_ms: number; preset_key: string; place?: Place }>;
-  captions: { enabled: boolean; preset_key: string; accent_role: string; place?: ZoomOnly } | null;
-  key_titles: Array<{ text: string; at_ms: number; dur_ms: number; preset_key: string; place?: Place }>;
-  cta: { text: string; at_ms: number; preset_key: string; pattern_key?: string | null; place?: Place } | null;
+  /** `keywords` (v1.7.0): las palabras que marca el estilo de subtítulos «sólo palabras clave»; hasta 12 de 60 caracteres. */
+  captions: { enabled: boolean; preset_key: string; accent_role: string; place?: ZoomOnly; keywords?: string[] } | null;
+  key_titles: Array<{ text: string; at_ms: number; dur_ms: number; preset_key: string; place?: Place; emphasis?: string[] } & InlineStyle>;
+  cta: ({ text: string; at_ms: number; preset_key: string; pattern_key?: string | null; place?: Place; emphasis?: string[] } & InlineStyle) | null;
   /**
    * La franja de identidad. `identity_role` es el nombre del contrato v1.4.0 de VideoLab y el de ImageLab. Se escribe
    * SÓLO `identity_role` (2026-11-17, paso 1 de 3 del retiro del alias). `strip_role` es el ALIAS LEGACY: se lee
@@ -58,7 +74,13 @@ export interface TextLayers {
   identity: { strip: boolean; identity_role: string | null; /** @deprecated alias legacy, sólo lectura */ strip_role?: string | null };
 }
 
-export interface PresetView { preset_key: string; layer: TextLayer; name: string; description: string; status: string | null; brand_override: boolean }
+export interface PresetView {
+  preset_key: string; layer: TextLayer; name: string; description: string; status: string | null; brand_override: boolean;
+  /** 2026-11-17 — del `spec` (dato): `html` = la vista previa es la del render; `ass` = aproximada. */
+  engine?: 'html' | 'ass';
+  /** 2026-11-17 — del `spec.active_word.mode === 'keywords'` (dato): el estilo marca sólo `captions.keywords`. */
+  uses_keywords?: boolean;
+}
 export type PresetsByLayer = Record<TextLayer, PresetView[]>;
 
 // ── Leer la pieza ──────────────────────────────────────────────────────────────────────────────
@@ -234,6 +256,8 @@ export function groupPresets(rows: unknown, brandId: string): PresetsByLayer {
     .forEach((r) => out[r.layer as TextLayer].push({
       preset_key: r.preset_key, layer: r.layer, name: str(r.name) || r.preset_key, description: str(r.description),
       status: typeof r.status === 'string' ? r.status : null, brand_override: r.brand_id === brandId,
+      engine: r?.spec?.engine === 'html' ? 'html' : 'ass',
+      ...(r?.spec?.active_word?.mode === 'keywords' ? { uses_keywords: true } : {}),
     }));
   return out;
 }
@@ -328,6 +352,35 @@ export function validateTextLayers(
     else if (t.length > max) errors.push(`${campo}: ${t.length} caracteres, el máximo es ${max}`);
     return t;
   };
+  // 2026-11-17 — tramos con estilo: cada uno debe estar en el texto (VideoLab sólo avisa; aquí se dice antes de pagar).
+  const tramos = (v: unknown, txt: string, campo: string): string[] | undefined => {
+    if (v == null) return undefined;
+    if (!Array.isArray(v)) { errors.push(`${campo} debe ser una lista`); return undefined; }
+    const out = v.map(str).filter(Boolean);
+    if (out.length > SPANS_MAX) errors.push(`${campo}: ${out.length} tramos, el máximo es ${SPANS_MAX}`);
+    for (const t of out) {
+      if (t.length > SPAN_CHARS_MAX) errors.push(`${campo}: «${t.slice(0, 20)}…» tiene ${t.length} caracteres, el máximo es ${SPAN_CHARS_MAX}`);
+      else if (txt && !txt.includes(t)) errors.push(`${campo}: «${t}» no aparece en el texto`);
+    }
+    return out.length ? out.slice(0, SPANS_MAX) : undefined;
+  };
+  const estilo = (b: Record<string, unknown>, txt: string, campo: string): InlineStyle => {
+    const out: InlineStyle = {};
+    if (b.align != null) {
+      if ((TEXT_ALIGNS as readonly unknown[]).includes(b.align)) out.align = b.align as TextAlign;
+      else errors.push(`${campo}.align debe ser ${TEXT_ALIGNS.join(', ')}`);
+    }
+    const role = str(b.emphasis_role);
+    if (role) {
+      if (!ctx.accentRoles.includes(role)) errors.push(`${campo}.emphasis_role: el color «${role}» no es uno de los que la marca ofrece`);
+      else out.emphasis_role = role;
+    }
+    for (const k of ['italic_spans', 'bold_spans', 'color_spans'] as const) {
+      const t = tramos(b[k], txt, `${campo}.${k}`);
+      if (t) out[k] = t;
+    }
+    return out;
+  };
 
   let hook: TextLayers['hook'] = null;
   if (raw.hook != null) {
@@ -337,12 +390,14 @@ export function validateTextLayers(
       const start = ms(h.start_ms ?? 0), end = ms(h.end_ms);
       dentro(start, 'hook.start_ms'); dentro(end, 'hook.end_ms');
       if (Number.isFinite(start) && Number.isFinite(end) && end <= start) errors.push('hook.end_ms debe ser mayor que hook.start_ms');
+      const ht = texto(h.text, 'hook', HOOK_TEXT_MAX);
       hook = {
-        text: texto(h.text, 'hook', HOOK_TEXT_MAX), preset_key: preset('hook', h.preset_key, 'hook'),
+        text: ht, preset_key: preset('hook', h.preset_key, 'hook'),
         start_ms: start, end_ms: end,
-        emphasis: Array.isArray(h.emphasis) ? h.emphasis.map(str).filter(Boolean).slice(0, 3) : [],
+        emphasis: tramos(h.emphasis, ht, 'hook.emphasis') ?? [],
         pattern_key: str(h.pattern_key) || null,
         ...lugar(h.place, 'hook'),
+        ...estilo(h, ht, 'hook'),
       };
     }
   }
@@ -369,7 +424,18 @@ export function validateTextLayers(
       const accent = str(c.accent_role);
       if (!accent) errors.push('captions: falta accent_role');
       else if (!ctx.accentRoles.includes(accent)) errors.push(`captions: el color «${accent}» no es uno de los que la marca ofrece`);
-      captions = { enabled: c.enabled !== false, preset_key: preset('caption', c.preset_key, 'captions'), accent_role: accent, ...lugar(c.place, 'captions', true) };
+      let keywords: string[] | undefined;
+      if (c.keywords != null) {
+        if (!Array.isArray(c.keywords)) errors.push('captions.keywords debe ser una lista');
+        else {
+          keywords = [...new Set(c.keywords.map(str).filter(Boolean))];
+          if (keywords.length > KEYWORDS_MAX) errors.push(`captions.keywords: ${keywords.length} palabras, el máximo es ${KEYWORDS_MAX}`);
+          for (const w of keywords) if (w.length > SPAN_CHARS_MAX) errors.push(`captions.keywords: «${w.slice(0, 20)}…» pasa de ${SPAN_CHARS_MAX} caracteres`);
+          keywords = keywords.slice(0, KEYWORDS_MAX);
+          if (!keywords.length) keywords = undefined;
+        }
+      }
+      captions = { enabled: c.enabled !== false, preset_key: preset('caption', c.preset_key, 'captions'), accent_role: accent, ...lugar(c.place, 'captions', true), ...(keywords ? { keywords } : {}) };
     }
   }
 
@@ -383,7 +449,9 @@ export function validateTextLayers(
     const at = ms(k.at_ms), dur = ms(k.dur_ms);
     dentro(at, `${campo}.at_ms`);
     if (!(dur > 0)) errors.push(`${campo}.dur_ms debe ser mayor que 0`);
-    key_titles.push({ text: texto(k.text, campo, LINE_TEXT_MAX), at_ms: at, dur_ms: dur, preset_key: preset('key_title', k.preset_key, campo), ...lugar(k.place, campo) });
+    const kt = texto(k.text, campo, LINE_TEXT_MAX);
+    const kem = tramos(k.emphasis, kt, `${campo}.emphasis`);
+    key_titles.push({ text: kt, at_ms: at, dur_ms: dur, preset_key: preset('key_title', k.preset_key, campo), ...lugar(k.place, campo), ...(kem ? { emphasis: kem } : {}), ...estilo(k, kt, campo) });
   }
 
   let cta: TextLayers['cta'] = null;
@@ -393,7 +461,9 @@ export function validateTextLayers(
     else {
       const at = ms(c.at_ms);
       dentro(at, 'cta.at_ms');
-      cta = { text: texto(c.text, 'cta', LINE_TEXT_MAX), at_ms: at, preset_key: preset('cta', c.preset_key, 'cta'), pattern_key: str(c.pattern_key) || null, ...lugar(c.place, 'cta') };
+      const ct = texto(c.text, 'cta', LINE_TEXT_MAX);
+      const cem = tramos(c.emphasis, ct, 'cta.emphasis');
+      cta = { text: ct, at_ms: at, preset_key: preset('cta', c.preset_key, 'cta'), pattern_key: str(c.pattern_key) || null, ...lugar(c.place, 'cta'), ...(cem ? { emphasis: cem } : {}), ...estilo(c, ct, 'cta') };
     }
   }
 
@@ -441,6 +511,57 @@ export function labExecuteUrl(row: { api_endpoint?: unknown; execute_path?: unkn
   if (!/^https:\/\//.test(base)) return null;
   const path = str(row?.execute_path) || '/api/execute';
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+// ── La vista previa fiel (2026-11-17, contrato VideoLab §4 ter.6) ─────────────────────────────────
+
+/** El pedido a `POST /api/text-scene`: síncrono, sin job ni costo de proveedor. PURO. */
+export function buildSceneBody(opts: { brandId: string; platform: string; timeline: unknown; durationMs: number | null; textLayers: TextLayers }) {
+  return {
+    brandId: opts.brandId,
+    params: { platform: opts.platform, format: 'reel' },
+    previousOutputs: { text_layers: opts.textLayers, ...(opts.timeline ? { timeline: opts.timeline } : {}) },
+    ...(opts.durationMs ? { duration_ms: opts.durationMs } : {}),
+  };
+}
+
+export const SCENE_VARIANTS_MAX = 12;
+
+/**
+ * Las capas de una miniatura: sólo la capa que se compara, con el estilo de la tarjeta y el texto real; las demás,
+ * fuera, para que la miniatura enseñe un solo estilo. `null` si esa capa no tiene texto que mostrar. PURO.
+ */
+export function layersForVariant(base: TextLayers, layer: TextLayer, presetKey: string): TextLayers | null {
+  const vacio: TextLayers = { hook: null, roles: [], captions: null, key_titles: [], cta: null, identity: { strip: false, identity_role: null } };
+  if (layer === 'hook') return base.hook ? { ...vacio, hook: { ...base.hook, preset_key: presetKey, place: undefined } } : null;
+  if (layer === 'cta') return base.cta ? { ...vacio, cta: { ...base.cta, preset_key: presetKey, at_ms: 0, place: undefined } } : null;
+  if (layer === 'key_title') {
+    const k = base.key_titles[0];
+    return k ? { ...vacio, key_titles: [{ ...k, preset_key: presetKey, at_ms: 0, place: undefined }] } : null;
+  }
+  if (layer === 'role') {
+    const r = base.roles.find((x) => x.show) ?? base.roles[0];
+    return r ? { ...vacio, roles: [{ ...r, show: true, preset_key: presetKey, at_ms: 0, place: undefined }] } : null;
+  }
+  if (layer === 'caption') return base.captions ? { ...vacio, captions: { ...base.captions, enabled: true, preset_key: presetKey } } : null;
+  return null;
+}
+
+/**
+ * Palabras clave candidatas para los subtítulos «sólo palabras clave»: las palabras de las frases clave que CopyLab
+ * propuso y del gancho que de verdad se dicen en el video (`timeline.words`), de 4 letras o más, sin repetir, en el
+ * orden en que suenan. Hasta 20. PURO.
+ */
+export function keywordCandidatesOf(timeline: unknown, frases: string[]): string[] {
+  const dichas = new Map<string, string>();
+  const ws = Array.isArray((timeline as any)?.words) ? (timeline as any).words : [];
+  const limpia = (w: string) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+  for (const w of ws) {
+    const t = limpia(str(w?.text ?? w?.word));
+    if (t.length >= 4 && !dichas.has(t.toLocaleLowerCase())) dichas.set(t.toLocaleLowerCase(), t);
+  }
+  const deFrases = new Set(frases.flatMap((f) => str(f).split(/\s+/)).map((w) => limpia(w).toLocaleLowerCase()).filter((w) => w.length >= 4));
+  return [...dichas.entries()].filter(([k]) => deFrases.has(k)).map(([, v]) => v).slice(0, 20);
 }
 
 // ── La rotación de estilos (2026-11-17) ───────────────────────────────────────────────────────────

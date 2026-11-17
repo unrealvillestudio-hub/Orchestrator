@@ -914,6 +914,8 @@ export interface PieceTextProposal {
   suggested_presets?: Partial<Record<keyof PresetsByLayer, string>> | null; rotation_note?: string | null;
   /** 2026-11-17 — sólo un admin cambia el estado de un estilo; a él se le dan además los retirados, para reactivarlos. */
   can_change_preset_status?: boolean;
+  /** 2026-11-17 — ventana visual: video limpio, modo de la franja (dato), palabras dichas y palabras clave candidatas. */
+  clean_video_url?: string | null; strip_mode?: string | null; spoken_words?: string[]; keyword_candidates?: string[];
   retired_presets?: PresetView[];
   accent_options: EmphasisColorOption[]; strip_options: EmphasisColorOption[];
   cast: CastMember[];
@@ -933,6 +935,16 @@ export function proposePieceText(token: string, pieceId: string, goal?: string):
 export function changePresetStatus(token: string, presetKey: string, brandId: string, action: 'validate' | 'retire' | 'reactivate'):
   Promise<{ ok: true; preset_key: string; status: string; status_changed_at: string; status_changed_by: string }> {
   return req('/api/text-preset-status', token, { method: 'POST', body: { preset_key: presetKey, brand_id: brandId, action } });
+}
+
+export interface SceneResult {
+  ok: boolean; engine?: 'html' | 'ass' | null; fidelity?: 'same_engine' | 'approximate' | null; runtime_url?: string;
+  scene?: any; warnings?: string[]; error?: string; detail?: string;
+}
+/** La escena resuelta de VideoLab para la vista grande y, por variante, la de cada miniatura de estilo. Sólo lee. */
+export function previewPieceText(token: string, pieceId: string, textLayers: TextLayers, variants: Array<{ layer: string; preset_key: string }> = []):
+  Promise<{ ok: true; main: SceneResult; variants: Array<SceneResult & { layer: string; preset_key: string }> }> {
+  return req('/api/piece-text', token, { method: 'POST', body: { piece_id: pieceId, action: 'scenes', text_layers: textLayers, variants } });
 }
 
 /** Manda las capas elegidas a VideoLab (vía el Orchestrator). Devuelve el job que hay que sondear. */
