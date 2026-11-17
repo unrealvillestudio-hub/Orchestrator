@@ -238,6 +238,55 @@ export function groupPresets(rows: unknown, brandId: string): PresetsByLayer {
   return out;
 }
 
+// ── El estado de un estilo (2026-11-17) ──────────────────────────────────────────────────────────
+
+/**
+ * Lo que un admin puede hacer con el estado de un estilo desde el Orchestrator (Sam, 2026-11-17: sólo admin, vale
+ * para todas las marcas, incluye «Retirar»). Vocabulario del CHECK de `videolab_text_presets.status`:
+ * `proposed | validated_by_judgment | validated_by_data | retired`.
+ *   · `validate`: proposed → validated_by_judgment.
+ *   · `retire`: cualquiera menos retired → retired (deja de ofrecerse y de rotar).
+ *   · `reactivate`: retired → proposed (vuelve a la lista sin validar).
+ */
+export const PRESET_STATUS_ACTIONS = ['validate', 'retire', 'reactivate'] as const;
+export type PresetStatusAction = typeof PRESET_STATUS_ACTIONS[number];
+
+/** El estado que deja una acción, o su motivo para no aplicarse. PURO. */
+export function nextPresetStatus(action: unknown, current: unknown): { ok: true; status: string } | { ok: false; reason: string } {
+  const cur = typeof current === 'string' && current ? current : 'proposed';
+  if (action === 'validate') return cur === 'proposed' ? { ok: true, status: 'validated_by_judgment' } : { ok: false, reason: `el estilo está en «${cur}»: sólo se valida uno propuesto` };
+  if (action === 'retire') return cur !== 'retired' ? { ok: true, status: 'retired' } : { ok: false, reason: 'el estilo ya está retirado' };
+  if (action === 'reactivate') return cur === 'retired' ? { ok: true, status: 'proposed' } : { ok: false, reason: `el estilo está en «${cur}»: sólo se reactiva uno retirado` };
+  return { ok: false, reason: `acción desconocida: debe ser ${PRESET_STATUS_ACTIONS.join(', ')}` };
+}
+
+/**
+ * La fila cuyo estado se cambia: la misma que el selector le muestra a la marca (`groupPresets`): la de la marca si
+ * existe, si no la de sistema. La de sistema sirve a todas las marcas, así que cambiarla las cambia a todas (decisión
+ * de Sam, opción a). Las filas inactivas no cuentan. PURO.
+ */
+export function presetRowToChange(rows: unknown, presetKey: string, brandId: string): any | null {
+  const lista = (Array.isArray(rows) ? rows : []).filter((r: any) => r?.preset_key === presetKey && r?.active !== false);
+  return lista.find((r: any) => r?.brand_id === brandId) ?? lista.find((r: any) => r?.brand_id == null) ?? null;
+}
+
+/** Los estilos retirados que un admin puede reactivar, por capa, sin los que tienen otra fila viva que ya se ofrece. PURO. */
+export function retiredPresetsOf(rows: unknown, brandId: string): PresetView[] {
+  const todas = (Array.isArray(rows) ? rows : []) as any[];
+  const vivas = new Set(todas.filter((r) => r?.active !== false && r?.status !== 'retired' && (r?.brand_id == null || r?.brand_id === brandId)).map((r) => r.preset_key));
+  const out = new Map<string, PresetView>();
+  for (const r of todas) {
+    const key = str(r?.preset_key);
+    if (!key || r?.active === false || r?.status !== 'retired' || vivas.has(key)) continue;
+    if (r?.brand_id != null && r?.brand_id !== brandId) continue;
+    if (!(TEXT_LAYERS as readonly string[]).includes(r?.layer)) continue;
+    if (!out.has(key) || r?.brand_id === brandId) {
+      out.set(key, { preset_key: key, layer: r.layer, name: str(r.name) || key, description: str(r.description), status: 'retired', brand_override: r.brand_id === brandId });
+    }
+  }
+  return [...out.values()];
+}
+
 // ── Lo que quien edita eligió ──────────────────────────────────────────────────────────────────
 
 export const HOOK_TEXT_MAX = 140;

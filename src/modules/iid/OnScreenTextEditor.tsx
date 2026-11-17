@@ -1,10 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { cn, Spinner } from '../../ui/components';
 import {
-  proposePieceText, applyPieceText, pollPieceText, CalibrationError,
+  proposePieceText, applyPieceText, pollPieceText, changePresetStatus, CalibrationError,
   type PieceTextProposal, type TextProposal,
 } from '../../services/calibrationInbox';
-import type { CastMember, PresetsByLayer, TextLayers } from '../../../api/_pieceText';
+import type { CastMember, PresetsByLayer, PresetView, TextLayers } from '../../../api/_pieceText';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
 import {
   BLOCK_LABELS, CAPTIONS_BAND, PCT_STEP, PREVIEW_AUTO, PREVIEW_NOTE, ROLE_NO_PERSONA, VIDEO_SAFE_ZONE_APPROX,
@@ -311,18 +311,111 @@ export function SchematicPreview({ aspect, safe, items }: { aspect: number; safe
   );
 }
 
+/** El nombre que ve quien edita para cada estado de `videolab_text_presets.status` (2026-11-17). */
+export const STATUS_LABEL: Record<string, string> = {
+  proposed: 'propuesto', validated_by_judgment: 'validado', validated_by_data: 'validado por datos', retired: 'retirado',
+};
+const esValidado = (st: string | null) => st === 'validated_by_judgment' || st === 'validated_by_data';
+
+/**
+ * Cambia el estado de un estilo en la propuesta que ya está en pantalla, sin volver a pedirla (pedirla otra vez llama
+ * a CopyLab). Un estilo retirado sale de su capa y pasa a `retired_presets`; uno reactivado vuelve a su capa, al final.
+ * PURO.
+ */
+export function withPresetStatus(prop: PieceTextProposal, presetKey: string, status: string): PieceTextProposal {
+  if (!prop.presets) return prop;
+  const capas = Object.fromEntries(Object.entries(prop.presets).map(([l, list]) => [l, [...list]])) as PresetsByLayer;
+  let retirados = [...(prop.retired_presets ?? [])];
+  let hallado: PresetView | null = null;
+  for (const l of Object.keys(capas) as Array<keyof PresetsByLayer>) {
+    const i = capas[l].findIndex((x) => x.preset_key === presetKey);
+    if (i >= 0) { hallado = capas[l][i]; capas[l].splice(i, 1); }
+  }
+  const j = retirados.findIndex((x) => x.preset_key === presetKey);
+  if (j >= 0) { hallado = hallado ?? retirados[j]; retirados.splice(j, 1); }
+  if (!hallado) return prop;
+  const nuevo = { ...hallado, status };
+  if (status === 'retired') retirados = [...retirados, nuevo];
+  else {
+    const l = nuevo.layer as keyof PresetsByLayer;
+    const k = (prop.presets[l] ?? []).findIndex((x) => x.preset_key === presetKey);
+    if (k >= 0) capas[l].splice(k, 0, nuevo); else capas[l].push(nuevo);
+  }
+  return { ...prop, presets: capas, retired_presets: retirados };
+}
+
+/** Lo que el selector de estilos necesita para que un admin cambie su estado. Sin admin, el contexto va vacío. */
+interface EstadoDeEstilos {
+  cambiar: (presetKey: string, action: 'validate' | 'retire' | 'reactivate') => void;
+  retirados: PresetView[]; ocupado: string | null; aviso: string | null;
+}
+const EstadoCtx = createContext<EstadoDeEstilos | null>(null);
+
 function Presets({ list, value, onChange, label }: { list: PresetsByLayer[keyof PresetsByLayer] | undefined; value: string; onChange: (k: string) => void; label: string }) {
-  if (!list?.length) return <p className="text-[10px] text-amber-300/80">No hay estilos disponibles para esta capa.</p>;
+  const admin = useContext(EstadoCtx);
+  const [verRetirados, setVerRetirados] = useState(false);
+  const capa = list?.[0]?.layer;
+  const retirados = admin && capa ? admin.retirados.filter((r) => r.layer === capa) : [];
+  if (!list?.length && !retirados.length) return <p className="text-[10px] text-amber-300/80">No hay estilos disponibles para esta capa.</p>;
+  const elegido = list?.find((x) => x.preset_key === value) ?? null;
   return (
-    <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={label}>
-      {list.map((p) => (
-        <button key={p.preset_key} type="button" role="radio" aria-checked={value === p.preset_key} title={p.description}
-          onClick={() => onChange(p.preset_key)}
-          className={cn('px-2 py-1 rounded-lg text-[11px] border transition-colors',
-            value === p.preset_key ? 'border-violet-500/70 bg-violet-500/15 text-violet-100' : 'border-zinc-800 text-zinc-400 hover:border-zinc-600')}>
-          {p.name}
-        </button>
-      ))}
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={label}>
+        {(list ?? []).map((p) => (
+          <button key={p.preset_key} type="button" role="radio" aria-checked={value === p.preset_key}
+            title={`${p.description}${p.description ? ' · ' : ''}Estado: ${STATUS_LABEL[p.status ?? ''] ?? p.status ?? 'sin estado'}`}
+            onClick={() => onChange(p.preset_key)}
+            className={cn('inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] border transition-colors',
+              value === p.preset_key ? 'border-violet-500/70 bg-violet-500/15 text-violet-100' : 'border-zinc-800 text-zinc-400 hover:border-zinc-600')}>
+            {p.name}
+            {/* El estado se ve sin abrir nada: punto cian = validado; anillo ámbar = propuesto (sin validar). */}
+            <span aria-hidden className={cn('inline-block w-1.5 h-1.5 rounded-full',
+              esValidado(p.status) ? 'bg-cyan-300' : 'border border-amber-400/80')} />
+            <span className="sr-only">({STATUS_LABEL[p.status ?? ''] ?? 'sin estado'})</span>
+          </button>
+        ))}
+      </div>
+      {admin && elegido && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500">
+          <span>«{elegido.name}»: <span className={esValidado(elegido.status) ? 'text-cyan-300' : 'text-amber-300/90'}>{STATUS_LABEL[elegido.status ?? ''] ?? 'sin estado'}</span></span>
+          {elegido.status === 'proposed' && (
+            <button type="button" disabled={!!admin.ocupado} onClick={() => admin.cambiar(elegido.preset_key, 'validate')}
+              className="px-2 py-0.5 rounded-md border border-cyan-500/50 text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-40">
+              {admin.ocupado === elegido.preset_key ? 'Guardando…' : 'Validar estilo'}
+            </button>
+          )}
+          <button type="button" disabled={!!admin.ocupado}
+            onClick={() => { if (window.confirm(`¿Retirar «${elegido.name}» para todas las marcas? Deja de ofrecerse y de rotar; se puede reactivar.`)) admin.cambiar(elegido.preset_key, 'retire'); }}
+            className="px-2 py-0.5 rounded-md border border-zinc-700 text-zinc-400 hover:border-red-500/50 hover:text-red-300 disabled:opacity-40">
+            Retirar
+          </button>
+          <span className="text-zinc-600">vale para todas las marcas</span>
+        </div>
+      )}
+      {admin && value && !elegido && (
+        <p className="text-[10px] text-amber-300/90">El estilo elegido ya no se ofrece (retirado): elige otro antes de aplicar.</p>
+      )}
+      {retirados.length > 0 && (
+        <div className="text-[10px]">
+          <button type="button" onClick={() => setVerRetirados(!verRetirados)} className="text-zinc-500 hover:text-zinc-300">
+            {verRetirados ? '▾' : '▸'} Retirados ({retirados.length})
+          </button>
+          {verRetirados && (
+            <ul className="mt-1 space-y-1">
+              {retirados.map((r) => (
+                <li key={r.preset_key} className="flex items-center gap-2 text-zinc-500">
+                  <span className="line-through">{r.name}</span>
+                  <button type="button" disabled={!!admin?.ocupado} onClick={() => admin?.cambiar(r.preset_key, 'reactivate')}
+                    className="px-2 py-0.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-zinc-500 disabled:opacity-40">
+                    {admin?.ocupado === r.preset_key ? 'Guardando…' : 'Reactivar'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {admin?.aviso && <p className="text-[10px] text-amber-300/90">{admin.aviso}</p>}
     </div>
   );
 }
@@ -490,6 +583,17 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
   const [done, setDone] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const raiz = useRef<HTMLDivElement>(null);
+  const [presetOcupado, setPresetOcupado] = useState<string | null>(null);
+  const [presetAviso, setPresetAviso] = useState<string | null>(null);
+  /** Validar, retirar o reactivar un estilo (sólo admin). Actualiza la lista en pantalla sin volver a pedir propuestas. */
+  const cambiarEstado = (presetKey: string, action: 'validate' | 'retire' | 'reactivate') => {
+    if (!prop) return;
+    setPresetOcupado(presetKey); setPresetAviso(null);
+    changePresetStatus(token, presetKey, prop.brand_id, action)
+      .then((r) => setProp((cur) => (cur ? withPresetStatus(cur, presetKey, r.status) : cur)))
+      .catch((err) => setPresetAviso(errorDe(err, 'No se pudo cambiar el estado del estilo.')))
+      .finally(() => setPresetOcupado(null));
+  };
 
   const proponer = () => {
     setLoading(true); setError(null);
@@ -546,7 +650,12 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
   const enCurso = !!job;
   const modo = (pl: Place | null) => (pl ? 'a mano' : 'automático');
 
+  const estadoCtx: EstadoDeEstilos | null = prop.can_change_preset_status
+    ? { cambiar: cambiarEstado, retirados: prop.retired_presets ?? [], ocupado: presetOcupado, aviso: presetAviso }
+    : null;
+
   return (
+    <EstadoCtx.Provider value={estadoCtx}>
     <div ref={raiz} className="space-y-2">
       <BarraSecciones raiz={raiz} />
       {sinLimpio && (
@@ -694,6 +803,7 @@ function VideoBody({ pieceId, token, onApplied }: Extract<OnScreenTextEditorProp
         Sólo se vuelve a dibujar el texto sobre el video limpio: no se regeneran las tomas. El video anterior queda en el historial.
       </p>
     </div>
+    </EstadoCtx.Provider>
   );
 }
 
