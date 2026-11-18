@@ -330,6 +330,31 @@ export function PlaceControls({ medium, block, place, onChange, zoomOnly, zoom, 
   }
   const sx = controlSupport(medium, block, 'x');
   const auto = !place;
+  if (medium === 'video') {
+    // 2026-11-18 (Sam): «todos los sliders de ubicación del texto elimínalos para que se coloquen a mano siempre, es más
+    // fácil». En el video el bloque se coloca arrastrándolo sobre la vista; aquí queda sólo volver a «Automático» y el
+    // tamaño (Zoom), que el arrastre no cambia.
+    return (
+      <div className="space-y-1 rounded-lg border border-zinc-800/70 p-2" data-colocacion-video>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-zinc-400">
+            {auto ? 'Automático: el lab elige el lugar y esquiva caras. Para colocarlo a mano, arrástralo sobre el video.'
+              : 'A mano: va donde lo soltaste sobre el video; no esquiva caras (el lab avisa si tapa una).'}
+          </span>
+          {!auto && (
+            <button type="button" onClick={() => onChange(null)}
+              className="px-2 py-0.5 rounded-lg text-[11px] border border-zinc-700 text-zinc-300 hover:text-white">
+              Automático
+            </button>
+          )}
+        </div>
+        {!auto && (
+          <Deslizador label="Zoom" value={place?.zoom ?? 1} min={ZOOM_MIN} max={ZOOM_MAX} step={ZOOM_STEP} fmt={zx}
+            onChange={(n) => place && onChange({ ...place, zoom: clampZoom(n) })} />
+        )}
+      </div>
+    );
+  }
   return (
     <div className="space-y-1 rounded-lg border border-zinc-800/70 p-2">
       <div className="flex items-center justify-between gap-2">

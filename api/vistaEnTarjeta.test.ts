@@ -59,3 +59,17 @@ describe('el cableado', () => {
     expect(visual).toMatch(/\{encima && <div className="absolute inset-0 pointer-events-none">\{encima\}<\/div>\}/);
   });
 });
+
+describe('en el video, la ubicación se elige arrastrando (Sam, 2026-11-18: «todos los sliders de ubicación… elimínalos»)', () => {
+  const editor = readFileSync('src/modules/iid/OnScreenTextEditor.tsx', 'utf8');
+  it('la colocación del video no tiene deslizadores X ni Y; queda «Automático» y el tamaño', () => {
+    const i = editor.indexOf("if (medium === 'video') {");
+    const tramo = editor.slice(i, editor.indexOf('\n  return (', i + 10) > 0 ? editor.indexOf('\n  }\n', i) : undefined);
+    expect(i).toBeGreaterThan(0);
+    expect(tramo).toMatch(/data-colocacion-video/);
+    expect(tramo).not.toMatch(/label="X"/);
+    expect(tramo).not.toMatch(/label="Y"/);
+    expect(tramo).toMatch(/Automático/);
+    expect(tramo).toMatch(/label="Zoom"/);
+  });
+});
