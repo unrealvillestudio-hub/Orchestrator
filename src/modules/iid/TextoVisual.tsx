@@ -169,7 +169,7 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
    * rueda del ratón sobre la vista avanza o retrocede cuadro a cuadro.
    */
   esquinaArriba?: React.ReactNode;
-  /** Los controles de la esquina (reloj y checks) arriba a la izquierda en vez de abajo a la derecha. */
+  /** Los controles de la esquina (reloj y checks) en un recuadro negro opaco, por delante de la capa de la plataforma. */
   controlesArriba?: boolean;
   reloj?: boolean;
 }) {
@@ -211,10 +211,10 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
         {loading && <span className={cn('absolute right-2', esquinaArriba ? 'top-10' : 'top-2')}><Spinner size={14} /></span>}
         {esquinaArriba && <div className="absolute top-1.5 right-1.5 z-30">{esquinaArriba}</div>}
         {(esquina || reloj) && (
-          // 2026-11-18 (Sam: «la maqueta queda por detrás de los checks»): con la capa de la plataforma encendida, los
-          // controles suben a la esquina superior izquierda, donde la maqueta no dibuja nada.
-          <div className={cn('absolute z-30 flex flex-wrap items-center gap-1.5', controlesArriba ? 'top-1.5 left-1.5 right-24' : 'bottom-1.5 right-1.5')}
-            data-controles-vista={controlesArriba ? 'arriba' : 'abajo'}>
+          // 2026-11-18 (Sam): abajo a la derecha, como antes, pero en un recuadro negro opaco por delante de todo: con la
+          // capa de la plataforma encendida, la maqueta no se ve entre los controles.
+          <div className={cn('absolute z-30 bottom-1.5 right-1.5 flex flex-wrap items-center justify-end gap-1.5', controlesArriba && 'rounded-lg bg-black p-1')}
+            data-controles-vista={controlesArriba ? 'recuadro' : 'abajo'}>
             {reloj && <Reloj video={video} fps={fps} />}
             {esquina}
           </div>

@@ -60,9 +60,9 @@ describe('el cableado', () => {
   it('ninguna plataforma escrita en el código de la capa', () => {
     expect(modulo.replace(/^\s*(\*|\/\/).*$/gm, '')).not.toMatch(/FACEBOOK|INSTAGRAM|TIKTOK|LINKEDIN|meta_fb|meta_ig|tiktok/);
   });
-  it('con la capa encendida, los controles suben a la esquina libre (Sam: «la maqueta queda por detrás de los checks»)', () => {
+  it('con la capa encendida, los controles siguen abajo a la derecha, en un recuadro negro por delante de la maqueta (Sam)', () => {
     const visual = readFileSync('src/modules/iid/TextoVisual.tsx', 'utf8');
     expect(editor).toMatch(/controlesArriba=\{plataformaVisible && !!prop\.platform_ui\}/);
-    expect(visual).toMatch(/controlesArriba \? 'top-1\.5 left-1\.5 right-24' : 'bottom-1\.5 right-1\.5'/);
+    expect(visual).toMatch(/'absolute z-30 bottom-1\.5 right-1\.5 flex flex-wrap items-center justify-end gap-1\.5', controlesArriba && 'rounded-lg bg-black p-1'/);
   });
 });
