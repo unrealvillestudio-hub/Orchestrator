@@ -18,6 +18,7 @@ import type { EmphasisColorOption } from '../../../api/_overlayText';
 import type { SceneResult } from '../../services/calibrationInbox';
 import type { PlatformUi } from '../../../api/_platformUi';
 import { Bookmark, Heart, MessageCircle, Share2 } from 'lucide-react';
+import type { SafeOverride } from '../../../api/_pieceText';
 import {
   MARK_KINDS, MARK_LABEL, MARK_SYMBOL, contrastOnDark, keywordShare, markupOf, marksByWord, toggleMark, wordRanges,
   type BlockMarks, type MarkKind,
@@ -595,6 +596,37 @@ export function EsquemaDeEscena({ scene, width, foco, sinLeyenda }: { scene: any
   );
 }
 
+interface SafeRect { x: number; y: number; w: number; h: number }
+type LadoZona = 'top' | 'left' | 'right' | 'bottom' | 'mover';
+const rectValido = (r: any): SafeRect | null =>
+  r && ['x', 'y', 'w', 'h'].every((k) => Number.isFinite(Number(r[k]))) ? { x: Number(r.x), y: Number(r.y), w: Number(r.w), h: Number(r.h) } : null;
+/** Lo más que un lado puede entrar: < 50 % (regla de VideoLab v1.13.0). */
+const LADO_MAX = 49.99;
+
+/** La zona en px del lienzo → `safe_override` en % por lado, dentro de 0 y < 50. PURO. */
+export function overrideDeRect(r: SafeRect, W: number, H: number): SafeOverride {
+  const c = (v: number) => Math.round(Math.min(LADO_MAX, Math.max(0, v)) * 100) / 100;
+  return { top: c((r.y / H) * 100), left: c((r.x / W) * 100), right: c(((W - r.x - r.w) / W) * 100), bottom: c(((H - r.y - r.h) / H) * 100) };
+}
+
+/**
+ * Mover un lado de la zona (o toda la zona) `dx`, `dy` px del lienzo, sin salir del video y sin que ningún lado pase
+ * del 50 % (la zona siempre contiene el centro). PURO.
+ */
+export function ajustarZona(r: SafeRect, lado: LadoZona, dx: number, dy: number, W: number, H: number): SafeRect {
+  const xMax = (W * LADO_MAX) / 100, yMax = (H * LADO_MAX) / 100;
+  let x0 = r.x, y0 = r.y, x1 = r.x + r.w, y1 = r.y + r.h;
+  if (lado === 'mover') {
+    const ddx = Math.min(Math.max(dx, -x0, (W - xMax) - x1), xMax - x0, W - x1);
+    const ddy = Math.min(Math.max(dy, -y0, (H - yMax) - y1), yMax - y0, H - y1);
+    x0 += ddx; x1 += ddx; y0 += ddy; y1 += ddy;
+  } else if (lado === 'left') x0 = Math.min(Math.max(0, x0 + dx), xMax);
+  else if (lado === 'right') x1 = Math.max(Math.min(W, x1 + dx), W - xMax);
+  else if (lado === 'top') y0 = Math.min(Math.max(0, y0 + dy), yMax);
+  else y1 = Math.max(Math.min(H, y1 + dy), H - yMax);
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
 /**
  * LA INTERFAZ DE LA PLATAFORMA SOBRE LA VISTA (Sam, 2026-11-18: «una capa que simule los botones y la interfaz de la
  * plataforma… así como lo haces en SocialLab»). La forma `vertical` de SocialLab (`src/ui/Maqueta.tsx`) sin el medio:
@@ -644,19 +676,57 @@ export function seSale(rect: { x: number; y: number; w: number; h: number } | nu
  * reproductor de la tarjeta y sin taparlo. Se ven todos los bloques a la vez, con su nombre; el que se sale va en rojo
  * relleno traslúcido. No recibe el puntero: el arrastre sigue funcionando debajo.
  */
-export function EsquemaSobreVideo({ scene, fits = [] }: {
+export function EsquemaSobreVideo({ scene, fits = [], onZona }: {
   scene: any; fits?: Array<{ layer: string; start_ms: number; fit: { fits: boolean } }>;
+  /**
+   * 2026-11-18 (Sam; VideoLab v1.13.0): con `onZona`, la zona verde se mueve y se agranda con asas, a riesgo de quien
+   * edita. Al soltar, devuelve la zona nueva en % del lienzo (`safe_override`).
+   */
+  onZona?: (o: SafeOverride) => void;
 }) {
   const W = Number(scene?.canvas?.width) || 1080;
   const H = Number(scene?.canvas?.height) || 1920;
-  const safe = scene?.safe && Number.isFinite(Number(scene.safe.w)) ? scene.safe : null;
+  const safeEscena = rectValido(scene?.safe);
+  const marca = rectValido(scene?.safe_brand);
+  const [arrastre, setArrastre] = useState<SafeRect | null>(null);
+  useEffect(() => { setArrastre(null); }, [scene]);
+  const safe = arrastre ?? safeEscena;
+  const raiz = useRef<HTMLDivElement>(null);
   const blocks: any[] = Array.isArray(scene?.blocks) ? scene.blocks : [];
   const pct = (v: number, total: number) => `${(v / total) * 100}%`;
   const fitDe = (b: any) => fits.find((f) => f.layer === b.layer && Number(f.start_ms) === Number(b.start_ms ?? 0))?.fit.fits ?? null;
+  const asa = (lado: LadoZona) => (e: React.PointerEvent<HTMLElement>) => {
+    if (!onZona || !safeEscena) return;
+    e.preventDefault(); e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const ancho = raiz.current?.getBoundingClientRect().width || W;
+    const k = W / ancho; const x0 = e.clientX; const y0 = e.clientY; const r0 = safe ?? safeEscena;
+    let ultimo = r0;
+    const mover = (ev: PointerEvent) => { ultimo = ajustarZona(r0, lado, (ev.clientX - x0) * k, (ev.clientY - y0) * k, W, H); setArrastre(ultimo); };
+    const soltar = () => {
+      window.removeEventListener('pointermove', mover); window.removeEventListener('pointerup', soltar);
+      onZona(overrideDeRect(ultimo, W, H));
+    };
+    window.addEventListener('pointermove', mover); window.addEventListener('pointerup', soltar);
+  };
+  const BORDE = 'absolute pointer-events-auto touch-none hover:bg-emerald-300/30';
   return (
-    <div className="absolute inset-0" aria-hidden="true" data-esquema-sobre-video>
-      {safe && <div className="absolute border border-dashed border-emerald-400/80"
-        style={{ left: pct(safe.x, W), top: pct(safe.y, H), width: pct(safe.w, W), height: pct(safe.h, H) }} />}
+    <div ref={raiz} className="absolute inset-0" data-esquema-sobre-video aria-hidden={onZona ? undefined : 'true'}>
+      {marca && safeEscena && (marca.x !== safeEscena.x || marca.y !== safeEscena.y || marca.w !== safeEscena.w || marca.h !== safeEscena.h) && (
+        <div className="absolute border border-dashed border-emerald-200/30" data-zona-marca title="Zona segura de la marca (referencia)"
+          style={{ left: pct(marca.x, W), top: pct(marca.y, H), width: pct(marca.w, W), height: pct(marca.h, H) }} />
+      )}
+      {safe && <div className="absolute border border-dashed border-emerald-400/80" data-zona-efectiva
+        style={{ left: pct(safe.x, W), top: pct(safe.y, H), width: pct(safe.w, W), height: pct(safe.h, H) }}>
+        {onZona && (<>
+          <div className={cn(BORDE, '-top-1 left-2 right-2 h-2 cursor-ns-resize')} onPointerDown={asa('top')} role="slider" aria-label="Borde superior de la zona segura" aria-valuenow={Math.round(safe.y)} />
+          <div className={cn(BORDE, '-bottom-1 left-2 right-2 h-2 cursor-ns-resize')} onPointerDown={asa('bottom')} role="slider" aria-label="Borde inferior de la zona segura" aria-valuenow={Math.round(safe.y + safe.h)} />
+          <div className={cn(BORDE, '-left-1 top-2 bottom-2 w-2 cursor-ew-resize')} onPointerDown={asa('left')} role="slider" aria-label="Borde izquierdo de la zona segura" aria-valuenow={Math.round(safe.x)} />
+          <div className={cn(BORDE, '-right-1 top-2 bottom-2 w-2 cursor-ew-resize')} onPointerDown={asa('right')} role="slider" aria-label="Borde derecho de la zona segura" aria-valuenow={Math.round(safe.x + safe.w)} />
+          <button type="button" className="absolute -top-2.5 -left-2.5 pointer-events-auto touch-none cursor-move rounded-md bg-emerald-500/90 px-1 text-[9px] leading-4 text-black"
+            onPointerDown={asa('mover')} aria-label="Mover la zona segura" title="Arrastra para mover la zona segura (a tu riesgo)">Zona</button>
+        </>)}
+      </div>}
       {blocks.filter((b) => b?.rect).map((b, i) => {
         const fuera = seSale(b.rect, safe, fitDe(b));
         const manual = b.placed === 'manual';

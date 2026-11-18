@@ -5,7 +5,7 @@ import {
   proposePieceText, applyPieceText, pollPieceText, undoPieceVideo, changePresetStatus, previewPieceText, CalibrationError, type SceneResult,
   type PieceTextProposal, type TextProposal,
 } from '../../services/calibrationInbox';
-import type { CastMember, PresetsByLayer, PresetView, TextAlign, TextFit, TextLayers } from '../../../api/_pieceText';
+import type { CastMember, PresetsByLayer, PresetView, SafeOverride, TextAlign, TextFit, TextLayers } from '../../../api/_pieceText';
 import { MARK_KINDS, pruneMarks, parseMarkup, mergeMarks, type BlockMarks } from './textoMarcas';
 import { dragTargetsOf, type BlockRef, type DraftBlocks } from './arrastre';
 import { BarraDeshacer } from './BarraDeshacer';
@@ -75,6 +75,8 @@ export interface VideoTextDraft {
   key_titles: Array<{ text: string; on: boolean; at_s: number; dur_s: number; preset_key: string; own: boolean; place: Place | null; style: BlockStyle }>;
   cta: { choice: Choice; own: string; preset_key: string; at_s: number; place: Place | null; style: BlockStyle };
   strip: { on: boolean; role: string };
+  /** 2026-11-18 (Sam): la zona segura de la pieza, ajustada a mano y a riesgo del operador; null = la de la marca. */
+  safe_override?: SafeOverride | null;
 }
 
 const firstKey = (presets: PresetsByLayer | null, layer: keyof PresetsByLayer) => presets?.[layer]?.[0]?.preset_key ?? '';
@@ -143,6 +145,7 @@ export function videoTextDraftOf(p: Pick<PieceTextProposal, 'presets' | 'cast' |
       style: blockStyleOf(cur?.cta),
     },
     strip: { on: cur?.identity?.strip ?? false, role: cur?.identity?.identity_role ?? cur?.identity?.strip_role ?? defaultRole(p.strip_options ?? []) },
+    safe_override: (cur as any)?.safe_override ?? null,
   };
 }
 
@@ -177,6 +180,7 @@ export function textLayersFromDraft(d: VideoTextDraft, proposals: PieceTextPropo
     key_titles: d.key_titles.filter((k) => k.on && k.text.trim()).map((k) => ({ text: k.text.trim(), at_ms: ms(k.at_s), dur_ms: ms(k.dur_s), preset_key: k.preset_key, ...conPlace(k.place), ...styleFields(k.text.trim(), k.style) })),
     cta: cta ? { text: cta.text, at_ms: ctaAt, preset_key: d.cta.preset_key, pattern_key: cta.pattern_key ?? null, ...conPlace(d.cta.place), ...styleFields(cta.text, d.cta.style) } : null,
     identity: { strip: d.strip.on, identity_role: d.strip.on ? d.strip.role || null : null },
+    ...(d.safe_override ? { safe_override: d.safe_override } : {}),
   };
 }
 
@@ -1074,7 +1078,8 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
             encima={<>
               {plataformaVisible && prop.platform_ui ? <CapaPlataforma ui={prop.platform_ui} /> : null}
               {esquemaVisible && vista.result?.ok && vista.result.scene
-                ? <EsquemaSobreVideo scene={vista.result.scene} fits={vista.result.fits ?? []} /> : null}
+                ? <EsquemaSobreVideo scene={vista.result.scene} fits={vista.result.fits ?? []}
+                    onZona={enCurso ? undefined : (o) => setDraft({ ...draft, safe_override: o })} /> : null}
             </>}
             esquina={vista.result?.ok && vista.result.scene ? (<>
               {prop.platform_ui && (
@@ -1102,7 +1107,18 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
               </button>
             }
             notasEn={slotBarra ?? null}
-            abajo={vista.result?.ok && vista.result.scene && esquemaVisible ? <LeyendaEsquema /> : null} />
+            abajo={<>
+              {vista.result?.ok && vista.result.scene && esquemaVisible ? <LeyendaEsquema /> : null}
+              {draft.safe_override ? (
+                <p className="flex flex-wrap items-center gap-2 text-[10px] text-amber-200/90" data-zona-a-mano>
+                  Zona segura ajustada a mano para esta pieza: a tu riesgo (el texto puede quedar bajo los botones de la plataforma).
+                  <button type="button" onClick={() => setDraft({ ...draft, safe_override: null })} disabled={enCurso}
+                    className="px-2 py-0.5 rounded-md border border-zinc-700 text-zinc-200 hover:text-white disabled:opacity-40">Restablecer</button>
+                </p>
+              ) : esquemaVisible && vista.result?.ok && vista.result.scene ? (
+                <p className="text-[10px] text-zinc-500">Arrastra los bordes de la zona verde, o «Zona» para moverla, si necesitas más sitio (a tu riesgo).</p>
+              ) : null}
+            </>} />
         </div>,
         slotVista,
       )}
