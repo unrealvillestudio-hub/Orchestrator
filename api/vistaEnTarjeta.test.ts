@@ -55,7 +55,8 @@ describe('el cableado', () => {
   });
   it('el esquema va encima del video, con su check activo por defecto, y no recibe el puntero', () => {
     expect(editor).toMatch(/leerPreferencia\('orchestrator\.vista\.esquema', 'si'\) === 'si'/);
-    expect(editor).toMatch(/<EsquemaSobreVideo scene=\{vista\.result\.scene\} fits=\{vista\.result\.fits \?\? \[\]\} \/>/);
+    // 2026-11-18: además lleva `onZona` (zona segura ajustable); lo que fija esta prueba no cambia.
+    expect(editor).toMatch(/<EsquemaSobreVideo scene=\{vista\.result\.scene\} fits=\{vista\.result\.fits \?\? \[\]\}/);
     expect(visual).toMatch(/\{encima && <div className="absolute inset-0 pointer-events-none">\{encima\}<\/div>\}/);
   });
 });

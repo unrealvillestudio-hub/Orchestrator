@@ -72,6 +72,28 @@ export interface TextLayers {
    * todavía en lo que ya está guardado y no se escribe nunca más. Lo retira la sesión del motor (pasos 2 y 3).
    */
   identity: { strip: boolean; identity_role: string | null; /** @deprecated alias legacy, sólo lectura */ strip_role?: string | null };
+  /**
+   * 2026-11-18 (Sam; VideoLab v1.13.0, #49): la zona segura de ESTA pieza, elegida por el operador y a su riesgo. % del
+   * lienzo por lado, 0 ≤ v < 50 (0 = borde del video). Ausente o null = la de la marca y el canal.
+   */
+  safe_override?: SafeOverride | null;
+}
+
+export interface SafeOverride { top: number; left: number; right: number; bottom: number }
+export const SAFE_SIDES = ['top', 'left', 'right', 'bottom'] as const;
+
+/** Valida la zona de la pieza con la misma regla que VideoLab (§4 ter.4, v1.13.0). PURO. */
+export function safeOverrideOf(v: unknown, errors: string[]): SafeOverride | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  if (!v || typeof v !== 'object' || Array.isArray(v)) { errors.push('safe_override: debe ser { top, left, right, bottom } o null'); return undefined; }
+  const out: Partial<SafeOverride> = {};
+  for (const k of SAFE_SIDES) {
+    const n = Number((v as any)[k]);
+    if (!Number.isFinite(n) || n < 0 || n >= 50) { errors.push(`safe_override.${k}: ${String((v as any)[k])} no está entre 0 y menos de 50`); continue; }
+    out[k] = Math.round(n * 100) / 100;
+  }
+  return SAFE_SIDES.every((k) => out[k] != null) ? out as SafeOverride : undefined;
 }
 
 export interface PresetView {
@@ -481,7 +503,8 @@ export function validateTextLayers(
   if (!hook && !roles.some((r) => r.show) && !(captions?.enabled) && !key_titles.length && !cta && !strip) {
     errors.push('no hay ninguna capa de texto elegida: el video quedaría limpio');
   }
-  return errors.length ? { ok: false, errors } : { ok: true, value: { hook, roles, captions, key_titles, cta, identity } };
+  const safe_override = safeOverrideOf((raw as any).safe_override, errors);
+  return errors.length ? { ok: false, errors } : { ok: true, value: { hook, roles, captions, key_titles, cta, identity, ...(safe_override !== undefined ? { safe_override } : {}) } };
 }
 
 // ── El pedido a VideoLab ───────────────────────────────────────────────────────────────────────
