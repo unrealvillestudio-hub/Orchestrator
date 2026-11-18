@@ -16,7 +16,7 @@ import { PieceActionsBar, type ActionOutcome } from './pieceActions';
 import {
   CountPill, Selector, Pager, CutoffsNotice, GenerationBadge, WatcherBadge, Provenance, PieceHeader, shortId,
   ForecastLine, SlotsNotice, SearchNotice, PendingStateBadge, PENDING_STATE_UI,
-  DeferralNotice, FixNotice, AutofixNotice, PieceSummary, MobileDetails, FilterBar, OpenChallengesNotice, RuleTextsProvider,
+  DeferralNotice, FixNotice, AutofixNotice, TruncationNotice, PieceSummary, MobileDetails, FilterBar, OpenChallengesNotice, RuleTextsProvider,
   PlatformFilter, ScopeGroupFilter,
 } from './pieceUi';
 // Lectura en voz alta. El lector no sabe de artefactos: el adaptador le pasa el texto plano.
@@ -462,6 +462,8 @@ function CalibrationCard({ piece, token, onResolved, slotsRead }: {
         {/* LO-CORREGIDO-01 — la propuesta con la que Sam la retó, y por qué versión va. Es lo que
             convierte «apruebo si está bien» en una comparación y no en una impresión. */}
         <FixNotice state={piece.pending_state} fix={piece.fix} /><AutofixNotice autofix={piece.autofix} reason={piece.pending_state === 'autofix_residuo' ? piece.fix?.challenge_reason : null} />
+        {/* TRUNC-AVISO — la pieza pasó con sospecha de cuerpo cortado: se avisa antes del veredicto. */}
+        <TruncationNotice warning={piece.truncation_warning} />
 
         {/* Escritorio: en su sitio de siempre. Teléfono: en «Detalles». */}
         <div className="hidden md:block space-y-4">{tecnico}</div>

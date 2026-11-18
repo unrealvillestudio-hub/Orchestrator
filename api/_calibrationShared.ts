@@ -165,6 +165,14 @@ export interface PieceAssets {
   social?: { adapted?: Array<{ copy?: string; platform?: string }>; platforms?: string[] | null };
   // `signature_closer`: la firma de la voz, que el drenaje de `meta_graph` pone una vez y al final.
   builder_meta?: { psycho_preset?: string; audience_frame?: string; signature_closer?: { text?: string | null } | null };
+  // TRUNC-AVISO (2026-11-18) — el veredicto de cuerpo truncado que `content-run-stage` deja en
+  // `assets.copylab.truncation` (bloque COPYTRUNC). Aquí sólo se lee. Ver `truncationWarningOf`.
+  copylab?: {
+    truncation?: {
+      truncated?: boolean; signal?: string; reason?: string | null; tail?: string | null;
+      action?: string; body_chars?: number | null; max_tokens?: number | null;
+    } | null;
+  } | null;
   watcher?: {
     result?: string;
     failed_gate?: string | null;
@@ -639,6 +647,11 @@ export interface PieceContext {
   /** CARRIL AUTO-FIX — qué corrigió el carril antes de que naciera la pieza. `null` = no corrió. */
   autofix: AutofixSummary | null;
   /**
+   * TRUNC-AVISO (2026-11-18) — el carril sospechó que el cuerpo está cortado y, por decisión de Sam,
+   * la dejó pasar con aviso en vez de fallar el job. `null` = sin sospecha. Ver `truncationWarningOf`.
+   */
+  truncation_warning: TruncationWarning | null;
+  /**
    * Aplazamiento: hasta cuándo y por qué. `null` en toda pieza no aplazada.
    *
    * `toContext` YA los devolvía desde el 2026-09-18 y la interfaz no los declaraba. No daba error
@@ -730,6 +743,40 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     research_hint: researchHintOf(piece),
     // CARRIL AUTO-FIX — qué corrigió el carril antes de que la pieza naciera, y qué quedó.
     autofix: autofixOf(piece),
+    // TRUNC-AVISO — la sospecha de cuerpo cortado con la que la pieza pasó a calibración.
+    truncation_warning: truncationWarningOf(piece),
+  };
+}
+
+/**
+ * TRUNC-AVISO (2026-11-18) — EL AVISO DE CUERPO POSIBLEMENTE CORTADO.
+ *
+ * Decisión de Sam del 2026-11-18: el detector de cuerpo truncado «no bloquea sino que permite pasar
+ * pero con su warn en la tarjeta de calibración». `content-run-stage` deja el veredicto en
+ * `assets.copylab.truncation` (`truncated`, `signal`, `reason`, `tail`, `action`). Si la pieza existe
+ * y trae `truncated: true`, pasó con aviso —una pieza con corte declarado por la API (`stop_reason`)
+ * no llega a nacer—, así que el criterio es `truncated === true` y no depende de que `action` exista
+ * (una pieza escrita entre el despliegue del carril y el de esta pantalla la trae igual).
+ * `null` = sin sospecha: un recuadro vacío en cien tarjetas enseña a saltarse el lleno.
+ */
+export interface TruncationWarning {
+  signal: string | null;
+  reason: string | null;
+  tail: string | null;
+  body_chars: number | null;
+  max_tokens: number | null;
+}
+export function truncationWarningOf(piece: { assets?: unknown } | null | undefined): TruncationWarning | null {
+  const t = (piece?.assets as PieceAssets | null | undefined)?.copylab?.truncation;
+  if (!t || t.truncated !== true) return null;
+  const texto = (x: unknown) => (typeof x === 'string' && x.trim() ? x : null);
+  const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+  return {
+    signal: texto(t.signal),
+    reason: texto(t.reason),
+    tail: texto(t.tail),
+    body_chars: num(t.body_chars),
+    max_tokens: num(t.max_tokens),
   };
 }
 
