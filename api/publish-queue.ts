@@ -273,6 +273,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         generation: genById.get(p.id),
         metrics: metricsOf(p, limits, closers),
         reading_language: readingLanguageOf(p.brand_id, brandLangs),
+        // 2026-11-18 — el editor carga el mismo texto que pinta la tarjeta (`editableBodyOf`).
+        provider: (channelById.get(p.id) ?? channelOf(p, channels)).provider,
       }),
       channel: channelById.get(p.id) ?? channelOf(p, channels),
       // El COMPROMISO de esta pieza: la franja que tiene reservada. `null` = no tiene, que

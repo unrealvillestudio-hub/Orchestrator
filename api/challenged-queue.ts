@@ -26,15 +26,17 @@ import {
   applyCors, extractToken,
   parsePieceSearch, idMatchesSearch, searchErrorBody, searchSummary,
   fetchLivePieces, fetchEvaluatedIds, pendingStateOf, tieneImagen, autofixResiduo, cambioTrasAprobacion,
-  type PieceSearch,
+  type PieceSearch, type ContentPiece,
 } from './_calibrationShared.js';
+// 2026-11-18 — el canal de la pieza, sólo para saber qué texto carga el editor.
+import { fetchPublishChannels, channelOf } from './_publishShared.js';
 // Quién puede usar este endpoint y sobre qué marcas: admin todo; un revisor, sólo las suyas.
 import { requireReviewer, filterByReviewScope } from './_reviewScope.js';
 import { fetchBrandLanguages } from './_brandLanguage.js';
 import { codesIn } from './_ruleCodes.js';
 import {
   fetchPendingChallenges, fetchPiecesByIds, fetchRuleTexts, toChallengedRow, retentionReason,
-  CHALLENGED_CAP,
+  CHALLENGED_CAP, type RawPiece,
 } from './_challengedShared.js';
 
 function intParam(v: unknown, def: number, min: number, max: number): number {
@@ -136,7 +138,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ]);
 
     const brandLangs = await fetchBrandLanguages();
-    const rows = page.map((r) => toChallengedRow(r, pieces, ruleRows, brandLangs));
+    // 2026-11-18 — el proveedor del canal de cada pieza: el editor carga el texto que pinta la tarjeta. FAIL-SOFT y
+    // dicho: sin canales, el editor carga lo de antes.
+    const channels = await fetchPublishChannels().catch((e: unknown) => {
+      console.warn('[challenged-queue] brand_publish_channels no legible; el editor carga el adaptado:', e instanceof Error ? e.message : String(e));
+      return null;
+    });
+    const providerOf = (p: RawPiece): string | null => (channels ? channelOf(p as unknown as ContentPiece, channels).provider : null);
+    const rows = page.map((r) => toChallengedRow(r, pieces, ruleRows, brandLangs, providerOf));
 
     const truncated = abiertas.length >= CHALLENGED_CAP;
     if (truncated) console.warn(`[challenged-queue] judge_calibration hit cap ${CHALLENGED_CAP} — la bandeja puede estar truncada`);
