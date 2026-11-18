@@ -140,7 +140,7 @@ const avisoDe = (w: unknown) => {
  * LA VISTA GRANDE: el video limpio de la pieza con el texto encima, dibujado por VideoLab. Cambia mientras se elige,
  * sin «Aplicar». Si aún no hay escena (cargando, error), lo dice; el video se ve igual.
  */
-export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace, lado, abajo, encima, esquina, notasEn }: {
+export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace, lado, abajo, encima, esquina, notasEn, esquinaArriba, reloj }: {
   videoUrl: string; result: SceneResult | null; loading: boolean; error: string | null; width: number;
   /** Los bloques que se pueden arrastrar (ver `arrastre.ts`). Sin `onPlace`, no se arrastra nada. */
   targets?: DragTarget[]; onPlace?: (ref: BlockRef, place: Place) => void;
@@ -162,6 +162,12 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
   encima?: React.ReactNode;
   esquina?: React.ReactNode;
   notasEn?: HTMLElement | null;
+  /**
+   * 2026-11-18 (Sam): arriba a la derecha, «Fijar»; abajo a la derecha, el reloj al lado del check. Con `reloj`, la
+   * rueda del ratón sobre la vista avanza o retrocede cuadro a cuadro.
+   */
+  esquinaArriba?: React.ReactNode;
+  reloj?: boolean;
 }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const W = Number(result?.scene?.canvas?.width) || 1080;
@@ -177,8 +183,16 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
     const ir = () => { if (video.paused && video.currentTime < 0.05) video.currentTime = Math.min((v.start + 1200) / 1000, (video.duration || 9e9) - 0.1); saltado.current = true; };
     if (video.readyState >= 1) ir(); else video.addEventListener('loadedmetadata', ir, { once: true });
   }, [video, result]);
+  const fps = Number(result?.scene?.fps) > 0 ? Number(result?.scene?.fps) : FPS_POR_DEFECTO;
+  const conRueda = useRueda<HTMLDivElement>(reloj ? (dy) => {
+    if (!video) return;
+    video.pause();
+    const d = video.duration || Infinity;
+    video.currentTime = Math.min(Math.max(0, video.currentTime + pasoDeRueda(dy, fps)), Number.isFinite(d) ? d : video.currentTime + 1);
+  } : null);
   const pantalla = (
-      <div className="relative mx-auto rounded-lg overflow-hidden bg-black shrink-0" style={{ width, height: alto }}>
+      <div ref={conRueda} className="relative mx-auto rounded-lg overflow-hidden bg-black shrink-0" style={{ width, height: alto }}
+        title={reloj ? 'Rueda del ratón: cuadro a cuadro' : undefined}>
         <video ref={setVideo} src={videoUrl} className="absolute inset-0 w-full h-full object-cover" muted playsInline loop controls={false}
           onClick={(e) => { const v = e.currentTarget; if (v.paused) void v.play(); else v.pause(); }} aria-label="Video limpio de la pieza" />
         {result?.ok && result.scene && result.runtime_url && (
@@ -190,8 +204,14 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
         {onPlace && result?.ok && result.scene && (
           <Arrastrables scene={result.scene} targets={targets} video={video} escala={width / W} onPlace={onPlace} />
         )}
-        {loading && <span className="absolute top-2 right-2"><Spinner size={14} /></span>}
-        {esquina && <div className="absolute bottom-1.5 right-1.5 z-30">{esquina}</div>}
+        {loading && <span className={cn('absolute top-2', esquinaArriba ? 'left-2' : 'right-2')}><Spinner size={14} /></span>}
+        {esquinaArriba && <div className="absolute top-1.5 right-1.5 z-30">{esquinaArriba}</div>}
+        {(esquina || reloj) && (
+          <div className="absolute bottom-1.5 right-1.5 z-30 flex items-center gap-1.5">
+            {reloj && <Reloj video={video} fps={fps} />}
+            {esquina}
+          </div>
+        )}
       </div>
   );
   const notas = (<>
@@ -284,6 +304,53 @@ function Arrastrables({ scene, targets, video, escala, onPlace }: {
 }
 
 /** Reproducir y mover el cabezal del video de la vista grande. */
+/** Cuadros por segundo si la escena no los dice. */
+export const FPS_POR_DEFECTO = 30;
+
+/** Cuánto se mueve el video con un golpe de rueda: un cuadro, hacia delante si la rueda baja. PURO. */
+export function pasoDeRueda(deltaY: number, fps: number): number {
+  if (!deltaY) return 0;
+  const f = fps > 0 ? fps : FPS_POR_DEFECTO;
+  return (deltaY > 0 ? 1 : -1) / f;
+}
+
+/** El reloj de la vista: segundos con dos decimales y el número de cuadro. PURO. */
+export function relojDe(t: number, fps: number): string {
+  const s = Math.max(0, Number.isFinite(t) ? t : 0);
+  const f = fps > 0 ? fps : FPS_POR_DEFECTO;
+  return `${s.toFixed(2)} s · c ${Math.round(s * f)}`;
+}
+
+/**
+ * La rueda del ratón sobre un elemento, sin que la página se desplace (el listener nativo con `passive: false` es el
+ * único que puede impedirlo). `alGirar` null = sin rueda.
+ */
+export function useRueda<T extends HTMLElement>(alGirar: ((deltaY: number) => void) | null) {
+  const [el, setEl] = useState<T | null>(null);
+  const ref = useRef(alGirar);
+  ref.current = alGirar;
+  const activo = !!alGirar;
+  useEffect(() => {
+    if (!el || !activo) return;
+    const h = (e: WheelEvent) => { if (!ref.current || !e.deltaY) return; e.preventDefault(); ref.current(e.deltaY); };
+    el.addEventListener('wheel', h, { passive: false });
+    return () => el.removeEventListener('wheel', h);
+  }, [el, activo]);
+  return setEl;
+}
+
+function Reloj({ video, fps }: { video: HTMLVideoElement | null; fps: number }) {
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    if (!video) return;
+    const u = () => setT(video.currentTime);
+    const ev = ['timeupdate', 'seeked', 'loadedmetadata'];
+    ev.forEach((e) => video.addEventListener(e, u)); u();
+    return () => ev.forEach((e) => video.removeEventListener(e, u));
+  }, [video]);
+  return <span className="rounded-md bg-black/60 px-1.5 py-1 text-[10px] font-mono tabular-nums text-zinc-100" aria-label="Momento del video" data-reloj>{relojDe(t, fps)}</span>;
+}
+
 function VideoBarra({ video }: { video: HTMLVideoElement | null }) {
   const [t, setT] = useState(0); const [dur, setDur] = useState(0); const [play, setPlay] = useState(false);
   useEffect(() => {

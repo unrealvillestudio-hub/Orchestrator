@@ -10,7 +10,7 @@ import { MARK_KINDS, pruneMarks, parseMarkup, mergeMarks, type BlockMarks } from
 import { dragTargetsOf, type BlockRef, type DraftBlocks } from './arrastre';
 import { BarraDeshacer } from './BarraDeshacer';
 import type { SoundLayer } from '../../../api/_pieceSound';
-import { Alineacion, EsquemaDeEscena, EsquemaSobreVideo, FranjaModo, LeyendaEsquema, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel } from './TextoVisual';
+import { Alineacion, EsquemaDeEscena, EsquemaSobreVideo, FranjaModo, LeyendaEsquema, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel, useRueda } from './TextoVisual';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
 import {
   BLOCK_LABELS, CAPTIONS_BAND, PCT_STEP, PREVIEW_AUTO, PREVIEW_NOTE, ROLE_NO_PERSONA, VIDEO_SAFE_ZONE_APPROX,
@@ -289,15 +289,24 @@ function Deslizador({ label, value, min, max, step, fmt, onChange, disabled, rea
   label: string; value: number; min: number; max: number; step: number; fmt: (n: number) => string;
   onChange: (n: number) => void; disabled?: boolean; reason?: string | null;
 }) {
+  // 2026-11-18 (Sam): con el puntero encima, la rueda del ratón ajusta el valor paso a paso, al tamaño preciso.
+  const conRueda = useRueda<HTMLInputElement>(disabled ? null : (dy) => onChange(valorPorRueda(value, dy, step, min, max)));
   return (
     <label className={cn('flex items-center gap-2 text-[11px]', disabled ? 'text-zinc-600' : 'text-zinc-400')} title={reason ?? undefined}>
       <span className="w-10 shrink-0">{label}</span>
-      <input type="range" min={min} max={max} step={step} value={value} disabled={disabled}
+      <input ref={conRueda} type="range" min={min} max={max} step={step} value={value} disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))} aria-label={label} aria-valuetext={fmt(value)}
         className="flex-1 accent-violet-400 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40" />
       <span className="w-12 text-right font-mono text-zinc-300">{disabled ? '—' : fmt(value)}</span>
     </label>
   );
+}
+
+/** Un golpe de rueda sobre un deslizador: un paso, hacia arriba si la rueda sube; dentro del rango. PURO. */
+export function valorPorRueda(value: number, deltaY: number, step: number, min: number, max: number): number {
+  if (!deltaY) return value;
+  const n = value + (deltaY < 0 ? step : -step);
+  return Math.round(Math.min(max, Math.max(min, n)) * 1e6) / 1e6;
 }
 
 const pct = (n: number) => `${Math.round(n)} %`;
@@ -856,6 +865,16 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
   const [esquemaVisible, setEsquemaVisible] = useState<boolean>(() => leerPreferencia('orchestrator.vista.esquema', 'si') === 'si');
   const cambiarEsquema = (v: boolean) => { setEsquemaVisible(v); guardarPreferencia('orchestrator.vista.esquema', v ? 'si' : 'no'); };
   const anchoTarjeta = useAnchoDe(slotVista ?? null);
+  // 2026-11-18 (Sam): «Fijar» arriba de la vista de la tarjeta. Fijada, la vista sigue arriba al desplazarse. Empieza
+  // suelta: fijarla es decisión de quien edita, y se recuerda en este navegador.
+  const [tarjetaFija, setTarjetaFija] = useState<boolean>(() => leerPreferencia('orchestrator.vista.tarjeta.fija', 'no') === 'si');
+  const cambiarTarjetaFija = (v: boolean) => { setTarjetaFija(v); guardarPreferencia('orchestrator.vista.tarjeta.fija', v ? 'si' : 'no'); };
+  useEffect(() => {
+    if (!slotVista) return;
+    const st = slotVista.style;
+    st.position = tarjetaFija ? 'sticky' : ''; st.top = tarjetaFija ? '0px' : ''; st.zIndex = tarjetaFija ? '20' : '';
+    return () => { st.position = ''; st.top = ''; st.zIndex = ''; };
+  }, [slotVista, tarjetaFija]);
   const cambiarFija = (v: boolean) => { setVistaFija(v); guardarPreferencia('orchestrator.vista.fija', v ? 'si' : 'no'); };
   const cambiarAncho = (n: number) => { const a = clampAncho(n); setAnchoVista(a); guardarPreferencia('orchestrator.vista.ancho', String(a)); };
   /** Lo guardado en la pieza, como borrador: contra esto se sabe si hay cambios sin aplicar y a esto vuelve «Descartar». */
@@ -1064,6 +1083,14 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
                 Zonas
               </label>
             ) : null}
+            reloj
+            esquinaArriba={
+              <button type="button" onClick={() => cambiarTarjetaFija(!tarjetaFija)} aria-pressed={tarjetaFija}
+                className={cn('rounded-md px-1.5 py-1 text-[10px]', tarjetaFija ? 'bg-violet-600/90 text-white' : 'bg-black/60 text-zinc-100')}
+                title={tarjetaFija ? 'La vista sigue arriba al desplazarse. Pulsa para soltarla.' : 'Pulsa para que la vista siga arriba al desplazarse.'}>
+                {tarjetaFija ? 'Fijada · soltar' : 'Fijar'}
+              </button>
+            }
             notasEn={slotBarra ?? null}
             abajo={vista.result?.ok && vista.result.scene && esquemaVisible ? <LeyendaEsquema /> : null} />
         </div>,
@@ -1198,8 +1225,12 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
               </label>
               {r.show && (
                 <>
-                  <input value={r.text} onChange={(e) => upd({ text: e.target.value })} aria-label={`Rótulo de ${r.name}`}
-                    className="w-full bg-zinc-950/60 border border-zinc-800 rounded-lg px-2.5 py-1 text-[12px] text-zinc-200" />
+                  {/* 2026-11-18 (Sam): «poder aplicar "siguiente línea" en los roles». Enter = salto de línea; VideoLab lo
+                      respeta hasta las líneas del estilo (`wrapText`). */}
+                  <textarea value={r.text} onChange={(e) => upd({ text: e.target.value })} aria-label={`Rótulo de ${r.name}`}
+                    rows={Math.min(3, Math.max(2, r.text.split('\n').length))} data-rol-multilinea
+                    className="w-full resize-y bg-zinc-950/60 border border-zinc-800 rounded-lg px-2.5 py-1 text-[12px] leading-snug text-zinc-200" />
+                  <p className="text-[10px] text-zinc-600">Enter: siguiente línea.</p>
                   <div className="flex gap-3 flex-wrap">
                     <Segundo label="Aparece en" value={r.at_s} onChange={(n) => upd({ at_s: n })} />
                     <Segundo label="Dura" value={r.dur_s} onChange={(n) => upd({ dur_s: n })} />
