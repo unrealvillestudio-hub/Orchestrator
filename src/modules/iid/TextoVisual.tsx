@@ -12,6 +12,7 @@
  * Ni una marca, ni un color, ni una URL de VideoLab en este archivo: todo llega del server (dato).
  */
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { cn, Spinner } from '../../ui/components';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
 import type { SceneResult } from '../../services/calibrationInbox';
@@ -139,7 +140,7 @@ const avisoDe = (w: unknown) => {
  * LA VISTA GRANDE: el video limpio de la pieza con el texto encima, dibujado por VideoLab. Cambia mientras se elige,
  * sin «Aplicar». Si aún no hay escena (cargando, error), lo dice; el video se ve igual.
  */
-export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace, lado, abajo }: {
+export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace, lado, abajo, encima, esquina, notasEn }: {
   videoUrl: string; result: SceneResult | null; loading: boolean; error: string | null; width: number;
   /** Los bloques que se pueden arrastrar (ver `arrastre.ts`). Sin `onPlace`, no se arrastra nada. */
   targets?: DragTarget[]; onPlace?: (ref: BlockRef, place: Place) => void;
@@ -153,6 +154,14 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
    * Ocupa el ancho de los dos juntos: la barra del play no se estira más allá.
    */
   abajo?: React.ReactNode;
+  /**
+   * 2026-11-18 (Sam): la vista va en el reproductor de la TARJETA. `encima` se dibuja sobre el video sin recibir el
+   * puntero (el esquema de zonas seguras); `esquina`, abajo a la derecha y sí lo recibe (el check que lo muestra);
+   * `notasEn` es el sitio de la franja inferior de la tarjeta donde van el play, la etiqueta y las notas.
+   */
+  encima?: React.ReactNode;
+  esquina?: React.ReactNode;
+  notasEn?: HTMLElement | null;
 }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const W = Number(result?.scene?.canvas?.width) || 1080;
@@ -177,10 +186,12 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
             <ScenePlayer scene={result.scene} runtimeUrl={result.runtime_url} width={width} video={video} />
           </div>
         )}
+        {encima && <div className="absolute inset-0 pointer-events-none">{encima}</div>}
         {onPlace && result?.ok && result.scene && (
           <Arrastrables scene={result.scene} targets={targets} video={video} escala={width / W} onPlace={onPlace} />
         )}
         {loading && <span className="absolute top-2 right-2"><Spinner size={14} /></span>}
+        {esquina && <div className="absolute bottom-1.5 right-1.5 z-30">{esquina}</div>}
       </div>
   );
   const notas = (<>
@@ -197,6 +208,12 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
         <p className="text-[10px] text-zinc-500">Arrastra un texto sobre el video para moverlo. Queda colocado a mano; «Automático» lo devuelve.</p>
       )}
   </>);
+  if (notasEn !== undefined) {
+    // En la tarjeta: el video ocupa el sitio del reproductor; play, etiqueta y notas, en la franja de abajo. Mientras
+    // la franja no existe (primer pintado), van debajo del video para no perderlas.
+    const pie = <div className="space-y-1.5">{abajo}{notas}</div>;
+    return <>{pantalla}{notasEn ? createPortal(pie, notasEn) : pie}</>;
+  }
   if (!lado) return <div className="space-y-1.5">{pantalla}{notas}</div>;
   return (
     <div className="space-y-1.5" style={{ width: width * 2 + 12 }}>
@@ -504,7 +521,53 @@ export function EsquemaDeEscena({ scene, width, foco, sinLeyenda }: { scene: any
   );
 }
 
+/**
+ * Un bloque se pinta en ROJO RELLENO cuando el texto se sale: si su caja pasa del borde de la zona segura, o si VideoLab
+ * dice que no cabe (`fit.fits === false`). PURO. (Sam, 2026-11-18: «rojo cuando el texto se sale, filled traslúcido».)
+ */
+export function seSale(rect: { x: number; y: number; w: number; h: number } | null | undefined,
+  safe: { x: number; y: number; w: number; h: number } | null | undefined, fits?: boolean | null): boolean {
+  if (fits === false) return true;
+  if (!rect || !safe) return false;
+  const e = 1; // 1 px de tolerancia por redondeo
+  return rect.x < safe.x - e || rect.y < safe.y - e || rect.x + rect.w > safe.x + safe.w + e || rect.y + rect.h > safe.y + safe.h + e;
+}
+
+/**
+ * EL ESQUEMA SOBRE EL VIDEO (Sam, 2026-11-18): la zona segura en verde punteado y cada bloque en punteado, encima del
+ * reproductor de la tarjeta y sin taparlo. Se ven todos los bloques a la vez, con su nombre; el que se sale va en rojo
+ * relleno traslúcido. No recibe el puntero: el arrastre sigue funcionando debajo.
+ */
+export function EsquemaSobreVideo({ scene, fits = [] }: {
+  scene: any; fits?: Array<{ layer: string; start_ms: number; fit: { fits: boolean } }>;
+}) {
+  const W = Number(scene?.canvas?.width) || 1080;
+  const H = Number(scene?.canvas?.height) || 1920;
+  const safe = scene?.safe && Number.isFinite(Number(scene.safe.w)) ? scene.safe : null;
+  const blocks: any[] = Array.isArray(scene?.blocks) ? scene.blocks : [];
+  const pct = (v: number, total: number) => `${(v / total) * 100}%`;
+  const fitDe = (b: any) => fits.find((f) => f.layer === b.layer && Number(f.start_ms) === Number(b.start_ms ?? 0))?.fit.fits ?? null;
+  return (
+    <div className="absolute inset-0" aria-hidden="true" data-esquema-sobre-video>
+      {safe && <div className="absolute border border-dashed border-emerald-400/80"
+        style={{ left: pct(safe.x, W), top: pct(safe.y, H), width: pct(safe.w, W), height: pct(safe.h, H) }} />}
+      {blocks.filter((b) => b?.rect).map((b, i) => {
+        const fuera = seSale(b.rect, safe, fitDe(b));
+        const manual = b.placed === 'manual';
+        return (
+          <div key={i} data-se-sale={fuera ? 'si' : 'no'}
+            className={cn('absolute rounded-sm border border-dashed text-[9px] leading-tight px-0.5 overflow-hidden',
+              fuera ? 'border-rose-500 bg-rose-500/30 text-rose-50' : manual ? 'border-violet-300 text-violet-100' : 'border-white/60 text-white/80')}
+            style={{ left: pct(b.rect.x, W), top: pct(b.rect.y, H), width: pct(b.rect.w, W), height: pct(b.rect.h, H) }}>
+            <span className="bg-black/40 rounded-sm px-0.5">{CAPA_NOMBRE[b.layer] ?? b.layer}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** La leyenda del esquema; en la vista grande va debajo, a lo ancho (Sam, 2026-11-18). */
 export function LeyendaEsquema({ width }: { width?: number }) {
-  return <p className="text-[9.5px] text-zinc-500 leading-snug min-w-0 flex-1" style={width ? { width } : undefined}>Verde: zona segura. Morado: a mano. Punteado: automático. Medidas reales de VideoLab.</p>;
+  return <p className="text-[9.5px] text-zinc-500 leading-snug min-w-0 flex-1" style={width ? { width } : undefined}>Verde: zona segura. Morado: a mano. Punteado: automático. Rojo relleno: el texto se sale. Medidas reales de VideoLab.</p>;
 }

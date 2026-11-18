@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { cn, Spinner } from '../../ui/components';
 import {
   proposePieceText, applyPieceText, pollPieceText, undoPieceVideo, changePresetStatus, previewPieceText, CalibrationError, type SceneResult,
@@ -9,7 +10,7 @@ import { MARK_KINDS, pruneMarks, parseMarkup, mergeMarks, type BlockMarks } from
 import { dragTargetsOf, type BlockRef, type DraftBlocks } from './arrastre';
 import { BarraDeshacer } from './BarraDeshacer';
 import type { SoundLayer } from '../../../api/_pieceSound';
-import { Alineacion, EsquemaDeEscena, FranjaModo, LeyendaEsquema, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel } from './TextoVisual';
+import { Alineacion, EsquemaDeEscena, EsquemaSobreVideo, FranjaModo, LeyendaEsquema, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel } from './TextoVisual';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
 import {
   BLOCK_LABELS, CAPTIONS_BAND, PCT_STEP, PREVIEW_AUTO, PREVIEW_NOTE, ROLE_NO_PERSONA, VIDEO_SAFE_ZONE_APPROX,
@@ -329,6 +330,31 @@ export function PlaceControls({ medium, block, place, onChange, zoomOnly, zoom, 
   }
   const sx = controlSupport(medium, block, 'x');
   const auto = !place;
+  if (medium === 'video') {
+    // 2026-11-18 (Sam): «todos los sliders de ubicación del texto elimínalos para que se coloquen a mano siempre, es más
+    // fácil». En el video el bloque se coloca arrastrándolo sobre la vista; aquí queda sólo volver a «Automático» y el
+    // tamaño (Zoom), que el arrastre no cambia.
+    return (
+      <div className="space-y-1 rounded-lg border border-zinc-800/70 p-2" data-colocacion-video>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-zinc-400">
+            {auto ? 'Automático: el lab elige el lugar y esquiva caras. Para colocarlo a mano, arrástralo sobre el video.'
+              : 'A mano: va donde lo soltaste sobre el video; no esquiva caras (el lab avisa si tapa una).'}
+          </span>
+          {!auto && (
+            <button type="button" onClick={() => onChange(null)}
+              className="px-2 py-0.5 rounded-lg text-[11px] border border-zinc-700 text-zinc-300 hover:text-white">
+              Automático
+            </button>
+          )}
+        </div>
+        {!auto && (
+          <Deslizador label="Zoom" value={place?.zoom ?? 1} min={ZOOM_MIN} max={ZOOM_MAX} step={ZOOM_STEP} fmt={zx}
+            onChange={(n) => place && onChange({ ...place, zoom: clampZoom(n) })} />
+        )}
+      </div>
+    );
+  }
   return (
     <div className="space-y-1 rounded-lg border border-zinc-800/70 p-2">
       <div className="flex items-center justify-between gap-2">
@@ -629,6 +655,29 @@ export const VISTA_ANCHO_MIN = 110;
 export const VISTA_ANCHO_MAX = 320;
 export const VISTA_ANCHO_INICIAL = 170;
 /** El ancho de la vista dentro de su rango; un valor que no es número vuelve al inicial. PURO. */
+/**
+ * El ancho para la vista en el reproductor de la tarjeta: el del sitio, sin pasar del alto que tenía el video de la
+ * tarjeta (75 % de la pantalla, en 9:16). PURO.
+ */
+export function anchoEnTarjeta(anchoSitio: number, altoPantalla: number): number {
+  const porAlto = Math.floor((altoPantalla * 0.75 * 9) / 16);
+  const a = Math.min(anchoSitio > 0 ? anchoSitio : VISTA_ANCHO_INICIAL, porAlto > 0 ? porAlto : Infinity);
+  return Math.max(VISTA_ANCHO_MIN, Math.round(a));
+}
+
+function useAnchoDe(el: HTMLElement | null): number {
+  const [w, setW] = useState(VISTA_ANCHO_INICIAL);
+  useEffect(() => {
+    if (!el) return;
+    const medir = () => setW(anchoEnTarjeta(el.clientWidth, window.innerHeight));
+    medir();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(medir) : null;
+    ro?.observe(el); window.addEventListener('resize', medir);
+    return () => { ro?.disconnect(); window.removeEventListener('resize', medir); };
+  }, [el]);
+  return w;
+}
+
 export function clampAncho(n: number): number {
   if (!Number.isFinite(n)) return VISTA_ANCHO_INICIAL;
   return Math.round(Math.min(VISTA_ANCHO_MAX, Math.max(VISTA_ANCHO_MIN, n)));
@@ -703,6 +752,14 @@ export type OnScreenTextEditorProps =
     sonidoPendiente?: SoundLayer | null;
     /** El pedido salió: la tarjeta vacía los dos borradores. */
     onEnviado?: () => void;
+    /**
+     * 2026-11-18 (Sam): «no hay necesidad de 2 previews, vamos a utilizar el de la tarjeta». `slotVista` es el sitio del
+     * reproductor de la tarjeta y `slotBarra` el de la franja inferior, al lado de «Sonido». Con `slotVista`, la vista
+     * fiel se dibuja ahí (portal) y la ventana ya no lleva su propia vista. Sin él (tarjeta sin video a la vista), la
+     * vista sigue dentro de la ventana, como antes.
+     */
+    slotVista?: HTMLElement | null;
+    slotBarra?: HTMLElement | null;
   }
   | {
     medium: 'image';
@@ -788,13 +845,17 @@ function ImageBody(p: Extract<OnScreenTextEditorProps, { medium: 'image' }>) {
 
 // ── Video ────────────────────────────────────────────────────────────────────────────────────────
 
-function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPendiente, onEnviado }: Extract<OnScreenTextEditorProps, { medium: 'video' }>) {
+function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPendiente, onEnviado, slotVista, slotBarra }: Extract<OnScreenTextEditorProps, { medium: 'video' }>) {
   const [prop, setProp] = useState<PieceTextProposal | null>(null);
   const [draft, setDraft] = useState<VideoTextDraft | null>(null);
   // 2026-11-17 (Sam): la vista se fija o se suelta, y su tamaño se cambia arrastrando el borde inferior. Se recuerda en
   // este navegador (comodidad de quien edita; si el navegador no deja guardar, vale lo de siempre).
   const [vistaFija, setVistaFija] = useState<boolean>(() => leerPreferencia('orchestrator.vista.fija', 'si') === 'si');
   const [anchoVista, setAnchoVista] = useState<number>(() => clampAncho(Number(leerPreferencia('orchestrator.vista.ancho', String(VISTA_ANCHO_INICIAL)))));
+  // 2026-11-18 (Sam): el esquema de zonas seguras va SOBRE el video de la tarjeta, con un check activo por defecto.
+  const [esquemaVisible, setEsquemaVisible] = useState<boolean>(() => leerPreferencia('orchestrator.vista.esquema', 'si') === 'si');
+  const cambiarEsquema = (v: boolean) => { setEsquemaVisible(v); guardarPreferencia('orchestrator.vista.esquema', v ? 'si' : 'no'); };
+  const anchoTarjeta = useAnchoDe(slotVista ?? null);
   const cambiarFija = (v: boolean) => { setVistaFija(v); guardarPreferencia('orchestrator.vista.fija', v ? 'si' : 'no'); };
   const cambiarAncho = (n: number) => { const a = clampAncho(n); setAnchoVista(a); guardarPreferencia('orchestrator.vista.ancho', String(a)); };
   /** Lo guardado en la pieza, como borrador: contra esto se sabe si hay cambios sin aplicar y a esto vuelve «Descartar». */
@@ -985,7 +1046,30 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
           las secciones van lado a lado cuando caben: con la vista chica, las secciones ocupan el espacio de la derecha;
           con la vista grande, bajan solas debajo (flex-wrap). La columna del esquema y el play tiene ancho fijo. */}
       <div className="flex flex-wrap items-start gap-2">
-      {prop.clean_video_url && (
+      {prop.clean_video_url && slotVista && createPortal(
+        // 2026-11-18 (Sam): la vista fiel ocupa el reproductor de la tarjeta, con el esquema encima y su check en la
+        // esquina; el play, la etiqueta y las notas van en la franja de abajo, al lado de «Sonido».
+        <div className="rounded-xl overflow-hidden border border-zinc-800 bg-black flex justify-center" data-vista-en-tarjeta>
+          <VistaFiel videoUrl={prop.clean_video_url} result={vista.result} loading={vista.loading} error={vista.error}
+            width={anchoTarjeta}
+            targets={vista.result?.ok && vista.result.scene ? dragTargetsOf(vista.result.scene, draftBlocksOf(draft, prop.proposals, prop.duration_ms ?? null)) : []}
+            onPlace={enCurso ? undefined : (ref, place) => setDraft(withPlace(draft, ref, place))}
+            encima={esquemaVisible && vista.result?.ok && vista.result.scene
+              ? <EsquemaSobreVideo scene={vista.result.scene} fits={vista.result.fits ?? []} /> : null}
+            esquina={vista.result?.ok && vista.result.scene ? (
+              <label className="flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-1 text-[10px] text-zinc-100 cursor-pointer select-none"
+                title={esquemaVisible ? 'Ocultar las zonas seguras y las cajas del texto' : 'Mostrar las zonas seguras y las cajas del texto'}>
+                <input type="checkbox" className="accent-violet-500" checked={esquemaVisible} onChange={(e) => cambiarEsquema(e.target.checked)}
+                  aria-label="Mostrar zonas seguras" />
+                Zonas
+              </label>
+            ) : null}
+            notasEn={slotBarra ?? null}
+            abajo={vista.result?.ok && vista.result.scene && esquemaVisible ? <LeyendaEsquema /> : null} />
+        </div>,
+        slotVista,
+      )}
+      {prop.clean_video_url && !slotVista && (
         // 2026-11-17 (Sam): la vista grande arriba, con el esquema, la barra de reproducción y las notas AL LADO del video
         // (ocupa sólo el alto del video). Se puede fijar o soltar, y su borde inferior se arrastra para hacerla más
         // grande o más chica: lo de abajo se reacomoda.
