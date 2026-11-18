@@ -79,16 +79,15 @@ describe('la vista grande: al lado, de tamaño ajustable y se puede soltar (Sam,
     const visual = readFileSync('src/modules/iid/TextoVisual.tsx', 'utf8');
     expect(editor).toMatch(/vistaFija && 'md:sticky md:top-0'/);
     expect(editor).toMatch(/role="separator"/);
-    expect(visual).toMatch(/<div className="min-w-0 shrink-0 space-y-1\.5" style=\{\{ width: ladoAncho \?\? 180 \}\}>\{lado\}\{notas\}<\/div>/);
+    expect(visual).toMatch(/<div className="shrink-0">\{lado\}<\/div>\n\s*<\/div>\n\s*\{abajo\}\{notas\}/);
   });
-  it('la barra del play no se estira: la columna tiene ancho fijo, y las secciones usan el espacio de al lado (Sam, 2026-11-18)', async () => {
-    const { anchoLado, VISTA_ANCHO_MIN, VISTA_ANCHO_MAX } = await import('../src/modules/iid/OnScreenTextEditor');
-    expect(anchoLado(VISTA_ANCHO_MIN)).toBe(150);
-    expect(anchoLado(VISTA_ANCHO_MAX)).toBe(Math.round(VISTA_ANCHO_MAX * 0.62));
-    expect(anchoLado(9999)).toBe(anchoLado(VISTA_ANCHO_MAX));
+  it('las zonas seguras miden lo mismo que la vista; leyenda, play y notas van debajo; las secciones usan el espacio libre (Sam, 2026-11-18)', () => {
     const editor = readFileSync('src/modules/iid/OnScreenTextEditor.tsx', 'utf8');
+    const visual = readFileSync('src/modules/iid/TextoVisual.tsx', 'utf8');
+    expect(editor).toMatch(/<EsquemaDeEscena scene=\{vista\.result\.scene\} width=\{anchoVista\} sinLeyenda \/>/);
+    expect(editor).toMatch(/abajo=\{/);
+    expect(visual).toMatch(/style=\{\{ width: width \* 2 \+ 12 \}\}/);
     expect(editor).toMatch(/<div className="flex flex-wrap items-start gap-2">/);
     expect(editor).toMatch(/<div className="flex-1 min-w-\[240px\] space-y-2">/);
-    expect(editor).toMatch(/ladoAncho=\{anchoLado\(anchoVista\)\}/);
   });
 });

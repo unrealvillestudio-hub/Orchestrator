@@ -9,7 +9,7 @@ import { MARK_KINDS, pruneMarks, parseMarkup, mergeMarks, type BlockMarks } from
 import { dragTargetsOf, type BlockRef, type DraftBlocks } from './arrastre';
 import { BarraDeshacer } from './BarraDeshacer';
 import type { SoundLayer } from '../../../api/_pieceSound';
-import { Alineacion, EsquemaDeEscena, FranjaModo, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel } from './TextoVisual';
+import { Alineacion, EsquemaDeEscena, FranjaModo, LeyendaEsquema, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel } from './TextoVisual';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
 import {
   BLOCK_LABELS, CAPTIONS_BAND, PCT_STEP, PREVIEW_AUTO, PREVIEW_NOTE, ROLE_NO_PERSONA, VIDEO_SAFE_ZONE_APPROX,
@@ -629,9 +629,6 @@ export const VISTA_ANCHO_MIN = 110;
 export const VISTA_ANCHO_MAX = 320;
 export const VISTA_ANCHO_INICIAL = 170;
 /** El ancho de la vista dentro de su rango; un valor que no es número vuelve al inicial. PURO. */
-/** Ancho fijo de la columna al lado del video (esquema, play y notas): sigue al esquema y nunca se estira. */
-export const anchoLado = (anchoVista: number) => Math.max(150, Math.round(clampAncho(anchoVista) * 0.62));
-
 export function clampAncho(n: number): number {
   if (!Number.isFinite(n)) return VISTA_ANCHO_INICIAL;
   return Math.round(Math.min(VISTA_ANCHO_MAX, Math.max(VISTA_ANCHO_MIN, n)));
@@ -994,16 +991,21 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
         // grande o más chica: lo de abajo se reacomoda.
         <div className={cn('z-20 shrink-0 max-w-full rounded-xl border border-zinc-800 bg-zinc-950 shadow-lg shadow-black/40', vistaFija && 'md:sticky md:top-0')}>
           <div className="p-2">
-            <VistaFiel videoUrl={prop.clean_video_url} result={vista.result} loading={vista.loading} error={vista.error} width={anchoVista} ladoAncho={anchoLado(anchoVista)}
+            <VistaFiel videoUrl={prop.clean_video_url} result={vista.result} loading={vista.loading} error={vista.error} width={anchoVista}
               targets={vista.result?.ok && vista.result.scene ? dragTargetsOf(vista.result.scene, draftBlocksOf(draft, prop.proposals, prop.duration_ms ?? null)) : []}
               onPlace={enCurso ? undefined : (ref, place) => setDraft(withPlace(draft, ref, place))}
               lado={
-                <div className="flex flex-col items-start gap-2">
-                  {vista.result?.ok && vista.result.scene
-                    ? <EsquemaDeEscena scene={vista.result.scene} width={Math.round(anchoVista * 0.62)} />
-                    : <SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} />}
+                // 2026-11-18 (Sam): las zonas seguras del MISMO tamaño que la vista, al lado del video.
+                vista.result?.ok && vista.result.scene
+                  ? <EsquemaDeEscena scene={vista.result.scene} width={anchoVista} sinLeyenda />
+                  : <div style={{ width: anchoVista }}><SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} /></div>
+              }
+              abajo={
+                // …y la leyenda, «Fijar arriba», el play y las notas, DEBAJO de los dos.
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  {vista.result?.ok && vista.result.scene && <LeyendaEsquema />}
                   <button type="button" onClick={() => cambiarFija(!vistaFija)} aria-pressed={vistaFija}
-                    className="hidden md:inline-flex px-2 min-h-8 rounded-md border border-zinc-700 text-[11px] text-zinc-300 hover:text-white"
+                    className="hidden md:inline-flex shrink-0 px-2 min-h-8 rounded-md border border-zinc-700 text-[11px] text-zinc-300 hover:text-white"
                     title={vistaFija ? 'La vista sigue arriba al desplazarse. Pulsa para soltarla.' : 'Pulsa para que la vista siga arriba al desplazarse.'}>
                     {vistaFija ? 'Fijada arriba · soltar' : 'Fijar arriba'}
                   </button>
