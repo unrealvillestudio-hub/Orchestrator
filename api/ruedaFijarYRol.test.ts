@@ -66,3 +66,10 @@ describe('el cableado en la tarjeta', () => {
     expect(editor).toMatch(/<input ref=\{conRueda\} type="range"/);
   });
 });
+
+describe('la barra de reproducción, arriba de la franja (Sam, 2026-11-18)', () => {
+  it('en la tarjeta va primero, justo debajo del video; después la leyenda y las notas', () => {
+    const visual = readFileSync('src/modules/iid/TextoVisual.tsx', 'utf8');
+    expect(visual).toMatch(/const pie = <div className="space-y-1\.5" data-pie-vista>\{barra\}\{abajo\}\{resto\}<\/div>;/);
+  });
+});

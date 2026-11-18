@@ -222,8 +222,8 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
         )}
       </div>
   );
-  const notas = (<>
-      <VideoBarra video={video} />
+  const barra = <VideoBarra video={video} />;
+  const resto = (<>
       <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
         <Fidelidad fidelity={result?.ok ? result.fidelity : null} />
         {result?.ok && result.fidelity === 'same_engine' && <span>Lo que ves es lo que sale en el video.</span>}
@@ -236,10 +236,12 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
         <p className="text-[10px] text-zinc-500">Arrastra un texto sobre el video para moverlo. Queda colocado a mano; «Automático» lo devuelve.</p>
       )}
   </>);
+  const notas = <>{barra}{resto}</>;
   if (notasEn !== undefined) {
     // En la tarjeta: el video ocupa el sitio del reproductor; play, etiqueta y notas, en la franja de abajo. Mientras
     // la franja no existe (primer pintado), van debajo del video para no perderlas.
-    const pie = <div className="space-y-1.5">{abajo}{notas}</div>;
+    // 2026-11-18 (Sam): la barra de reproducción arriba de la franja, justo debajo del video; después, la leyenda y las notas.
+    const pie = <div className="space-y-1.5" data-pie-vista>{barra}{abajo}{resto}</div>;
     return <>{pantalla}{notasEn ? createPortal(pie, notasEn) : pie}</>;
   }
   if (!lado) return <div className="space-y-1.5">{pantalla}{notas}</div>;
