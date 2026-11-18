@@ -18,9 +18,19 @@ describe('el estilo de la vista fijada', () => {
 describe('el cableado en la tarjeta', () => {
   const tarjeta = readFileSync('src/modules/iid/pieceActions.tsx', 'utf8');
   const editor = readFileSync('src/modules/iid/OnScreenTextEditor.tsx', 'utf8');
-  it('al fijar (o al abrir con la vista fijada) la página se lleva hasta la vista', () => {
-    expect(tarjeta).toMatch(/if \(vistaFija && vistaAbierta\) marcoVista\.current\?\.scrollIntoView\(\{ block: 'start', behavior: 'smooth' \}\);/);
+  it('al fijar (o al abrir con la vista fijada) la página se lleva hasta la vista y la columna izquierda queda quieta', () => {
+    expect(tarjeta).toMatch(/usePaginaQuieta\(vistaFija && vistaAbierta, marcoVista\);/);
     expect(tarjeta).toMatch(/const vistaAbierta = pantallaVideo \|\| sonidoVideo;/);
+    const m = readFileSync('src/modules/iid/vistaFija.ts', 'utf8');
+    expect(m).toMatch(/raiz\.style\.overflow = 'hidden'; document\.body\.style\.overflow = 'hidden';/);
+    expect(m).toMatch(/return \(\) => \{ raiz\.style\.overflow = antes\.html; document\.body\.style\.overflow = antes\.body;/);
+  });
+  it('sólo se bloquea la página con la ventana al lado: en el teléfono el editor está debajo', async () => {
+    const { debeBloquearPagina } = await import('../src/modules/iid/vistaFija');
+    expect(debeBloquearPagina(true, true, true)).toBe(true);
+    expect(debeBloquearPagina(true, true, false)).toBe(false);
+    expect(debeBloquearPagina(false, true, true)).toBe(false);
+    expect(debeBloquearPagina(true, false, true)).toBe(false);
   });
   it('vale para «Texto en pantalla» y para «Sonido», con un solo estado', () => {
     expect(tarjeta).toMatch(/style=\{estiloVistaFija\(!!\(textoVideo && vistaAbierta && media && vistaFija\)\)\}/);

@@ -17,7 +17,7 @@ import type { TextLayers } from '../../../api/_pieceText';
 import type { SoundDraft, SoundLayer } from '../../../api/_pieceSound';
 import { ControlesDeSonido } from './ControlesDeSonido';
 import { VentanaLateral } from './VentanaLateral';
-import { useVistaFija, estiloVistaFija } from './vistaFija';
+import { useVistaFija, estiloVistaFija, usePaginaQuieta } from './vistaFija';
 import {
   imageBlocksToSend, imagePlacementDraftOf, LAMINA_SIN_COLOCACION, NO_SAFE_ZONE, roleTextOf,
   type ImageBlocks, type ImagePlacementDraft, type SafeZone,
@@ -680,9 +680,8 @@ export function PieceActionsBar({
   const [vistaFija, cambiarVistaFija] = useVistaFija();
   const marcoVista = useRef<HTMLDivElement | null>(null);
   const vistaAbierta = pantallaVideo || sonidoVideo;
-  useEffect(() => {
-    if (vistaFija && vistaAbierta) marcoVista.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-  }, [vistaFija, vistaAbierta]);
+  // La columna de la izquierda se queda quieta con la vista arriba mientras se edita al lado (`usePaginaQuieta`).
+  usePaginaQuieta(vistaFija && vistaAbierta, marcoVista);
   const elegirLamina = (n: number) => {
     setSlideN(n); setError(null); setPlaceSel(null); setColSel(null); setScaleSel(null);
     if (n > 1) {
