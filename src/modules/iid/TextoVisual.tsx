@@ -139,7 +139,7 @@ const avisoDe = (w: unknown) => {
  * LA VISTA GRANDE: el video limpio de la pieza con el texto encima, dibujado por VideoLab. Cambia mientras se elige,
  * sin «Aplicar». Si aún no hay escena (cargando, error), lo dice; el video se ve igual.
  */
-export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace, lado }: {
+export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace, lado, ladoAncho }: {
   videoUrl: string; result: SceneResult | null; loading: boolean; error: string | null; width: number;
   /** Los bloques que se pueden arrastrar (ver `arrastre.ts`). Sin `onPlace`, no se arrastra nada. */
   targets?: DragTarget[]; onPlace?: (ref: BlockRef, place: Place) => void;
@@ -148,6 +148,8 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
    * notas pasan a esa columna, para que la vista ocupe sólo el alto del video.
    */
   lado?: React.ReactNode;
+  /** 2026-11-18 (Sam): ancho FIJO de esa columna; la barra del play no se estira para llenar el sobrante. */
+  ladoAncho?: number;
 }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const W = Number(result?.scene?.canvas?.width) || 1080;
@@ -196,7 +198,7 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
   return (
     <div className="flex items-start gap-3">
       {pantalla}
-      <div className="min-w-0 flex-1 space-y-1.5">{lado}{notas}</div>
+      <div className="min-w-0 shrink-0 space-y-1.5" style={{ width: ladoAncho ?? 180 }}>{lado}{notas}</div>
     </div>
   );
 }
