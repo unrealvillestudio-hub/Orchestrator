@@ -663,6 +663,10 @@ export function PieceActionsBar({
   const [pantallaAspect, setPantallaAspect] = useState(4 / 5);
   // La ventana del video se abre aparte: un video no se recompone por el panel de imagen (`PIEZA_DE_VIDEO`).
   const [pantallaVideo, setPantallaVideo] = useState(false);
+  // 2026-11-18 (Sam): con «Texto en pantalla» abierto, la vista fiel ocupa el reproductor de la tarjeta y sus controles
+  // van en la franja de abajo, al lado de «Sonido». Son los dos sitios a los que el editor pinta (portal).
+  const [slotVista, setSlotVista] = useState<HTMLDivElement | null>(null);
+  const [slotBarra, setSlotBarra] = useState<HTMLDivElement | null>(null);
   // 2026-11-17 — la ventana «Controles de sonido» (boceto aprobado por Sam). Una ventana a la vez: texto o sonido.
   const [sonidoVideo, setSonidoVideo] = useState(false);
   // 2026-11-17 (Sam: «sí a aplicar juntos»). Lo editado sin aplicar en cada ventana vive aquí: sobrevive a cerrar la
@@ -1889,6 +1893,7 @@ export function PieceActionsBar({
       <OnScreenTextEditor medium="video" pieceId={piece.piece_id} token={token}
         borrador={borradorTexto?.draft ?? null} onBorrador={setBorradorTexto}
         sonidoPendiente={borradorSonido?.layer ?? null} onEnviado={vaciarBorradores}
+        slotVista={media && textView !== undefined ? slotVista : null} slotBarra={slotBarra}
         onApplied={(r) => onRegenerated?.({ html: r.html, artifact_url: r.artifact_url, composed: false, refreshed: r.html !== null, posts: 0 })} />
     </div>
     </VentanaLateral>
@@ -1927,9 +1932,11 @@ export function PieceActionsBar({
         )}
       </AnimatePresence>
     );
+    // La vista de la tarjeta: mientras se edita «Texto en pantalla», el sitio del reproductor lo ocupa la vista fiel.
+    const vistaEditando = textoVideo && pantallaVideo && media;
     return (
       <div className="space-y-3">
-        {media}
+        {vistaEditando ? <div ref={setSlotVista} className="w-full" data-sitio-vista /> : media}
         <div className="space-y-2">
           {notaImagen}
           {zona === 'imagen' && notaError}
@@ -1938,6 +1945,7 @@ export function PieceActionsBar({
               {deImagen.map(pintar)}
               {botonTextoImagen}
               {botonSonido}
+              {vistaEditando && <div ref={setSlotBarra} className="basis-full sm:basis-0 sm:flex-1 min-w-[220px]" data-sitio-barra />}
             </div>
           ))}
           {ventanaVideo}

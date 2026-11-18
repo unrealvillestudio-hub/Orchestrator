@@ -52,7 +52,8 @@ describe('la tarjeta por zonas: el orden de Sam', () => {
   it('imagen y sus correcciones, texto, lectura y las suyas, veredicto, investigación plegada al final', () => {
     const i = MOD.indexOf('if (textView !== undefined) {');
     const zonas = MOD.slice(i, MOD.indexOf('\n  return (\n', i + 10) > 0 ? MOD.indexOf('\n  }\n', i) : undefined);
-    const orden = ['{media}', "enZona('imagen'", '{textView}', '{reader}', "enZona('texto'", '{beforeVerdict}', "enZona('veredicto'", 'plegada />'];
+    // 2026-11-18: mientras se edita «Texto en pantalla», el sitio de la vista ocupa el lugar de `media`; el orden no cambia.
+    const orden = [' : media}', "enZona('imagen'", '{textView}', '{reader}', "enZona('texto'", '{beforeVerdict}', "enZona('veredicto'", 'plegada />'];
     const pos = orden.map((t) => zonas.indexOf(t));
     expect(pos.every((p) => p >= 0)).toBe(true);
     expect([...pos].sort((a, b) => a - b)).toEqual(pos);
