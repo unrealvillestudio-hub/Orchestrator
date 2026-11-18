@@ -1093,6 +1093,7 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
               </label>
             </>) : null}
             reloj
+            controlesArriba={plataformaVisible && !!prop.platform_ui}
             esquinaArriba={
               <button type="button" onClick={() => cambiarTarjetaFija(!tarjetaFija)} aria-pressed={tarjetaFija}
                 className={cn('rounded-md px-1.5 py-1 text-[10px]', tarjetaFija ? 'bg-violet-600/90 text-white' : 'bg-black/60 text-zinc-100')}

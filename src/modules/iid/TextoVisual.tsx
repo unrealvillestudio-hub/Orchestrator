@@ -142,7 +142,7 @@ const avisoDe = (w: unknown) => {
  * LA VISTA GRANDE: el video limpio de la pieza con el texto encima, dibujado por VideoLab. Cambia mientras se elige,
  * sin «Aplicar». Si aún no hay escena (cargando, error), lo dice; el video se ve igual.
  */
-export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace, lado, abajo, encima, esquina, notasEn, esquinaArriba, reloj }: {
+export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace, lado, abajo, encima, esquina, notasEn, esquinaArriba, reloj, controlesArriba }: {
   videoUrl: string; result: SceneResult | null; loading: boolean; error: string | null; width: number;
   /** Los bloques que se pueden arrastrar (ver `arrastre.ts`). Sin `onPlace`, no se arrastra nada. */
   targets?: DragTarget[]; onPlace?: (ref: BlockRef, place: Place) => void;
@@ -169,6 +169,8 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
    * rueda del ratón sobre la vista avanza o retrocede cuadro a cuadro.
    */
   esquinaArriba?: React.ReactNode;
+  /** Los controles de la esquina (reloj y checks) arriba a la izquierda en vez de abajo a la derecha. */
+  controlesArriba?: boolean;
   reloj?: boolean;
 }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
@@ -206,10 +208,13 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
         {onPlace && result?.ok && result.scene && (
           <Arrastrables scene={result.scene} targets={targets} video={video} escala={width / W} onPlace={onPlace} />
         )}
-        {loading && <span className={cn('absolute top-2', esquinaArriba ? 'left-2' : 'right-2')}><Spinner size={14} /></span>}
+        {loading && <span className={cn('absolute right-2', esquinaArriba ? 'top-10' : 'top-2')}><Spinner size={14} /></span>}
         {esquinaArriba && <div className="absolute top-1.5 right-1.5 z-30">{esquinaArriba}</div>}
         {(esquina || reloj) && (
-          <div className="absolute bottom-1.5 right-1.5 z-30 flex items-center gap-1.5">
+          // 2026-11-18 (Sam: «la maqueta queda por detrás de los checks»): con la capa de la plataforma encendida, los
+          // controles suben a la esquina superior izquierda, donde la maqueta no dibuja nada.
+          <div className={cn('absolute z-30 flex flex-wrap items-center gap-1.5', controlesArriba ? 'top-1.5 left-1.5 right-24' : 'bottom-1.5 right-1.5')}
+            data-controles-vista={controlesArriba ? 'arriba' : 'abajo'}>
             {reloj && <Reloj video={video} fps={fps} />}
             {esquina}
           </div>
