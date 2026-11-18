@@ -9,7 +9,7 @@ import { MARK_KINDS, pruneMarks, parseMarkup, mergeMarks, type BlockMarks } from
 import { dragTargetsOf, type BlockRef, type DraftBlocks } from './arrastre';
 import { BarraDeshacer } from './BarraDeshacer';
 import type { SoundLayer } from '../../../api/_pieceSound';
-import { Alineacion, EsquemaDeEscena, FranjaModo, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel } from './TextoVisual';
+import { Alineacion, EsquemaDeEscena, FranjaModo, LeyendaEsquema, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel } from './TextoVisual';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
 import {
   BLOCK_LABELS, CAPTIONS_BAND, PCT_STEP, PREVIEW_AUTO, PREVIEW_NOTE, ROLE_NO_PERSONA, VIDEO_SAFE_ZONE_APPROX,
@@ -981,22 +981,31 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
         <p className="text-[10px] text-zinc-500">CopyLab no recibió los patrones recientes: los ganchos pueden repetir patrón.</p>
       )}
 
+      {/* 2026-11-18 (Sam): «no hay motivos para agrandar la barra del play… hay mucho espacio inutilizado». La vista y
+          las secciones van lado a lado cuando caben: con la vista chica, las secciones ocupan el espacio de la derecha;
+          con la vista grande, bajan solas debajo (flex-wrap). La columna del esquema y el play tiene ancho fijo. */}
+      <div className="flex flex-wrap items-start gap-2">
       {prop.clean_video_url && (
         // 2026-11-17 (Sam): la vista grande arriba, con el esquema, la barra de reproducción y las notas AL LADO del video
         // (ocupa sólo el alto del video). Se puede fijar o soltar, y su borde inferior se arrastra para hacerla más
         // grande o más chica: lo de abajo se reacomoda.
-        <div className={cn('z-20 rounded-xl border border-zinc-800 bg-zinc-950 shadow-lg shadow-black/40', vistaFija && 'md:sticky md:top-0')}>
+        <div className={cn('z-20 shrink-0 max-w-full rounded-xl border border-zinc-800 bg-zinc-950 shadow-lg shadow-black/40', vistaFija && 'md:sticky md:top-0')}>
           <div className="p-2">
             <VistaFiel videoUrl={prop.clean_video_url} result={vista.result} loading={vista.loading} error={vista.error} width={anchoVista}
               targets={vista.result?.ok && vista.result.scene ? dragTargetsOf(vista.result.scene, draftBlocksOf(draft, prop.proposals, prop.duration_ms ?? null)) : []}
               onPlace={enCurso ? undefined : (ref, place) => setDraft(withPlace(draft, ref, place))}
               lado={
-                <div className="flex flex-wrap items-start gap-3">
-                  {vista.result?.ok && vista.result.scene
-                    ? <EsquemaDeEscena scene={vista.result.scene} width={Math.round(anchoVista * 0.62)} />
-                    : <SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} />}
+                // 2026-11-18 (Sam): las zonas seguras del MISMO tamaño que la vista, al lado del video.
+                vista.result?.ok && vista.result.scene
+                  ? <EsquemaDeEscena scene={vista.result.scene} width={anchoVista} sinLeyenda />
+                  : <div style={{ width: anchoVista }}><SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} /></div>
+              }
+              abajo={
+                // …y la leyenda, «Fijar arriba», el play y las notas, DEBAJO de los dos.
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  {vista.result?.ok && vista.result.scene && <LeyendaEsquema />}
                   <button type="button" onClick={() => cambiarFija(!vistaFija)} aria-pressed={vistaFija}
-                    className="hidden md:inline-flex ml-auto px-2 min-h-8 rounded-md border border-zinc-700 text-[11px] text-zinc-300 hover:text-white"
+                    className="hidden md:inline-flex shrink-0 px-2 min-h-8 rounded-md border border-zinc-700 text-[11px] text-zinc-300 hover:text-white"
                     title={vistaFija ? 'La vista sigue arriba al desplazarse. Pulsa para soltarla.' : 'Pulsa para que la vista siga arriba al desplazarse.'}>
                     {vistaFija ? 'Fijada arriba · soltar' : 'Fijar arriba'}
                   </button>
@@ -1019,11 +1028,14 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
         </div>
       )}
       {!prop.clean_video_url && (
-        <Seccion titulo="Vista previa" resumen="aproximada">
-          <SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} />
-        </Seccion>
+        <div className="w-full">
+          <Seccion titulo="Vista previa" resumen="aproximada">
+            <SchematicPreview aspect={prop.aspect ?? 9 / 16} safe={VIDEO_SAFE_ZONE_APPROX} items={videoPreviewItems(draft, prop.proposals)} />
+          </Seccion>
+        </div>
       )}
 
+      <div className="flex-1 min-w-[240px] space-y-2">
       <Seccion titulo={BLOCK_LABELS.headline} resumen={hookElegido ? `${hookElegido.text} · ${modo(draft.hook.place)}` : null} onOpen={() => pedirMiniaturas('hook')}>
         <Propuestas list={prop.proposals.hooks} choice={draft.hook.choice} own={draft.hook.own} propio="Escribir uno propio"
           onChoice={(c) => set({ hook: { ...draft.hook, choice: c } })} onOwn={(t) => set({ hook: { ...draft.hook, ...ownWithMarkup(t, draft.hook.style) } })} />
@@ -1158,6 +1170,9 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
         )}
         <NoAplica label="X, Y y Zoom" reason="La franja va fija en el borde de la marca: no es un bloque que se coloque." />
       </Seccion>
+
+      </div>
+      </div>
 
       {error && <p className="text-[11px] text-rose-300 leading-snug">{error}</p>}
       {done && <p className="text-[11px] text-emerald-300 leading-snug">{done}</p>}

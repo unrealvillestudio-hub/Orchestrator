@@ -139,7 +139,7 @@ const avisoDe = (w: unknown) => {
  * LA VISTA GRANDE: el video limpio de la pieza con el texto encima, dibujado por VideoLab. Cambia mientras se elige,
  * sin «Aplicar». Si aún no hay escena (cargando, error), lo dice; el video se ve igual.
  */
-export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace, lado }: {
+export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace, lado, abajo }: {
   videoUrl: string; result: SceneResult | null; loading: boolean; error: string | null; width: number;
   /** Los bloques que se pueden arrastrar (ver `arrastre.ts`). Sin `onPlace`, no se arrastra nada. */
   targets?: DragTarget[]; onPlace?: (ref: BlockRef, place: Place) => void;
@@ -148,6 +148,11 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
    * notas pasan a esa columna, para que la vista ocupe sólo el alto del video.
    */
   lado?: React.ReactNode;
+  /**
+   * 2026-11-18 (Sam): lo que va DEBAJO del video y del esquema (leyenda, «Fijar arriba»), seguido del play y las notas.
+   * Ocupa el ancho de los dos juntos: la barra del play no se estira más allá.
+   */
+  abajo?: React.ReactNode;
 }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const W = Number(result?.scene?.canvas?.width) || 1080;
@@ -194,9 +199,12 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
   </>);
   if (!lado) return <div className="space-y-1.5">{pantalla}{notas}</div>;
   return (
-    <div className="flex items-start gap-3">
-      {pantalla}
-      <div className="min-w-0 flex-1 space-y-1.5">{lado}{notas}</div>
+    <div className="space-y-1.5" style={{ width: width * 2 + 12 }}>
+      <div className="flex items-start gap-3">
+        {pantalla}
+        <div className="shrink-0">{lado}</div>
+      </div>
+      {abajo}{notas}
     </div>
   );
 }
@@ -464,7 +472,7 @@ const CAPA_NOMBRE: Record<string, string> = {
  * los resolvió la escena (Sam, 2026-11-17: al lado de la vista grande, y que se redibuje al elegir un estilo). Morado =
  * colocado a mano; punteado = automático. `foco` resalta la capa que se está editando.
  */
-export function EsquemaDeEscena({ scene, width, foco }: { scene: any; width: number; foco?: string | null }) {
+export function EsquemaDeEscena({ scene, width, foco, sinLeyenda }: { scene: any; width: number; foco?: string | null; sinLeyenda?: boolean }) {
   const W = Number(scene?.canvas?.width) || 1080;
   const H = Number(scene?.canvas?.height) || 1920;
   const k = width / W;
@@ -491,7 +499,12 @@ export function EsquemaDeEscena({ scene, width, foco }: { scene: any; width: num
           );
         })}
       </div>
-      <p className="text-[9.5px] text-zinc-500 leading-snug" style={{ width }}>Verde: zona segura. Morado: a mano. Punteado: automático. Medidas reales de VideoLab.</p>
+      {!sinLeyenda && <LeyendaEsquema width={width} />}
     </div>
   );
+}
+
+/** La leyenda del esquema; en la vista grande va debajo, a lo ancho (Sam, 2026-11-18). */
+export function LeyendaEsquema({ width }: { width?: number }) {
+  return <p className="text-[9.5px] text-zinc-500 leading-snug min-w-0 flex-1" style={width ? { width } : undefined}>Verde: zona segura. Morado: a mano. Punteado: automático. Medidas reales de VideoLab.</p>;
 }
