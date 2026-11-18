@@ -15,6 +15,7 @@ import { RuleChip, RuleText } from './RuleText';
 export { RuleTextsProvider } from './RuleText';
 import type {
   FlowGeneration, PieceMetrics, CountAgainstLimit, SignatureCheck, PendingState, FixFlow, AutofixSummary,
+  TruncationWarning,
 } from '../../services/calibrationInbox';
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -1234,6 +1235,38 @@ export function AutofixNotice({ autofix, reason }: { autofix: AutofixSummary | n
         {residuo && <span className="font-semibold font-sans">no pudo resolver <RuleText text={autofix.residual.join(', ')} /></span>}
         {residuo && reason && <span className="text-pink-300/70"> · <RuleText text={reason} /></span>}
         {autofix.cost_usd != null && <span className={residuo ? 'text-pink-300/50' : 'text-emerald-300/50'}> · ${autofix.cost_usd.toFixed(3)}</span>}
+      </span>
+    </div>
+  );
+}
+
+// ── TRUNC-AVISO, DICHO EN LA TARJETA (2026-11-18) ─────────────────────────────
+//
+// Decisión de Sam: el detector de cuerpo truncado no bloquea; deja pasar la pieza con su aviso aquí.
+// Se pinta el motivo y la COLA del cuerpo que se juzgó, para que Sam vea con sus ojos si el final está
+// cortado o sólo no lleva signo de cierre. Sin sospecha (`null`) no se pinta nada.
+export function TruncationNotice({ warning }: { warning: TruncationWarning | null | undefined }) {
+  if (!warning) return null;
+  const datos = [
+    warning.signal ? `señal: ${warning.signal}` : null,
+    warning.body_chars != null ? `${warning.body_chars} caracteres` : null,
+    warning.max_tokens != null ? `techo ${warning.max_tokens} tokens` : null,
+  ].filter(Boolean).join(' · ');
+  return (
+    <div
+      className={cn(DATE_ROW, 'border-dashed bg-amber-500/[0.07] border-amber-400/40 text-amber-100/90')}
+      title="assets.copylab.truncation — el carril sospechó que el cuerpo está cortado y dejó pasar la pieza con aviso."
+      role="note"
+    >
+      <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+      <span className="min-w-0">
+        <span className="font-semibold font-sans">Posible texto cortado:</span>{' '}
+        <span className="font-sans">revisa el final antes de aprobar.</span>
+        {warning.reason && <span className="text-amber-300/70"> · {warning.reason}</span>}
+        {datos && <span className="text-amber-300/50"> · {datos}</span>}
+        {warning.tail && (
+          <span className="block mt-1 text-amber-100/70 whitespace-pre-wrap break-words">…{warning.tail.slice(-160)}</span>
+        )}
       </span>
     </div>
   );

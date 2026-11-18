@@ -343,6 +343,12 @@ export interface CalibrationPiece {
    */
   autofix: AutofixSummary | null;
   /**
+   * TRUNC-AVISO (2026-11-18) — el carril sospechó que el cuerpo está cortado y la dejó pasar con
+   * aviso. `null` = sin sospecha. Opcional: un server anterior no lo manda. Espejo de
+   * `TruncationWarning` en `api/_calibrationShared.ts`.
+   */
+  truncation_warning?: TruncationWarning | null;
+  /**
    * CHIP DE REGLA (2026-10-05) — enunciado y severidad de cada código que aparece en la pieza, sólo
    * de su marca o generales (filtrado en el server). Opcional: un server anterior no lo manda, y
    * entonces los códigos se pintan como texto.
@@ -350,6 +356,15 @@ export interface CalibrationPiece {
   rule_texts?: RuleTexts;
   /** 2026-10-08 — tipo de la pieza (serie del tema, carrusel o formato). Opcional: server anterior. */
   piece_type?: string;
+}
+
+/** Espejo de `TruncationWarning` en `api/_calibrationShared.ts`. */
+export interface TruncationWarning {
+  signal: string | null;
+  reason: string | null;
+  tail: string | null;
+  body_chars: number | null;
+  max_tokens: number | null;
 }
 
 /** Espejo de `AutofixSummary` en `api/_calibrationShared.ts`. */
