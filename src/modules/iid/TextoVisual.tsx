@@ -16,6 +16,8 @@ import { createPortal } from 'react-dom';
 import { cn, Spinner } from '../../ui/components';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
 import type { SceneResult } from '../../services/calibrationInbox';
+import type { PlatformUi } from '../../../api/_platformUi';
+import { Bookmark, Heart, MessageCircle, Share2 } from 'lucide-react';
 import type { SafeOverride } from '../../../api/_pieceText';
 import {
   MARK_KINDS, MARK_LABEL, MARK_SYMBOL, contrastOnDark, keywordShare, markupOf, marksByWord, toggleMark, wordRanges,
@@ -141,7 +143,7 @@ const avisoDe = (w: unknown) => {
  * LA VISTA GRANDE: el video limpio de la pieza con el texto encima, dibujado por VideoLab. Cambia mientras se elige,
  * sin «Aplicar». Si aún no hay escena (cargando, error), lo dice; el video se ve igual.
  */
-export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace, lado, abajo, encima, esquina, notasEn, esquinaArriba, reloj }: {
+export function VistaFiel({ videoUrl, result, loading, error, width, targets = [], onPlace, lado, abajo, encima, esquina, notasEn, esquinaArriba, reloj, controlesArriba }: {
   videoUrl: string; result: SceneResult | null; loading: boolean; error: string | null; width: number;
   /** Los bloques que se pueden arrastrar (ver `arrastre.ts`). Sin `onPlace`, no se arrastra nada. */
   targets?: DragTarget[]; onPlace?: (ref: BlockRef, place: Place) => void;
@@ -168,6 +170,8 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
    * rueda del ratón sobre la vista avanza o retrocede cuadro a cuadro.
    */
   esquinaArriba?: React.ReactNode;
+  /** Los controles de la esquina (reloj y checks) en un recuadro negro opaco, por delante de la capa de la plataforma. */
+  controlesArriba?: boolean;
   reloj?: boolean;
 }) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
@@ -205,10 +209,13 @@ export function VistaFiel({ videoUrl, result, loading, error, width, targets = [
         {onPlace && result?.ok && result.scene && (
           <Arrastrables scene={result.scene} targets={targets} video={video} escala={width / W} onPlace={onPlace} />
         )}
-        {loading && <span className={cn('absolute top-2', esquinaArriba ? 'left-2' : 'right-2')}><Spinner size={14} /></span>}
+        {loading && <span className={cn('absolute right-2', esquinaArriba ? 'top-10' : 'top-2')}><Spinner size={14} /></span>}
         {esquinaArriba && <div className="absolute top-1.5 right-1.5 z-30">{esquinaArriba}</div>}
         {(esquina || reloj) && (
-          <div className="absolute bottom-1.5 right-1.5 z-30 flex items-center gap-1.5">
+          // 2026-11-18 (Sam): abajo a la derecha, como antes, pero en un recuadro negro opaco por delante de todo: con la
+          // capa de la plataforma encendida, la maqueta no se ve entre los controles.
+          <div className={cn('absolute z-30 bottom-1.5 right-1.5 flex flex-wrap items-center justify-end gap-1.5', controlesArriba && 'rounded-lg bg-black p-1')}
+            data-controles-vista={controlesArriba ? 'recuadro' : 'abajo'}>
             {reloj && <Reloj video={video} fps={fps} />}
             {esquina}
           </div>
@@ -618,6 +625,38 @@ export function ajustarZona(r: SafeRect, lado: LadoZona, dx: number, dy: number,
   else if (lado === 'top') y0 = Math.min(Math.max(0, y0 + dy), yMax);
   else y1 = Math.max(Math.min(H, y1 + dy), H - yMax);
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/**
+ * LA INTERFAZ DE LA PLATAFORMA SOBRE LA VISTA (Sam, 2026-11-18: «una capa que simule los botones y la interfaz de la
+ * plataforma… así como lo haces en SocialLab»). La forma `vertical` de SocialLab (`src/ui/Maqueta.tsx`) sin el medio:
+ * el video ya está debajo. Botones a la derecha, cuenta y texto abajo, degradado. No recibe el puntero. Qué plataforma
+ * y qué cuenta es dato (`api/_platformUi.ts`); aquí no se nombra ninguna.
+ */
+export function CapaPlataforma({ ui }: { ui: PlatformUi }) {
+  const [fotoRota, setFotoRota] = useState(false);
+  const inicial = (ui.cuenta.trim()[0] ?? '·').toUpperCase();
+  const lineas = (ui.texto ?? '').split('\n').map((l) => l.trim()).filter(Boolean).join(' ');
+  return (
+    <div className="absolute inset-0 pointer-events-none text-white" data-capa-plataforma={ui.platform}
+      style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif', letterSpacing: 'normal', containerType: 'size' }}>
+      <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/75 to-transparent" />
+      <div className="absolute right-[3%] bottom-[16%] flex flex-col items-center gap-[1.6cqh] text-[min(3cqw,11px)] font-semibold drop-shadow"
+>
+        {ui.foto && !fotoRota
+          ? <img src={ui.foto} alt="" referrerPolicy="no-referrer" onError={() => setFotoRota(true)} className="rounded-full object-cover border border-white/30" style={{ width: '9cqw', height: '9cqw', minWidth: 22, minHeight: 22 }} />
+          : <span className="rounded-full bg-zinc-700 grid place-items-center border border-white/30" style={{ width: '9cqw', height: '9cqw', minWidth: 22, minHeight: 22 }}>{inicial}</span>}
+        <Heart className="w-[7cqw] h-[7cqw] min-w-4 min-h-4" />
+        <MessageCircle className="w-[7cqw] h-[7cqw] min-w-4 min-h-4" />
+        <Bookmark className="w-[6cqw] h-[6cqw] min-w-4 min-h-4" />
+        <Share2 className="w-[6cqw] h-[6cqw] min-w-4 min-h-4" />
+      </div>
+      <div className="absolute left-[4%] right-[18%] bottom-[3%] space-y-0.5 drop-shadow">
+        <p className="font-semibold" style={{ fontSize: 'max(9px, 3.6cqw)' }}>{ui.cuenta}</p>
+        {lineas && <p className="leading-snug" style={{ fontSize: 'max(8px, 3.2cqw)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{lineas}</p>}
+      </div>
+    </div>
+  );
 }
 
 /**

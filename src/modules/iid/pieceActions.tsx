@@ -17,6 +17,7 @@ import type { TextLayers } from '../../../api/_pieceText';
 import type { SoundDraft, SoundLayer } from '../../../api/_pieceSound';
 import { ControlesDeSonido } from './ControlesDeSonido';
 import { VentanaLateral } from './VentanaLateral';
+import { useVistaFija, estiloVistaFija, usePaginaQuieta } from './vistaFija';
 import {
   imageBlocksToSend, imagePlacementDraftOf, LAMINA_SIN_COLOCACION, NO_SAFE_ZONE, roleTextOf,
   type ImageBlocks, type ImagePlacementDraft, type SafeZone,
@@ -674,6 +675,13 @@ export function PieceActionsBar({
   const [borradorTexto, setBorradorTexto] = useState<{ draft: VideoTextDraft; layers: TextLayers } | null>(null);
   const [borradorSonido, setBorradorSonido] = useState<{ draft: SoundDraft; layer: SoundLayer } | null>(null);
   const vaciarBorradores = () => { setBorradorTexto(null); setBorradorSonido(null); };
+  // 2026-11-18 (Sam): «Fijar» vale para «Texto en pantalla» y para «Sonido». Al fijar (o al abrir con la vista fijada),
+  // la página se lleva hasta la vista: la ventana se desplaza por dentro y, si no, la vista se quedaría donde estaba.
+  const [vistaFija, cambiarVistaFija] = useVistaFija();
+  const marcoVista = useRef<HTMLDivElement | null>(null);
+  const vistaAbierta = pantallaVideo || sonidoVideo;
+  // La columna de la izquierda se queda quieta con la vista arriba mientras se edita al lado (`usePaginaQuieta`).
+  usePaginaQuieta(vistaFija && vistaAbierta, marcoVista);
   const elegirLamina = (n: number) => {
     setSlideN(n); setError(null); setPlaceSel(null); setColSel(null); setScaleSel(null);
     if (n > 1) {
@@ -1936,7 +1944,17 @@ export function PieceActionsBar({
     const vistaEditando = textoVideo && pantallaVideo && media;
     return (
       <div className="space-y-3">
-        {vistaEditando ? <div ref={setSlotVista} className="w-full" data-sitio-vista /> : media}
+        <div ref={marcoVista} className="relative" style={estiloVistaFija(!!(textoVideo && vistaAbierta && media && vistaFija))} data-marco-vista>
+          {vistaEditando ? <div ref={setSlotVista} className="w-full" data-sitio-vista /> : media}
+          {/* Con «Sonido» abierto, el video de siempre lleva el mismo «Fijar» que la vista de «Texto en pantalla». */}
+          {textoVideo && sonidoVideo && media && (
+            <button type="button" onClick={() => cambiarVistaFija(!vistaFija)} aria-pressed={vistaFija}
+              className={cn('absolute top-1.5 right-1.5 z-30 rounded-md px-1.5 py-1 text-[10px]', vistaFija ? 'bg-violet-600/90 text-white' : 'bg-black/60 text-zinc-100')}
+              title={vistaFija ? 'El video sigue a la vista mientras editas. Pulsa para soltarlo.' : 'Pulsa para que el video siga a la vista mientras editas.'}>
+              {vistaFija ? 'Fijada · soltar' : 'Fijar'}
+            </button>
+          )}
+        </div>
         <div className="space-y-2">
           {notaImagen}
           {zona === 'imagen' && notaError}
