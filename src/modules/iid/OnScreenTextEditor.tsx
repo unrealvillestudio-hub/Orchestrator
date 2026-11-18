@@ -9,6 +9,7 @@ import type { CastMember, PresetsByLayer, PresetView, TextAlign, TextFit, TextLa
 import { MARK_KINDS, pruneMarks, parseMarkup, mergeMarks, type BlockMarks } from './textoMarcas';
 import { dragTargetsOf, type BlockRef, type DraftBlocks } from './arrastre';
 import { BarraDeshacer } from './BarraDeshacer';
+import { useVistaFija } from './vistaFija';
 import type { SoundLayer } from '../../../api/_pieceSound';
 import { Alineacion, EsquemaDeEscena, EsquemaSobreVideo, FranjaModo, LeyendaEsquema, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel, useRueda } from './TextoVisual';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
@@ -867,14 +868,8 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
   const anchoTarjeta = useAnchoDe(slotVista ?? null);
   // 2026-11-18 (Sam): «Fijar» arriba de la vista de la tarjeta. Fijada, la vista sigue arriba al desplazarse. Empieza
   // suelta: fijarla es decisión de quien edita, y se recuerda en este navegador.
-  const [tarjetaFija, setTarjetaFija] = useState<boolean>(() => leerPreferencia('orchestrator.vista.tarjeta.fija', 'no') === 'si');
-  const cambiarTarjetaFija = (v: boolean) => { setTarjetaFija(v); guardarPreferencia('orchestrator.vista.tarjeta.fija', v ? 'si' : 'no'); };
-  useEffect(() => {
-    if (!slotVista) return;
-    const st = slotVista.style;
-    st.position = tarjetaFija ? 'sticky' : ''; st.top = tarjetaFija ? '0px' : ''; st.zIndex = tarjetaFija ? '20' : '';
-    return () => { st.position = ''; st.top = ''; st.zIndex = ''; };
-  }, [slotVista, tarjetaFija]);
+  // La fija la tarjeta (`vistaFija.ts`): aquí sólo el botón, con el mismo estado que «Sonido».
+  const [tarjetaFija, cambiarTarjetaFija] = useVistaFija();
   const cambiarFija = (v: boolean) => { setVistaFija(v); guardarPreferencia('orchestrator.vista.fija', v ? 'si' : 'no'); };
   const cambiarAncho = (n: number) => { const a = clampAncho(n); setAnchoVista(a); guardarPreferencia('orchestrator.vista.ancho', String(a)); };
   /** Lo guardado en la pieza, como borrador: contra esto se sabe si hay cambios sin aplicar y a esto vuelve «Descartar». */

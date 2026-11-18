@@ -52,7 +52,9 @@ describe('el cableado en la tarjeta', () => {
   const visual = readFileSync('src/modules/iid/TextoVisual.tsx', 'utf8');
   it('la vista de la tarjeta lleva reloj y rueda, y «Fijar» arriba; fijar empieza suelto', () => {
     expect(editor).toMatch(/\n\s*reloj\n\s*esquinaArriba=\{/);
-    expect(editor).toMatch(/leerPreferencia\('orchestrator\.vista\.tarjeta\.fija', 'no'\) === 'si'/);
+    // 2026-11-18: el estado de «Fijar» pasa a `vistaFija.ts`, compartido con «Sonido»; sigue empezando suelto.
+    expect(editor).toMatch(/const \[tarjetaFija, cambiarTarjetaFija\] = useVistaFija\(\);/);
+    expect(readFileSync('src/modules/iid/vistaFija.ts', 'utf8')).toMatch(/getItem\(CLAVE\) === 'si'/);
     expect(visual).toMatch(/\{esquinaArriba && <div className="absolute top-1\.5 right-1\.5 z-30">/);
     expect(visual).toMatch(/\{reloj && <Reloj video=\{video\} fps=\{fps\} \/>\}/);
   });
