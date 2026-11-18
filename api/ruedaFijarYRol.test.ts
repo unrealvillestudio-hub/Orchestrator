@@ -51,7 +51,8 @@ describe('el cableado en la tarjeta', () => {
   const editor = readFileSync('src/modules/iid/OnScreenTextEditor.tsx', 'utf8');
   const visual = readFileSync('src/modules/iid/TextoVisual.tsx', 'utf8');
   it('la vista de la tarjeta lleva reloj y rueda, y «Fijar» arriba; fijar empieza suelto', () => {
-    expect(editor).toMatch(/\n\s*reloj\n\s*esquinaArriba=\{/);
+    // 2026-11-18: entre `reloj` y `esquinaArriba` entra `controlesArriba` (capa «Plataforma»); lo que fija no cambia.
+    expect(editor).toMatch(/\n\s*reloj\n(\s*controlesArriba=\{[^\n]*\}\n)?\s*esquinaArriba=\{/);
     // 2026-11-18: el estado de «Fijar» pasa a `vistaFija.ts`, compartido con «Sonido»; sigue empezando suelto.
     expect(editor).toMatch(/const \[tarjetaFija, cambiarTarjetaFija\] = useVistaFija\(\);/);
     expect(readFileSync('src/modules/iid/vistaFija.ts', 'utf8')).toMatch(/getItem\(CLAVE\) === 'si'/);
