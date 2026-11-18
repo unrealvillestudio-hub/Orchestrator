@@ -33,6 +33,7 @@ import {
 } from '../../../api/_carouselText';
 import { TEXT_PLACE_CHOICES, TEXT_PLACE_HELP, textPlaceLabel, textPlaceNoteOf, textPlaceToSend, type TextPlace } from '../../../api/_textPlace';
 import { TEXT_COLUMN_CHOICES, TEXT_COLUMN_HELP, textColumnLabel, textColumnToSend, textLayoutNoteOf, type TextColumn } from '../../../api/_textColumn';
+import { mixedScriptNoticesOf, textAfterMixedScript, type MixedScriptResponse } from '../../../api/_mixedScriptNotice';
 import { TEXT_SCALE_HELP, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, clampTextScale, textScaleLabel, textScaleToSend } from '../../../api/_textScale';
 
 /**
@@ -1015,7 +1016,11 @@ export function PieceActionsBar({
         const r = await savePieceEdit(token, {
           piece_id: piece.piece_id, field: c.field, after_text: c.after,
           edit_reason: reason || null, acknowledge_warnings: acknowledge,
-        }) as { guard?: { hits?: Array<{ code?: string; fragment?: string; field?: string }>; warnings?: Array<{ message?: string } | string> } };
+        }) as { guard?: { hits?: Array<{ code?: string; fragment?: string; field?: string }>; warnings?: Array<{ message?: string } | string> } } & MixedScriptResponse;
+        // 2026-11-18 — la EF corrige letras de otro alfabeto dentro de palabras latinas: se avisa y el editor se queda
+        // con lo que quedó guardado.
+        avisos.push(...mixedScriptNoticesOf(r));
+        c.after = textAfterMixedScript(c.after, c.field, r);
         // La EF devuelve `guard.hits`; `warnings` era el nombre que esta pantalla esperaba y nunca
         // llegó, así que los avisos de la guarda no se veían. Se leen los dos.
         for (const h of r?.guard?.hits ?? []) avisos.push(`${h.code ?? 'regla'}: «${h.fragment ?? ''}» en ${h.field ?? c.field}`);

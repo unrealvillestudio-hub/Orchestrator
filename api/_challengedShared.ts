@@ -36,7 +36,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
-  SB_URL, SB_KEY, channelTextOf, actionsFor, esPiezaDeVideo,
+  SB_URL, SB_KEY, channelTextOf, actionsFor, esPiezaDeVideo, channelLayoutOf, editableBodyOf,
   type PieceTextInput, type TextSource, type PieceActions,
 } from './_calibrationShared.js';
 import { readingLanguageOf, type BrandLanguageCatalog } from './_brandLanguage.js';
@@ -286,9 +286,12 @@ export interface RawPiece {
  * Sale de `channelTextOf`, la MISMA función que usa la bandeja de calibración: dos
  * bandejas que resuelvan «cuál es el texto» por su cuenta vuelven a divergir.
  */
-export function pieceBody(p: RawPiece | null | undefined): string | null {
+export function pieceBody(p: RawPiece | null | undefined, provider: string | null = null): string | null {
   const c = p?.assets?.copy;
   if (!c) return null;
+  // 2026-11-18 — un canal que publica el MAESTRO (blog) edita el maestro: el mismo texto que pinta la tarjeta. Ver
+  // `editableBodyOf` en `_calibrationShared.ts`. Sin proveedor, el criterio de antes al pie de la letra.
+  if (channelLayoutOf(provider)?.text === 'master') return editableBodyOf(p as PieceTextInput, provider);
   const { text, source } = channelTextOf(p as PieceTextInput);
   if (source === 'channel_adapted') return text;
   // Sin adaptación: se conserva el criterio anterior AL PIE DE LA LETRA, incluido que un
@@ -328,6 +331,8 @@ export function toChallengedRow(
   pieces: Map<string, RawPiece>,
   ruleRows: readonly RuleTextRow[],
   brandLangs: BrandLanguageCatalog = null,
+  // 2026-11-18 — proveedor del canal por pieza (`brand_publish_channels`), para el texto del editor. Ausente: lo de antes.
+  providerOf: (p: RawPiece) => string | null = () => null,
 ): ChallengedRow {
   const p = row.piece_id ? pieces.get(row.piece_id) ?? null : null;
   const reason = retentionReason(row.rule_code);
@@ -356,7 +361,7 @@ export function toChallengedRow(
           image_overlay: imageOverlayOf(p.assets),
           id: p.id,
           title: pieceTitle(p),
-          body: pieceBody(p),
+          body: pieceBody(p, providerOf(p)),
           platform: p.platform,
           domain: p.domain,
           status: p.status,

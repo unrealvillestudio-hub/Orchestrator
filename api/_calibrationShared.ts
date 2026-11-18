@@ -673,6 +673,12 @@ export interface ContextExtras {
   metrics?: PieceMetrics;
   /** Idioma en que se lee la pieza en voz alta, resuelto por marca (`_brandLanguage`). */
   reading_language?: string | null;
+  /**
+   * 2026-11-18 — el proveedor del canal de la pieza (`brand_publish_channels.provider`). Decide QUÉ texto carga el
+   * editor («Editar texto»): el mismo que pinta la vista como se publica (`editableBodyOf`). Ausente o desconocido, el
+   * editor carga lo de antes (`channelTextOf`).
+   */
+  provider?: string | null;
 }
 
 export function toContext(piece: ContentPiece, extras: ContextExtras = {}): PieceContext {
@@ -686,7 +692,8 @@ export function toContext(piece: ContentPiece, extras: ContextExtras = {}): Piec
     // su pieza con esta función.
     actions: actionsFor(piece),
     // U-5 — el texto efectivo, por la MISMA función que lo resuelve en el resto del carril.
-    body: channelTextOf(piece).text || null,
+    // 2026-11-18 — y el MISMO que pinta la tarjeta: `editableBodyOf` con el proveedor del canal.
+    body: editableBodyOf(piece, extras.provider ?? null) || null,
     piece_id: piece.id,
     brand_id: piece.brand_id,
     voice: piece.voice ?? null,
@@ -1264,6 +1271,28 @@ export function publishedTextOf(piece: PublishedTextInput, provider: string | nu
   return platforms.some((p) => p.toLowerCase() === canal)
     ? { text: canonicalizeSignature(judged, sig), source: 'channel_degraded' }
     : { text: '', source: 'no_copy_for_channel' };
+}
+
+// ── EL TEXTO QUE CARGA EL EDITOR (2026-11-18) ─────────────────────────────────────────────────
+//
+// EL DEFECTO [reportado por Sam, 2026-11-18; pieza `95385260`, NeuroneSCF, blog]. La tarjeta pinta la vista como se
+// publica (`publishedTextOf` con el proveedor del canal): en un blog (`shopify_blog`, `vercel_html`) es el MAESTRO,
+// `copy.aife_filtered`. El editor «Editar texto» cargaba `channelTextOf`, que prefiere el ADAPTADO del canal
+// (`social.adapted[].copy`). Cuando las dos caras divergían —el auto-fix había reparado el adaptado y el maestro seguía
+// con lo que reescribió AIFE— lo que se veía no era lo que se editaba.
+//
+// LA FUENTE ES UNA SOLA: el cuerpo editable de lo que el canal PUBLICA.
+//   · proveedor que publica el maestro → el maestro, tal cual (con sus `##`, `>` y `![img-N]`: es lo que sale);
+//   · `meta_graph` y los manuales → el adaptado del canal, o el maestro si no hay (`channelTextOf`), sin la firma ni el
+//     título que el publicador añade: esos no se editan aquí;
+//   · proveedor ausente o fuera del mapa → lo de antes (`channelTextOf`). No se adivina.
+//
+// AL GUARDAR no hay que cambiar nada: la EF `piece-edit` escribe el cuerpo en las TRES caras (`copy.raw`,
+// `copy.aife_filtered` y cada `social.adapted[].copy`), así que tras guardar ya no pueden divergir.
+export function editableBodyOf(piece: PieceTextInput, provider: string | null | undefined): string {
+  const layout = channelLayoutOf(provider);
+  if (layout?.text === 'master') return masterTextOf(piece).trim();
+  return channelTextOf(piece).text;
 }
 
 /** Avisos de la vista cuando el texto publicado no es el adaptado limpio. */

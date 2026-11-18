@@ -72,6 +72,8 @@ function platformsOf(pieces: ContentPiece[]): string[] {
 // por request, y viajan resueltos en cada pieza. La UI no conoce ni un tope.
 import { fetchPlatformLimits, fetchSignatureClosers, metricsOf } from './_pieceMetrics.js';
 import { fetchBrandLanguages, readingLanguageOf } from './_brandLanguage.js';
+// 2026-11-18 — el canal de la pieza, sólo para saber qué texto carga el editor.
+import { fetchPublishChannels, channelOf } from './_publishShared.js';
 // PR-C — la PREVISIÓN de fecha: dónde caería esta pieza si se aprobara ahora. Se resuelve
 // en el server, en la misma pasada que arma la bandeja, y NO reserva nada.
 import {
@@ -423,6 +425,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const page    = ordered.slice(offset, offset + limit);
 
     // Procedencia: sólo para la página visible (el `in.()` de PostgREST crece con la lista).
+    // 2026-11-18 — el proveedor del canal de cada pieza, para que el editor cargue el texto que pinta la tarjeta
+    // (`editableBodyOf`). FAIL-SOFT y dicho: sin canales, el editor carga lo de antes (`channelTextOf`).
+    const channels = await fetchPublishChannels().catch((e: unknown) => {
+      console.warn('[calibration-queue] brand_publish_channels no legible; el editor carga el adaptado:', e instanceof Error ? e.message : String(e));
+      return null;
+    });
     const [traces, attempts, edits] = await Promise.all([
       fetchWatcherTraces(page.map((p) => p.orchestrator_job_id ?? '')),
       fetchAttemptsByQueue(page.map((p) => p.queue_id ?? '')),
@@ -438,6 +446,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         generation: genById.get(p.id),
         metrics: metricsOf(p, limits, closers),
         reading_language: readingLanguageOf(p.brand_id, brandLangs),
+        provider: channels ? channelOf(p, channels).provider : null,
       }),
       // PREVISIÓN, no compromiso. La pieza todavía no está aprobada, así que no tiene
       // franja: esto es dónde caería si se aprobara ahora, y otra pieza aprobada antes se
