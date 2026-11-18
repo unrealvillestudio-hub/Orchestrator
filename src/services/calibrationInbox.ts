@@ -978,6 +978,8 @@ export interface PieceTextProposal {
   duration_ms: number | null;
   /** 2026-11-16 — la proporción ancho/alto de la pieza, para la vista previa de la ventana. */
   aspect?: number;
+  /** 2026-11-18 (Sam): la interfaz de la plataforma de destino para la capa «Plataforma»; null si falta el dato. */
+  platform_ui?: import('../../api/_platformUi').PlatformUi | null;
   pending: { job_id: string; requested_at: string } | null;
 }
 

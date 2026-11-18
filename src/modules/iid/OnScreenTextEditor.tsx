@@ -11,7 +11,7 @@ import { dragTargetsOf, type BlockRef, type DraftBlocks } from './arrastre';
 import { BarraDeshacer } from './BarraDeshacer';
 import { useVistaFija } from './vistaFija';
 import type { SoundLayer } from '../../../api/_pieceSound';
-import { Alineacion, EsquemaDeEscena, EsquemaSobreVideo, FranjaModo, LeyendaEsquema, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel, useRueda } from './TextoVisual';
+import { Alineacion, CapaPlataforma, EsquemaDeEscena, EsquemaSobreVideo, FranjaModo, LeyendaEsquema, MarcasDeTexto, Muestras, PalabrasClave, ScenePlayer, VistaFiel, useRueda } from './TextoVisual';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
 import {
   BLOCK_LABELS, CAPTIONS_BAND, PCT_STEP, PREVIEW_AUTO, PREVIEW_NOTE, ROLE_NO_PERSONA, VIDEO_SAFE_ZONE_APPROX,
@@ -866,6 +866,9 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
   const [esquemaVisible, setEsquemaVisible] = useState<boolean>(() => leerPreferencia('orchestrator.vista.esquema', 'si') === 'si');
   const cambiarEsquema = (v: boolean) => { setEsquemaVisible(v); guardarPreferencia('orchestrator.vista.esquema', v ? 'si' : 'no'); };
   const anchoTarjeta = useAnchoDe(slotVista ?? null);
+  // 2026-11-18 (Sam): la capa que simula la interfaz de la plataforma de destino, como en SocialLab. Apagada al empezar.
+  const [plataformaVisible, setPlataformaVisible] = useState<boolean>(() => leerPreferencia('orchestrator.vista.plataforma', 'no') === 'si');
+  const cambiarPlataforma = (v: boolean) => { setPlataformaVisible(v); guardarPreferencia('orchestrator.vista.plataforma', v ? 'si' : 'no'); };
   // 2026-11-18 (Sam): «Fijar» arriba de la vista de la tarjeta. Fijada, la vista sigue arriba al desplazarse. Empieza
   // suelta: fijarla es decisión de quien edita, y se recuerda en este navegador.
   // La fija la tarjeta (`vistaFija.ts`): aquí sólo el botón, con el mismo estado que «Sonido».
@@ -1068,16 +1071,27 @@ function VideoBody({ pieceId, token, onApplied, borrador, onBorrador, sonidoPend
             width={anchoTarjeta}
             targets={vista.result?.ok && vista.result.scene ? dragTargetsOf(vista.result.scene, draftBlocksOf(draft, prop.proposals, prop.duration_ms ?? null)) : []}
             onPlace={enCurso ? undefined : (ref, place) => setDraft(withPlace(draft, ref, place))}
-            encima={esquemaVisible && vista.result?.ok && vista.result.scene
-              ? <EsquemaSobreVideo scene={vista.result.scene} fits={vista.result.fits ?? []} /> : null}
-            esquina={vista.result?.ok && vista.result.scene ? (
+            encima={<>
+              {plataformaVisible && prop.platform_ui ? <CapaPlataforma ui={prop.platform_ui} /> : null}
+              {esquemaVisible && vista.result?.ok && vista.result.scene
+                ? <EsquemaSobreVideo scene={vista.result.scene} fits={vista.result.fits ?? []} /> : null}
+            </>}
+            esquina={vista.result?.ok && vista.result.scene ? (<>
+              {prop.platform_ui && (
+                <label className="flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-1 text-[10px] text-zinc-100 cursor-pointer select-none"
+                  title={`Simular la interfaz de ${prop.platform_ui.platform} sobre el video`} data-check-plataforma>
+                  <input type="checkbox" className="accent-violet-500" checked={plataformaVisible} onChange={(e) => cambiarPlataforma(e.target.checked)}
+                    aria-label="Mostrar la interfaz de la plataforma" />
+                  Plataforma
+                </label>
+              )}
               <label className="flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-1 text-[10px] text-zinc-100 cursor-pointer select-none"
                 title={esquemaVisible ? 'Ocultar las zonas seguras y las cajas del texto' : 'Mostrar las zonas seguras y las cajas del texto'}>
                 <input type="checkbox" className="accent-violet-500" checked={esquemaVisible} onChange={(e) => cambiarEsquema(e.target.checked)}
                   aria-label="Mostrar zonas seguras" />
                 Zonas
               </label>
-            ) : null}
+            </>) : null}
             reloj
             esquinaArriba={
               <button type="button" onClick={() => cambiarTarjetaFija(!tarjetaFija)} aria-pressed={tarjetaFija}

@@ -67,6 +67,7 @@ import {
   BED_LEVEL, cueCountsOf, cueTimesOf, FX_GAIN, groupSoundPresets, libraryOf, validateSound,
   type LibrarySound, type SoundPresets, type SoundPresetView,
 } from './_pieceSound.js';
+import { platformUiOf, type PlatformUi } from './_platformUi.js';
 
 const headers = (profile: 'public' | 'content' | 'intel', extra: Record<string, string> = {}) =>
   ({ apikey: SB_KEY(), Authorization: `Bearer ${SB_KEY()}`, 'Accept-Profile': profile, ...extra });
@@ -133,6 +134,19 @@ async function coloresDeMarca(brandId: string) {
 }
 
 /** Los presets de VideoLab de la marca y del sistema. Si la tabla aún no existe, se dice en vez de inventarlos. */
+/** La capa de la plataforma (`_platformUi.ts`). Si una lectura falla, sin capa: es una ayuda, no bloquea la ventana. */
+async function plataformaDe(brandId: string, platformKey: string | null | undefined, texto: string | null): Promise<PlatformUi | null> {
+  try {
+    const b = encodeURIComponent(brandId);
+    const [canales, previews, perfiles] = await Promise.all([
+      leer(`brand_publish_channels?brand_id=eq.${b}&select=brand_id,platform_key,config`, 'intel'),
+      leer('platform_previews?active=eq.true&select=platform,media_format,layout,active', 'intel'),
+      leer(`account_profiles?brand_id=eq.${b}&select=brand_id,platform,username,display_name,picture_url`, 'intel'),
+    ]);
+    return platformUiOf({ brandId, platformKey, texto, canales, previews, perfiles });
+  } catch { return null; }
+}
+
 async function presetsDe(brandId: string): Promise<{ presets: PresetsByLayer | null; retired: PresetView[]; error: string | null }> {
   try {
     const rows = await leer(`videolab_text_presets?or=(brand_id.is.null,brand_id.eq.${encodeURIComponent(brandId)})`
@@ -358,9 +372,10 @@ async function proponer(res: VercelResponse, piece: any, goalRaw: unknown, admin
   const output = data?.output ?? {};
 
   // Los colores y los presets sólo hacen falta para editar un video.
-  const [colores, presets] = medium === 'video'
-    ? await Promise.all([coloresDeMarca(brandId), presetsDe(brandId)])
-    : [{ accent: [], strip: [], stripMode: null as string | null }, { presets: null, retired: [] as PresetView[], error: null }];
+  const [colores, presets, plataforma] = medium === 'video'
+    ? await Promise.all([coloresDeMarca(brandId), presetsDe(brandId),
+      plataformaDe(brandId, piece.platform, typeof assets?.copy?.raw === 'string' ? assets.copy.raw : null)])
+    : [{ accent: [], strip: [], stripMode: null as string | null }, { presets: null, retired: [] as PresetView[], error: null }, null];
   // Rotación (2026-11-17): sólo en una generación nueva, sin `text_layers` todavía.
   const rotacion = medium === 'video' && !assets?.video?.text_layers && presets.presets
     ? await sugerenciaDeEstilos(brandId, presets.presets)
@@ -402,6 +417,8 @@ async function proponer(res: VercelResponse, piece: any, goalRaw: unknown, admin
     // 2026-11-16 — la proporción de la pieza, para la vista previa esquemática de la ventana «Texto en pantalla».
     aspect: aspectOf(assets, medium),
     pending: assets?.video?.pending_text_job ?? null,
+    // 2026-11-18 (Sam): la interfaz de la plataforma de destino, como en SocialLab; null si falta el dato.
+    platform_ui: plataforma,
   });
 }
 

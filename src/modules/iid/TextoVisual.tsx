@@ -16,6 +16,8 @@ import { createPortal } from 'react-dom';
 import { cn, Spinner } from '../../ui/components';
 import type { EmphasisColorOption } from '../../../api/_overlayText';
 import type { SceneResult } from '../../services/calibrationInbox';
+import type { PlatformUi } from '../../../api/_platformUi';
+import { Bookmark, Heart, MessageCircle, Share2 } from 'lucide-react';
 import {
   MARK_KINDS, MARK_LABEL, MARK_SYMBOL, contrastOnDark, keywordShare, markupOf, marksByWord, toggleMark, wordRanges,
   type BlockMarks, type MarkKind,
@@ -584,6 +586,38 @@ export function EsquemaDeEscena({ scene, width, foco, sinLeyenda }: { scene: any
         })}
       </div>
       {!sinLeyenda && <LeyendaEsquema width={width} />}
+    </div>
+  );
+}
+
+/**
+ * LA INTERFAZ DE LA PLATAFORMA SOBRE LA VISTA (Sam, 2026-11-18: «una capa que simule los botones y la interfaz de la
+ * plataforma… así como lo haces en SocialLab»). La forma `vertical` de SocialLab (`src/ui/Maqueta.tsx`) sin el medio:
+ * el video ya está debajo. Botones a la derecha, cuenta y texto abajo, degradado. No recibe el puntero. Qué plataforma
+ * y qué cuenta es dato (`api/_platformUi.ts`); aquí no se nombra ninguna.
+ */
+export function CapaPlataforma({ ui }: { ui: PlatformUi }) {
+  const [fotoRota, setFotoRota] = useState(false);
+  const inicial = (ui.cuenta.trim()[0] ?? '·').toUpperCase();
+  const lineas = (ui.texto ?? '').split('\n').map((l) => l.trim()).filter(Boolean).join(' ');
+  return (
+    <div className="absolute inset-0 pointer-events-none text-white" data-capa-plataforma={ui.platform}
+      style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif', letterSpacing: 'normal', containerType: 'size' }}>
+      <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/75 to-transparent" />
+      <div className="absolute right-[3%] bottom-[16%] flex flex-col items-center gap-[1.6cqh] text-[min(3cqw,11px)] font-semibold drop-shadow"
+>
+        {ui.foto && !fotoRota
+          ? <img src={ui.foto} alt="" referrerPolicy="no-referrer" onError={() => setFotoRota(true)} className="rounded-full object-cover border border-white/30" style={{ width: '9cqw', height: '9cqw', minWidth: 22, minHeight: 22 }} />
+          : <span className="rounded-full bg-zinc-700 grid place-items-center border border-white/30" style={{ width: '9cqw', height: '9cqw', minWidth: 22, minHeight: 22 }}>{inicial}</span>}
+        <Heart className="w-[7cqw] h-[7cqw] min-w-4 min-h-4" />
+        <MessageCircle className="w-[7cqw] h-[7cqw] min-w-4 min-h-4" />
+        <Bookmark className="w-[6cqw] h-[6cqw] min-w-4 min-h-4" />
+        <Share2 className="w-[6cqw] h-[6cqw] min-w-4 min-h-4" />
+      </div>
+      <div className="absolute left-[4%] right-[18%] bottom-[3%] space-y-0.5 drop-shadow">
+        <p className="font-semibold" style={{ fontSize: 'max(9px, 3.6cqw)' }}>{ui.cuenta}</p>
+        {lineas && <p className="leading-snug" style={{ fontSize: 'max(8px, 3.2cqw)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{lineas}</p>}
+      </div>
     </div>
   );
 }
