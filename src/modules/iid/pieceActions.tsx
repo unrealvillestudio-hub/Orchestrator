@@ -12,6 +12,7 @@ import { effectiveFixImageMode, type FixRequestCode, type FixImageMode } from '.
 import { overlayEditorSeed, overlayViewAfterApply, shadowDefaultLabel, type ImageOverlayView, type EmphasisColorOption, type OverlayOverrideOut, type ShadowOption } from '../../../api/_overlayText';
 import { textStyleDraftOf, subMarkupOf, textStylePayload, withBlock, SUB_EDITOR_HELP, type TextStyleDraft, type TextColorOptions } from '../../../api/_textStyle';
 import { TextBlockControls } from './TextStyleControls';
+import { MenuDeEscena } from './MenuDeEscena';
 import { OnScreenTextEditor, HookProposals, type VideoTextDraft } from './OnScreenTextEditor';
 import type { TextLayers } from '../../../api/_pieceText';
 import type { SoundDraft, SoundLayer } from '../../../api/_pieceSound';
@@ -1623,20 +1624,8 @@ export function PieceActionsBar({
                   {SCENE_SLOTS.map((slot) => {
                     const opciones = slot.kind === 'place' ? cast.places : cast.persons;
                     if (!opciones.length) return null;
-                    return (
-                      <label key={slot.key} className="flex items-center gap-1 text-[11px] text-zinc-400">
-                        <span className="font-mono">{slot.label}</span>
-                        <select
-                          value=""
-                          onChange={(e) => { pickSlot(slot.key, e.target.value); e.currentTarget.value = ''; }}
-                          className="bg-zinc-900 border border-zinc-800 rounded-lg px-1.5 py-0.5 text-[11px] text-zinc-300"
-                          aria-label={`Cambiar ${slot.label}`}
-                        >
-                          <option value="">cambiar por…</option>
-                          {opciones.map((o) => <option key={o.name} value={o.name}>{o.name}</option>)}
-                        </select>
-                      </label>
-                    );
+                    // 2026-11-21 — con la cara, el nombre y la voz y el cargo de cada persona; los lugares, por grupo.
+                    return <MenuDeEscena key={slot.key} label={slot.label} options={opciones} disabled={!!busy} onPick={(v) => pickSlot(slot.key, v)} />;
                   })}
                 </div>
               </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SCENE_SLOTS, sceneCastOf, slotDirective, imageHistoryOf, MODE_HELP, SLOT_CHANGE_MODE } from './_sceneCast.js';
+import { SCENE_SLOTS, sceneCastOf, slotDirective, imageHistoryOf, MODE_HELP, SLOT_CHANGE_MODE, personThumbOf, PLACE_GROUPS } from './_sceneCast.js';
 import { IMAGE_MODES, resolveRecomposeMode } from './recompose-image.js';
 
 /**
@@ -36,6 +36,42 @@ describe('los lugares de la escena', () => {
   });
   it('la ayuda nombra los tres modos', () => {
     expect(Object.keys(MODE_HELP).sort()).toEqual(['edit_from_current', 'regenerate_full', 'same_scene']);
+  });
+});
+
+describe('el menú con caras y grupos (2026-11-21)', () => {
+  // Sam: «no recuerdo quién es Itzel… ponme un thumbnail de su cara + nombre + si es host o administradora».
+  const FICHAS = [
+    { display_name: 'Tomás', role: 'host', role_title: null, imagelab_description: 'Hombre de 40 años…', identity_cards: { close: 'https://cdn.example.invalid/tomas_close.jpg' } },
+    { display_name: 'Valentina Ríos', role: 'expert', role_title: 'Guía de montaña', imagelab_description: 'Mujer…', reference_photos: [{ url: 'https://cdn.example.invalid/vale.jpg' }] },
+    { display_name: 'Carmen', role: 'expert', role_title: 'Agente de viajes', imagelab_description: '', reference_photos: null },
+  ];
+  it('cada persona con su cara, su voz y su cargo; la que no se puede pintar, al final y apagada', () => {
+    const c = sceneCastOf(FICHAS, [], null);
+    expect(c.persons.map((p) => [p.name, p.subtitle, p.paintable])).toEqual([
+      ['Tomás', 'Host', true], ['Valentina Ríos', 'Especialista · Guía de montaña', true], ['Carmen', 'Especialista · Agente de viajes', false]]);
+    expect(c.persons[0].thumb).toBe('https://cdn.example.invalid/tomas_close.jpg');
+    expect(c.persons[1].thumb).toBe('https://cdn.example.invalid/vale.jpg');
+    expect(c.persons[2].thumb).toBeNull();
+    expect(c.persons[0].value).toBe('Tomás');
+  });
+  it('la cara: tarjeta de cerca, luego de medio cuerpo, luego la primera foto; nada que no sea una URL', () => {
+    expect(personThumbOf({ raw_config: { identity_cards: { medium: 'https://x.invalid/m.jpg' } } })).toBe('https://x.invalid/m.jpg');
+    expect(personThumbOf({ reference_photos: ['ftp://no', 'https://x.invalid/p.jpg'] })).toBe('https://x.invalid/p.jpg');
+    expect(personThumbOf({})).toBeNull();
+  });
+  it('los lugares: se ven por su nombre, se escriben por su alias y se agrupan (vPodcast, Conversations, el resto)', () => {
+    const c = sceneCastOf([], [
+      { display_name: 'Muelle Prat', location_type: 'exterior_urban', aliases: ['el muelle'] },
+      { display_name: 'Sala de la bodega', location_type: 'conversation_set', aliases: ['sala de la bodega'] },
+      { display_name: 'Estudio del cerro', location_type: 'podcast_studio', aliases: ['estudio del cerro'] },
+      { display_name: 'Estudio del puerto', location_type: 'podcast_studio', aliases: ['estudio del puerto'] },
+      { display_name: 'Sin alias', location_type: 'podcast_studio', aliases: [] },
+    ], null);
+    expect(c.places.map((p) => [p.group, p.name, p.value])).toEqual([
+      [PLACE_GROUPS[0].label, 'Estudio del cerro', 'estudio del cerro'], [PLACE_GROUPS[0].label, 'Estudio del puerto', 'estudio del puerto'],
+      [PLACE_GROUPS[1].label, 'Sala de la bodega', 'sala de la bodega'], ['Lugares', 'Muelle Prat', 'el muelle']]);
+    expect(slotDirective('Fondo', c.places[0].value)).toBe('Fondo por estudio del cerro');
   });
 });
 

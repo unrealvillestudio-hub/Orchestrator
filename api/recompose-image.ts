@@ -421,18 +421,31 @@ async function coloresDelResaltado(req: VercelRequest, res: VercelResponse) {
       return r.json();
     };
     const b = encodeURIComponent(brandId);
-    const [tokens, palette, personLinks, places] = await Promise.all([
+    const [tokens, palette, personLinks, placeLinks] = await Promise.all([
       // 2026-10-20 — también la capa global: la sombra de una marca sin sombra propia sale de ahí.
       leer(`imagelab_overlay_tokens?or=(brand_id.eq.${b},brand_id.is.null)&active=eq.true&select=brand_id,canal,tokens`),
       leer(`brand_palette?brand_id=eq.${b}&select=role,hex`),
       // 2026-10-20 — EN LA ESCENA: las personas y los lugares de la marca que se pueden poner en ella.
-      leer(`brand_persons?brand_id=eq.${b}&active=eq.true&select=person_blueprint_id`),
-      leer(`brand_locations?brand_id=eq.${b}&active=eq.true&select=aliases`),
+      // 2026-11-21 — con la voz de cada persona y el lugar con su nombre y su tipo (menú con caras y grupos).
+      leer(`brand_persons?brand_id=eq.${b}&active=eq.true&select=person_blueprint_id,role`),
+      leer(`brand_locations?brand_id=eq.${b}&active=eq.true&select=aliases,location_blueprint_id`),
     ]);
     const ids = (Array.isArray(personLinks) ? personLinks : []).map((l: any) => String(l?.person_blueprint_id ?? '')).filter(Boolean);
-    const persons = ids.length
-      ? await leer(`person_blueprints?blueprint_id=in.(${ids.map((i) => `"${encodeURIComponent(i)}"`).join(',')})&active=eq.true&select=display_name`)
+    const vozDe = new Map((Array.isArray(personLinks) ? personLinks : []).map((l: any) => [String(l?.person_blueprint_id ?? ''), l?.role ?? null]));
+    const lista = (xs: string[]) => xs.map((i) => `"${encodeURIComponent(i)}"`).join(',');
+    const fichasEscena = ids.length
+      ? await leer(`person_blueprints?blueprint_id=in.(${lista(ids)})&active=eq.true&select=blueprint_id,display_name,role_title,imagelab_description,reference_photos,identity_cards:raw_config->identity_cards`)
       : [];
+    const persons = (Array.isArray(fichasEscena) ? fichasEscena : []).map((r: any) => ({ ...r, role: vozDe.get(String(r?.blueprint_id ?? '')) ?? null }));
+    const locIds = (Array.isArray(placeLinks) ? placeLinks : []).map((l: any) => String(l?.location_blueprint_id ?? '')).filter(Boolean);
+    // Si la lectura de los sets falla, el menú queda con los alias, como antes: no tumba el panel.
+    const sets = locIds.length
+      ? await leer(`location_blueprints?blueprint_id=in.(${lista(locIds)})&active=eq.true&select=blueprint_id,display_name,location_type,reference_photos`).catch(() => [])
+      : [];
+    const setDe = new Map((Array.isArray(sets) ? sets : []).map((x: any) => [String(x?.blueprint_id ?? ''), x]));
+    const places = (Array.isArray(placeLinks) ? placeLinks : [])
+      .filter((l: any) => !locIds.length || !Array.isArray(sets) || !sets.length || setDe.has(String(l?.location_blueprint_id ?? '')))
+      .map((l: any) => ({ ...(setDe.get(String(l?.location_blueprint_id ?? '')) ?? {}), aliases: l?.aliases ?? [] }));
     const image = piece.assets?.image ?? null;
     // 2026-11-16 — «Texto en pantalla»: la persona que se puede rotular (de la identidad guardada en la imagen), su cargo
     // si su ficha lo trae y el nombre de la marca. Si estas lecturas fallan, el rol queda sin cargo o sin marca: no tumba
